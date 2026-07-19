@@ -3,6 +3,7 @@ import {
   buildFashionMagazinePrompt,
   buildFashionNegativePrompt,
   evaluateContentPolicy,
+  polishKoreanPromptText,
 } from '../lib/content-policy'
 import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, resolveFalImageSize } from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
@@ -61,7 +62,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return jsonResponse({ ok: false, error: 'invalid_json_body' }, 400)
     }
 
-    const description = (body.description ?? '').trim()
+    const description = polishKoreanPromptText(body.description ?? '')
     if (!description) {
       return jsonResponse({ ok: false, error: 'description_required' }, 400)
     }

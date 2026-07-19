@@ -80,6 +80,9 @@ const ENTITY_LEX: Array<{ re: RegExp; en: string; kind: SceneEntity['kind'] }> =
   { re: /여성|여자|woman|female/i, en: 'adult woman', kind: 'human' },
   { re: /남성|남자|man\b|male/i, en: 'adult man', kind: 'human' },
   { re: /모델|model/i, en: 'adult model', kind: 'human' },
+  { re: /아가씨|소녀(?!상)|lady|girl(?!\s*animal)/i, en: 'young adult woman', kind: 'human' },
+  { re: /소년|boy\b/i, en: 'young adult man', kind: 'human' },
+  { re: /사람|인물|캐릭터|character|person/i, en: 'adult person', kind: 'human' },
 ]
 
 const STATE_LEX: Array<{ re: RegExp; en: string }> = [
@@ -124,6 +127,8 @@ const ACTION_LEX: Array<{ re: RegExp; en: string; props?: string[]; passive?: bo
   { re: /서성|배회|어슬렁|돌아다니|서성이|pacing|wandering|loitering/i, en: 'pacing / wandering restlessly' },
   { re: /서\s*있|standing/i, en: 'standing' },
   { re: /앉|sitting/i, en: 'sitting' },
+  { re: /엎드|prone|lying\s+on\s+(her|his|the)\s+stomach|on\s+all\s+fours\s+reading/i, en: 'lying prone on the stomach' },
+  { re: /책\s*을\s*보|책을\s*읽|독서|reading\s+(a\s+)?book/i, en: 'reading a book', props: ['open book'] },
   { re: /걷|walking/i, en: 'walking' },
   { re: /도망|flee|escaping/i, en: 'fleeing / escaping' },
   { re: /숨|hiding/i, en: 'hiding' },
@@ -135,6 +140,7 @@ const ACTION_LEX: Array<{ re: RegExp; en: string; props?: string[]; passive?: bo
 const PROP_LEX: Array<{ re: RegExp; en: string }> = [
   { re: /포도|grape/i, en: 'grapes / grape clusters' },
   { re: /축구공|soccer\s*ball/i, en: 'soccer ball' },
+  { re: /책|book/i, en: 'open book' },
   { re: /꽃|flower/i, en: 'flowers' },
   { re: /공\b|ball\b/i, en: 'ball' },
 ]
@@ -168,6 +174,10 @@ const SETTING_LEX: Array<{ re: RegExp; en: string }> = [
   { re: /도시|city|urban|street/i, en: 'city' },
   { re: /초원|savannah|grassland/i, en: 'grassland' },
   { re: /들판|field(?!\s*of\s*view)/i, en: 'open field' },
+  { re: /거실|living\s*room/i, en: 'living room interior' },
+  { re: /침실|bedroom/i, en: 'bedroom interior' },
+  { re: /부엌|주방|kitchen/i, en: 'kitchen interior' },
+  { re: /방\s*안| indoors|indoor\s+room/i, en: 'indoor room' },
   { re: /빗속|rain/i, en: 'in the rain' },
   { re: /햇살|sunshine|sunlight/i, en: 'in sunlight' },
   { re: /운동장|경기장|필드|stadium|field/i, en: 'sports field' },
@@ -188,7 +198,66 @@ function findEntityHits(text: string): Hit[] {
     seen.add(e.en)
     hits.push({ en: e.en, kind: e.kind, index: m.index, len: m[0].length })
   }
+  // 고유명사 주인공: "제제가 …" / "제제는 …" (동물 사전에 없을 때 → 사람 캐릭터)
+  const nameRe = /(?:^|[,\s])([가-힣]{2,8})([이가은는])(?=\s|$|[.!?…])/g
+  let nm: RegExpExecArray | null
+  while ((nm = nameRe.exec(text)) != null) {
+    const name = nm[1]
+    if (ENTITY_LEX.some((e) => e.kind === 'animal' && e.re.test(name))) continue
+    if (ENTITY_LEX.some((e) => e.kind !== 'animal' && e.re.test(name))) continue
+    if (/들판|거실|침실|부엌|숲|산|바다|도시|여기|거기|저쪽|오늘|지금/.test(name)) continue
+    const en = `named character "${name}" (adult human)`
+    if (seen.has(en)) continue
+    seen.add(en)
+    const index = (nm.index ?? 0) + nm[0].indexOf(name)
+    hits.push({ en, kind: 'human', index, len: name.length })
+  }
   return hits.sort((a, b) => a.index - b.index)
+}
+
+/** AI가 원문에 없는 동물(예: 호랑이)을 지어내면 버린다 */
+function animalMentionedInText(raw: string, nameEn: string): boolean {
+  const t = raw.toLowerCase()
+  const en = nameEn.toLowerCase().replace(/^real\s+/, '')
+  if (t.includes(en)) return true
+  for (const e of ENTITY_LEX) {
+    if (e.kind !== 'animal') continue
+    if (e.en === en || e.en === nameEn) {
+      return e.re.test(raw)
+    }
+  }
+  return false
+}
+
+function sanitizeAiPlan(ai: ScenePlan, heuristic: ScenePlan, raw: string): ScenePlan {
+  const cleanedEntities = ai.entities.filter((e) => {
+    if (e.kind !== 'animal') return true
+    return animalMentionedInText(raw, e.nameEn)
+  })
+  let head = ai.head
+  if (head?.kind === 'animal' && !animalMentionedInText(raw, head.nameEn)) {
+    head = heuristic.head
+  }
+  // 원문에 동물이 없고 휴리스틱이 사람 캐릭터면 사람 우선
+  const rawHasAnimal = ENTITY_LEX.some((e) => e.kind === 'animal' && e.re.test(raw))
+  if (!rawHasAnimal && heuristic.head?.kind === 'human') {
+    head = heuristic.head
+    if (!cleanedEntities.some((e) => e.nameEn === head!.nameEn)) {
+      cleanedEntities.unshift(head)
+    }
+  }
+  if (head && !cleanedEntities.some((e) => e.nameEn === head!.nameEn)) {
+    cleanedEntities.unshift(head)
+  }
+  const animalNames = [...new Set(cleanedEntities.filter((e) => e.kind === 'animal').map((e) => e.nameEn))]
+  return {
+    ...ai,
+    head,
+    entities: cleanedEntities.length ? cleanedEntities : heuristic.entities,
+    multiSpecies: animalNames.length >= 2,
+    // 사람·실내 장면이면 야생동물 리드가 붙지 않도록
+    source: 'ai',
+  }
 }
 
 function particleAfter(text: string, index: number, len: number): string {
@@ -461,9 +530,10 @@ export function compileSceneHeuristic(description: string): ScenePlan {
   ]
   const adult = /누드|나체|nude|naked|란제리|lingerie|야한|에로|섹시|nsfw|explicit|글래머/i.test(raw)
   const setting = enrichSetting(raw, extractSetting(raw), props)
-  const hasPlaceHint = /아래|위에서|속에서|에서|옆에서|앞에서|뒤에서|나무|포도|숲|들판|빗속|햇살/.test(raw)
+  const hasPlaceHint =
+    /아래|위에서|속에서|에서|옆에서|앞에서|뒤에서|나무|포도|숲|들판|거실|침실|부엌|방|빗속|햇살/.test(raw)
   const hasBodyMotion =
-    actions.length > 0 || /서성|배회|걷|달리|뛰|쫓|안|돌보|놀|먹|서\s*있|앉/.test(raw)
+    actions.length > 0 || /서성|배회|걷|달리|뛰|쫓|안|돌보|놀|먹|서\s*있|앉|엎드|책/.test(raw)
 
   const needsWideScene =
     multiSpecies ||
@@ -572,6 +642,13 @@ export function buildPromptFromPlan(
     } else if (head.kind === 'animal') {
       critical.push(
         `CRITICAL FOCUS: a real wild ${head.nameEn}${stateBit}${traitBit} — natural animal body, four legs / real anatomy, not a person.`,
+      )
+    } else if (head.kind === 'human') {
+      critical.push(
+        `CRITICAL FOCUS: an adult human ${head.nameEn}${stateBit}${traitBit} — photorealistic person, NOT an animal, NOT a tiger/lion/fox wildlife shot.`,
+      )
+      critical.push(
+        'FORBIDDEN: replacing the human character with any animal species, wildlife portrait, or National Geographic animal photo.',
       )
     } else {
       critical.push(`CRITICAL FOCUS: the main subject is a real ${head.nameEn}${stateBit}${traitBit}.`)
@@ -696,6 +773,16 @@ export function buildNegativeFromPlan(plan: ScenePlan): string {
       base.push(`missing ${e.nameEn}`, `no ${e.nameEn}`)
     }
   }
+  if (plan.head?.kind === 'human' || plan.entities.some((e) => e.kind === 'human')) {
+    base.push(
+      'tiger',
+      'lion',
+      'wildlife animal portrait',
+      'National Geographic animal',
+      'replacing human with animal',
+      'animal instead of person',
+    )
+  }
   if (plan.multiSpecies) {
     for (const e of plan.entities.filter((x) => x.kind === 'animal')) {
       base.push(`two ${e.nameEn}s only`, `only ${e.nameEn}s`)
@@ -789,16 +876,16 @@ export async function compileSceneWithAi(
   if (!ai?.run) return null
 
   const system = [
-    'Parse ANY Korean/English image request (full sentence, noun phrase, relative clause, or keywords) into JSON only.',
+    'Parse ANY Korean/English image request into JSON only. No markdown.',
     'Schema: {"head":{"nameEn":"string","kind":"animal|human|object|other"},',
     '"entities":[{"nameEn":"string","kind":"string","grammar":"agent|patient|dative|companion|unspecified"}],',
-    '"states":["hungry"],"actions":["being chased"],"props":[],"traits":["missing one eye"],"relations":["..."],',
+    '"states":[],"actions":[],"props":[],"traits":[],"relations":[],',
     '"setting":null,"viewpoint":null,"countHint":1,"adult":false,"anthro":false,"needsWideScene":true,"multiSpecies":false,',
     '"inputForm":"phrase|clause|sentence|keywords"}',
-    'Rules: head = main noun being described (배고픈 당나귀 → donkey).',
-    'Relative: 원숭이에게 쫓기는 호랑이 → head=tiger, dative=monkey, action=being chased.',
-    'SVO: 여우가 고양이를 안아 → agent=fox, patient=cat. Keep species separate. No markdown.',
-    'traits = appearance modifiers (한쪽 눈이 없는 → missing one eye).',
+    'CRITICAL: NEVER invent animals or species that are NOT written in the user text.',
+    'If the subject is a personal name with 이/가/은/는 (예: 제제가, 민수가) → kind=human, nameEn like named character "제제".',
+    'Indoor human scene example: 제제가 거실에 엎드려 책을 봐요 → head=human 제제, setting=living room, action=lying prone reading, props=book.',
+    'Animal example only when animal words appear: 배고픈 당나귀 → donkey; 여우가 고양이를 안아 → fox+cat.',
     'anthro=true ONLY if user explicitly asks 반인반수/수인/인화/furry/anthropomorphic.',
   ].join(' ')
 
@@ -888,8 +975,9 @@ export async function compileResponsiveFreePrompt(input: {
   ai?: AiBinding
 }): Promise<{ prompt: string; negativePrompt: string; plan: ScenePlan }> {
   const heuristic = compileSceneHeuristic(input.description)
-  const aiPlan = await compileSceneWithAi(input.description, input.ai)
-  const plan = aiPlan ?? heuristic
+  const aiRaw = await compileSceneWithAi(input.description, input.ai)
+  // AI가 원문에 없는 호랑이 등을 넣으면 버리고 휴리스틱(사람 이름 등)을 살린다
+  const plan = aiRaw ? sanitizeAiPlan(aiRaw, heuristic, input.description) : heuristic
 
   // AI 결과가 빈약하면 휴리스틱 슬롯으로 보강
   if (!plan.states.length && heuristic.states.length) plan.states = heuristic.states
@@ -901,9 +989,21 @@ export async function compileResponsiveFreePrompt(input: {
   for (const t of heuristic.traits) {
     if (!plan.traits.includes(t)) plan.traits.push(t)
   }
+  for (const a of heuristic.actions) {
+    if (!plan.actions.includes(a)) plan.actions.push(a)
+  }
+  for (const p of heuristic.props) {
+    if (!plan.props.includes(p)) plan.props.push(p)
+  }
   if (!plan.setting && heuristic.setting) plan.setting = heuristic.setting
-  else if (heuristic.setting && plan.setting && !/grape/i.test(plan.setting) && /grape/i.test(heuristic.setting)) {
+  else if (heuristic.setting && plan.setting && !/grape|living room/i.test(plan.setting) && /grape|living room/i.test(heuristic.setting)) {
     plan.setting = heuristic.setting
+  }
+  // 사람 장면인데 AI head가 비면 휴리스틱 head 사용
+  if (!plan.head && heuristic.head) plan.head = heuristic.head
+  if (heuristic.head?.kind === 'human' && plan.head?.kind === 'animal') {
+    const rawHasAnimal = ENTITY_LEX.some((e) => e.kind === 'animal' && e.re.test(input.description))
+    if (!rawHasAnimal) plan.head = heuristic.head
   }
   if (heuristic.needsWideScene) plan.needsWideScene = true
   if (heuristic.anthro) plan.anthro = true

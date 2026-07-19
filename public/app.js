@@ -983,6 +983,7 @@ function polishConceptText(text) {
   t = t.replace(/촉옷/g, '속옷')
   t = t.replace(/않자/g, '앉아')
   t = t.replace(/위애/g, '위에')
+  t = t.replace(/잇어요/g, '있어요')
   return t.replace(/\s+/g, ' ').trim()
 }
 

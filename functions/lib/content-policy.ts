@@ -110,6 +110,8 @@ export function polishKoreanPromptText(text: string): string {
   t = t.replace(/란제리\s*속옷/g, '란제리 속옷')
   t = t.replace(/않자/g, '앉아')
   t = t.replace(/위애/g, '위에')
+  t = t.replace(/잇어요/g, '있어요')
+  t = t.replace(/잇다/g, '있다')
   return t.replace(/\s+/g, ' ').trim()
 }
 
