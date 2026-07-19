@@ -112,6 +112,8 @@ export function polishKoreanPromptText(text: string): string {
   t = t.replace(/위애/g, '위에')
   t = t.replace(/잇어요/g, '있어요')
   t = t.replace(/잇다/g, '있다')
+  t = t.replace(/잆학/g, '입학')
+  t = t.replace(/입핵/g, '입학')
   return t.replace(/\s+/g, ' ').trim()
 }
 
@@ -146,12 +148,28 @@ export function isFreeSceneRevision(revision: string, baseDescription = ''): boo
 export function mergeFreeRevisionDescription(base: string, revision: string): string {
   const b = polishKoreanPromptText(base)
   const r = polishKoreanPromptText(revision)
+  // 수정문이 이미 완결 장면이면(거실·엎드림·책 등) 수정문을 주 브리프로 사용
+  const revisionIsFullScene =
+    r.length >= 12 &&
+    /[이가은는]/.test(r) &&
+    (/거실|엎드|책|들판|달리|앉아|대학|입학|토끼|개구리|장면/.test(r) || r.length >= 20)
+  if (revisionIsFullScene) {
+    return [
+      r,
+      b && !r.includes(b.slice(0, Math.min(12, b.length)))
+        ? `이전 맥락(참고): ${b}`
+        : '',
+      'Render the FULL scene from the Korean brief: environment, pose, props, and character must all be visible. NOT a passport/ID headshot, NOT a studio face-only crop.',
+    ]
+      .filter(Boolean)
+      .join(' ')
+  }
   if (!b) return r
   if (!r) return b
   return [
     b,
     `수정 반영(원 장면을 유지한 채 반드시 적용): ${r}`,
-    'Keep every original subject and setting; apply the revision exactly without replacing animals with a human model.',
+    'Keep subjects and setting; apply the revision exactly. Show full scene (pose, place, props). NOT face-only portrait, NOT passport photo.',
   ].join(' ')
 }
 

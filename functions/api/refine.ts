@@ -68,8 +68,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const mode = body.mode === 'region' ? 'region' : 'text'
-  // 기본은 자유 일러스트 (화보 모드는 명시할 때만)
-  const genMode = body.genMode === 'fashion' ? 'fashion' : 'free'
+  // 제품 초점: 자유 일러스트. 텍스트 수정은 클라이언트가 fashion을내도 장면 재생성으로 강제.
+  // (옛 캐시 JS가 genMode=fashion을 보내 얼굴유지 img2img로 가던 사고 차단)
+  const genMode: 'free' | 'fashion' = 'free'
   const imageUrl = (body.imageUrl ?? '').trim()
   const baseDescription = polishKoreanPromptText(body.baseDescription ?? '')
   const revision = polishKoreanPromptText(body.revision ?? '')
@@ -94,15 +95,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     )
   }
 
-  const size = body.size ?? (genMode === 'free' ? 'landscape' : 'portrait')
+  const size = body.size ?? 'landscape'
   const mood = body.mood ?? 'editorial'
 
   // ═══════════════════════════════════════════════════════════
-  // 자유 일러스트 · 텍스트 수정
-  // 절대 화보 img2img(얼굴 유지)로 보내지 않음 → 장면 재생성만
-  // (토끼+개구리 수정이 사람 가운 초상으로 붕괴하던 경로를 차단)
+  // 텍스트 수정 = 항상 자유 장면 재생성 (얼굴 유지 화보 img2img 금지)
   // ═══════════════════════════════════════════════════════════
-  if (mode === 'text' && genMode === 'free') {
+  if (mode === 'text') {
     const merged = mergeFreeRevisionDescription(baseDescription, revision)
     try {
       const compiled = await compileResponsiveFreePrompt({

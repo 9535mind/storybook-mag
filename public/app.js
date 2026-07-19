@@ -984,6 +984,7 @@ function polishConceptText(text) {
   t = t.replace(/않자/g, '앉아')
   t = t.replace(/위애/g, '위에')
   t = t.replace(/잇어요/g, '있어요')
+  t = t.replace(/잆학/g, '입학')
   return t.replace(/\s+/g, ' ').trim()
 }
 
@@ -1868,13 +1869,14 @@ reviseApplyButton.addEventListener('click', async () => {
       headers: authHeaders(),
       body: JSON.stringify({
         mode,
-        genMode: getGenMode(),
+        // 자유 일러스트 고정 — 옛 캐시가 fashion을내도 서버에서 장면 재생성으로 처리
+        genMode: 'free',
         imageUrl: currentResult.imageUrl,
-        baseDescription: currentResult.prompt,
+        baseDescription: currentResult.prompt || (descriptionField?.value || '').trim(),
         revision,
         maskDataUrl,
         mood: currentResult.mood,
-        size: currentResult.size,
+        size: currentResult.size || sizeField?.value || 'landscape',
         regionCount: regionState.regions.length,
       }),
     })
