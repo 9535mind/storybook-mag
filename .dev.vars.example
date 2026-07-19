@@ -1,0 +1,22 @@
+# Copy to .dev.vars and fill real values. Do not commit .dev.vars.
+
+# Admin emergency PIN (also used as signup invite fallback if SIGNUP_INVITE_CODE is empty)
+ADMIN_PIN=change_me_now
+
+# Preferred separate invite code for signup
+SIGNUP_INVITE_CODE=change_invite_code
+
+# Primary image engine — Replicate Juggernaut XL Lightning
+REPLICATE_API_TOKEN=your_replicate_token_here
+REPLICATE_MODEL_OWNER=sdxl-based
+REPLICATE_MODEL_NAME=juggernaut-xl-lightning
+# REPLICATE_MODEL_VERSION=<optional version id>
+
+# Fallback / wildlife-priority — fal.ai Flux.2 Pro
+FAL_KEY=your_fal_key_here
+FAL_MODEL_ID=fal-ai/flux-2-pro
+
+# I2V shorts — Replicate Wan2.2 (reuses REPLICATE_API_TOKEN)
+REPLICATE_VIDEO_MODEL_OWNER=wan-video
+REPLICATE_VIDEO_MODEL_NAME=wan-2.2-i2v-fast
+# REPLICATE_VIDEO_MODEL_VERSION=<optional version id>

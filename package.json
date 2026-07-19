@@ -1,0 +1,16 @@
+{
+  "name": "fashion-magazine-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "관리자 전용 성인 패션 매거진풍 이미지 생성 스튜디오",
+  "scripts": {
+    "dev": "wrangler pages dev public --compatibility-date=2026-07-01",
+    "deploy": "wrangler pages deploy public --project-name=storymag",
+    "db:migrate": "wrangler d1 execute storymag-auth --remote --file=migrations/0001_auth.sql",
+    "db:migrate:rate": "wrangler d1 execute storymag-auth --remote --file=migrations/0002_rate_limits.sql",
+    "db:migrate:settings": "wrangler d1 execute storymag-auth --remote --file=migrations/0003_app_settings.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

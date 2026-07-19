@@ -1,0 +1,12 @@
+name = "storymag"
+compatibility_date = "2026-07-01"
+pages_build_output_dir = "public"
+
+# 언어 반응형 장면 이해 (Llama) — 실패 시 휴리스틱으로 폴백
+[ai]
+binding = "AI"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "storymag-auth"
+database_id = "111ba775-0eed-42fc-94a3-1829049c4398"

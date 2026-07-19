@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Storymag · 자유 일러스트</title>
+  <link rel="stylesheet" href="/style.css?v=20260719aj" />
+</head>
+<body>
+  <div id="pin-gate" class="pin-gate">
+    <div class="pin-gate__card auth-card">
+      <p class="pin-gate__badge">STORYMAG</p>
+      <h1 class="pin-gate__title">자유 일러스트 스튜디오</h1>
+      <p class="pin-gate__desc">계정으로 로그인하거나 회원가입하세요.</p>
+
+      <div class="auth-tabs">
+        <button id="auth-tab-login" class="auth-tab auth-tab--active" type="button">로그인</button>
+        <button id="auth-tab-signup" class="auth-tab" type="button">회원가입</button>
+      </div>
+
+      <label class="auth-label" for="auth-email">아이디 / 이메일</label>
+      <input id="auth-email" class="pin-gate__input" type="text" placeholder="admin 또는 you@example.com" autocomplete="username" />
+
+      <label class="auth-label" for="auth-password">비밀번호</label>
+      <input
+        id="auth-password"
+        class="pin-gate__input"
+        type="password"
+        placeholder="5자 이상"
+        autocomplete="current-password"
+      />
+
+      <div id="auth-invite-wrap" hidden>
+        <label class="auth-label" for="auth-invite">초대 코드</label>
+        <input
+          id="auth-invite"
+          class="pin-gate__input"
+          type="password"
+          placeholder="관리자에게 받은 코드"
+          autocomplete="off"
+        />
+        <p class="auth-footnote">회원가입은 초대 코드가 있어야 가능합니다.</p>
+      </div>
+
+      <button id="auth-submit" class="pin-gate__button" type="button">로그인</button>
+      <p id="pin-error" class="pin-gate__error" hidden></p>
+    </div>
+  </div>
+
+  <main id="app" class="app" hidden>
+    <header class="app__header">
+      <div class="app__brand">
+        <p class="app__badge">STORYMAG</p>
+        <div class="app__title-row">
+          <h1 class="app__title">자유 일러스트 스튜디오</h1>
+          <button id="new-shoot-header" class="app__new-shoot" type="button">새 장면 시작</button>
+        </div>
+        <div class="app__mode-bar" hidden>
+          <p class="app__mode-label" id="gen-mode-label">생성 모드</p>
+          <div class="app__mode-options" role="radiogroup" aria-labelledby="gen-mode-label">
+            <label class="app__mode-option">
+              <input type="radio" name="gen-mode" value="free" form="generate-form" checked />
+              <span class="app__mode-option-card">
+                <span class="app__mode-option-title">자유 일러스트</span>
+              </span>
+            </label>
+            <label class="app__mode-option">
+              <input type="radio" name="gen-mode" value="fashion" form="generate-form" />
+              <span class="app__mode-option-card">
+                <span class="app__mode-option-title">관리자전용</span>
+              </span>
+            </label>
+          </div>
+          <p id="gen-mode-hint" class="app__mode-hint"></p>
+        </div>
+        <p id="app-subtitle" class="app__subtitle">자유 일러스트</p>
+        <p id="auth-user-label" class="app__user" hidden></p>
+      </div>
+      <div class="app__header-actions">
+        <button id="logout-button" class="app__logout" type="button">로그아웃</button>
+      </div>
+    </header>
+
+    <section class="panel">
+      <form id="generate-form" class="form">
+        <div class="guide-block">
+          <div class="guide-grid guide-grid--core">
+            <div class="guide-field">
+              <div class="field-head">
+                <label class="form__label" for="guide-who">주부 · 누가 (주어)</label>
+                <button type="button" class="ai-help-btn" data-ai-field="guideWho" data-ai-target="guide-who">
+                  AI 도움 받기
+                </button>
+              </div>
+              <input id="guide-who" class="form__select" type="text" maxlength="120" placeholder="예: 여우가, 느티나무가" />
+            </div>
+            <div class="guide-field">
+              <div class="field-head">
+                <label class="form__label" for="guide-action">술부 · 무엇을 / 어떻다 (술어)</label>
+                <button type="button" class="ai-help-btn" data-ai-field="guideAction" data-ai-target="guide-action">
+                  AI 도움 받기
+                </button>
+              </div>
+              <input id="guide-action" class="form__select" type="text" maxlength="200" placeholder="예: 달린다, 앉아 있다" />
+            </div>
+          </div>
+
+          <div id="guide-detail" class="guide-detail" hidden>
+            <p class="form__hint guide-detail__title">아래는 드롭다운으로 고르세요. (생략 가능)</p>
+            <div class="guide-grid guide-grid--detail">
+              <div class="guide-field">
+                <div class="field-head">
+                  <label class="form__label" for="guide-state">형용사 · 어떤</label>
+                  <button type="button" class="ai-help-btn" data-ai-field="guideState" data-ai-target="guide-state">
+                    AI 도움 받기
+                  </button>
+                </div>
+                <select id="guide-state" class="form__select">
+                  <option value="__custom__">직접 입력…</option>
+                  <option value="" selected>선택 (생략 가능)</option>
+                  <option value="배고픈">배고픈</option>
+                  <option value="귀여운">귀여운</option>
+                  <option value="무서운">무서운</option>
+                  <option value="슬픈">슬픈</option>
+                  <option value="화난">화난</option>
+                  <option value="피곤한">피곤한</option>
+                  <option value="용감한">용감한</option>
+                  <option value="우아한">우아한</option>
+                </select>
+                <input id="guide-state-custom" class="form__select guide-custom" type="text" maxlength="120" placeholder="형용사 직접 입력" hidden />
+              </div>
+              <div class="guide-field">
+                <div class="field-head">
+                  <label class="form__label" for="guide-object">목적어 · 무엇을 / 누구를</label>
+                  <button type="button" class="ai-help-btn" data-ai-field="guideObject" data-ai-target="guide-object">
+                    AI 도움 받기
+                  </button>
+                </div>
+                <select id="guide-object" class="form__select">
+                  <option value="__custom__">직접 입력…</option>
+                  <option value="" selected>선택 (생략 가능)</option>
+                  <option value="고양이">고양이</option>
+                  <option value="여우">여우</option>
+                  <option value="강아지">강아지</option>
+                  <option value="축구공">축구공</option>
+                  <option value="꽃">꽃</option>
+                  <option value="아기 동물">아기 동물</option>
+                  <option value="공">공</option>
+                </select>
+                <input id="guide-object-custom" class="form__select guide-custom" type="text" maxlength="120" placeholder="목적어 직접 입력" hidden />
+              </div>
+              <div class="guide-field">
+                <div class="field-head">
+                  <label class="form__label" for="guide-complement">보어 · 어떻게 / 어디서</label>
+                  <button type="button" class="ai-help-btn" data-ai-field="guideComplement" data-ai-target="guide-complement">
+                    AI 도움 받기
+                  </button>
+                </div>
+                <select id="guide-complement" class="form__select">
+                  <option value="__custom__">직접 입력…</option>
+                  <option value="" selected>선택 (생략 가능)</option>
+                  <option value="힘없이">힘없이</option>
+                  <option value="천천히">천천히</option>
+                  <option value="조심스럽게">조심스럽게</option>
+                  <option value="숲속에서">숲속에서</option>
+                  <option value="들판에서">들판에서</option>
+                  <option value="빗속에서">빗속에서</option>
+                  <option value="햇살 아래">햇살 아래</option>
+                </select>
+                <input id="guide-complement-custom" class="form__select guide-custom" type="text" maxlength="160" placeholder="보어 직접 입력" hidden />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="field-head">
+          <label class="form__label" for="description">캐릭터 / 컨셉 설명</label>
+          <button
+            type="button"
+            class="ai-help-btn"
+            data-ai-field="description"
+            data-ai-target="description"
+          >
+            AI 도움 받기
+          </button>
+        </div>
+        <textarea
+          id="description"
+          class="form__textarea"
+          rows="5"
+          maxlength="1200"
+          placeholder="예: 백설공주가 사과를 들고 고민하고 있다 — 간략한 캐릭터 정보를 적어 주세요"
+        ></textarea>
+        <p class="form__hint">
+          「AI 도움 받기」→ 조언이 뜨고, 조언을 <strong>클릭</strong>하면 앞뒤 맥락을 보고 칸을 채워 줍니다. 채운 뒤 직접 고칠 수 있어요.
+        </p>
+        <p id="scene-preview" class="scene-preview" hidden></p>
+
+        <div class="form__row">
+          <div class="form__field">
+            <label class="form__label" for="mood">무드</label>
+            <select id="mood" class="form__select">
+              <option value="editorial">에디토리얼</option>
+              <option value="glamour">글래머</option>
+              <option value="chic">시크 &amp; 모던</option>
+              <option value="romantic">로맨틱</option>
+            </select>
+          </div>
+          <div class="form__field">
+            <label class="form__label" for="size">비율</label>
+            <select id="size" class="form__select">
+              <option value="portrait">2:3 세로</option>
+              <option value="story">9:16 세로 (쇼츠/릴스)</option>
+              <option value="square">1:1 정방형</option>
+              <option value="landscape">3:2 가로 (장면·액션 추천)</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="generate-button" class="form__submit" type="submit">이미지 생성</button>
+        <p id="form-status" class="form__status" hidden></p>
+      </form>
+    </section>
+
+    <section id="result-section" class="result" hidden>
+      <h2 class="result__title">생성 결과</h2>
+      <p id="result-engine" class="result__engine" hidden></p>
+      <p id="review-badge" class="review-badge" hidden>검토 중 · 수용하기 전까지 갤러리에 저장되지 않아요</p>
+
+      <div class="result__stage" id="result-stage">
+        <img
+          id="result-image"
+          class="result__image"
+          alt="생성된 패션 매거진풍 이미지"
+          draggable="false"
+        />
+        <canvas id="region-canvas" class="region-canvas" hidden></canvas>
+      </div>
+
+      <div id="review-panel" class="review-panel" hidden>
+        <p id="review-hint" class="review-panel__hint">수정하거나 다시 생성한 뒤, 마음에 들면 아래에서 수용하세요.</p>
+
+        <div id="review-actions" class="review-panel__actions">
+          <button id="revise-toggle-button" class="review-panel__secondary" type="button">수정하기</button>
+          <button id="reject-button" class="review-panel__secondary" type="button">다시 생성</button>
+          <button id="accept-button" class="form__submit" type="button">수용하기</button>
+        </div>
+
+        <div id="revise-panel" class="revise-panel" hidden>
+          <div class="revise-panel__modes">
+            <label class="revise-panel__mode">
+              <input type="radio" name="revise-mode" value="text" checked />
+              텍스트로 수정
+            </label>
+            <label class="revise-panel__mode">
+              <input type="radio" name="revise-mode" value="region" />
+              영역 지정 후 수정
+            </label>
+          </div>
+
+          <p id="region-hint" class="review-panel__hint" hidden>
+            여러 번 드래그할 수 있어요. 각 영역에 순서 번호(1,2,3…)가 남습니다. 예: ① 눈 → 「안경」
+          </p>
+          <p id="region-list" class="region-list" hidden></p>
+          <div id="region-toolbar" class="region-toolbar" hidden>
+            <button id="region-undo-button" class="region-toolbar__primary" type="button">
+              마지막 영역 취소
+            </button>
+            <button id="region-clear-button" class="review-panel__secondary region-toolbar__secondary" type="button">
+              모든 선택 영역 지우기
+            </button>
+            <p class="review-panel__hint">잘못 그린 번호 박스를 클릭해도 그 영역만 지울 수 있어요.</p>
+          </div>
+
+          <div class="field-head">
+            <label class="form__label" for="revision-text">수정 요청</label>
+            <button type="button" class="ai-help-btn" data-ai-field="revision" data-ai-target="revision-text">
+              AI 도움 받기
+            </button>
+          </div>
+          <textarea
+            id="revision-text"
+            class="form__textarea"
+            rows="3"
+            maxlength="800"
+            placeholder="예: 선택한 눈 부분에 세련된 안경을 씌워줘 / 짧은 실크 슬립 드레스로 바꿔줘"
+          ></textarea>
+
+          <div class="revise-panel__footer">
+            <button id="revise-apply-button" class="form__submit animate-panel__button" type="button">수정 적용</button>
+            <button id="revise-cancel-button" class="review-panel__secondary" type="button">수정 닫기</button>
+          </div>
+          <p id="revise-status" class="form__status" hidden></p>
+        </div>
+      </div>
+
+      <div id="accepted-actions" class="result__actions" hidden>
+        <button id="revise-again-button" class="review-panel__secondary" type="button">다시 수정하기</button>
+        <a id="result-download" class="result__download" download="fashion-magazine.png">다운로드</a>
+      </div>
+
+      <div id="animate-panel" class="animate-panel" hidden>
+        <div class="field-head">
+          <label class="form__label" for="motion">모션 힌트 (선택)</label>
+          <button type="button" class="ai-help-btn" data-ai-field="motion" data-ai-target="motion">
+            AI 도움 받기
+          </button>
+        </div>
+        <input
+          id="motion"
+          class="form__select"
+          type="text"
+          maxlength="400"
+          placeholder="예: 천천히 고개를 돌리며 카메라를 응시, 옷자락이 바람에 흔들림"
+        />
+        <div class="form__field" style="margin-top: 0.75rem">
+          <span class="form__label" id="video-duration-label">영상 길이</span>
+          <div
+            id="video-duration"
+            class="video-duration"
+            role="group"
+            aria-labelledby="video-duration-label"
+            data-duration="8"
+          >
+            <button type="button" class="video-duration__btn is-active" data-duration="8">8초</button>
+            <button type="button" class="video-duration__btn" data-duration="10">10초</button>
+            <button type="button" class="video-duration__btn" data-duration="12">12초</button>
+            <button type="button" class="video-duration__btn" data-duration="15">15초</button>
+          </div>
+        </div>
+        <div class="form__field" style="margin-top: 0.75rem">
+          <span class="form__label" id="video-speed-label">진행 속도</span>
+          <div
+            id="video-speed"
+            class="video-duration"
+            role="group"
+            aria-labelledby="video-speed-label"
+            data-speed="normal"
+          >
+            <button type="button" class="video-duration__btn" data-speed="slow">느리게</button>
+            <button type="button" class="video-duration__btn is-active" data-speed="normal">보통</button>
+            <button type="button" class="video-duration__btn" data-speed="fast">빠르게</button>
+          </div>
+        </div>
+        <button id="animate-button" class="form__submit animate-panel__button" type="button">쇼츠 비디오 만들기</button>
+        <p id="animate-status" class="form__status" hidden></p>
+
+        <div id="video-result" class="video-result" hidden>
+          <video id="result-video" class="result__video" controls loop playsinline></video>
+          <div class="video-speed-bar" aria-label="재생 속도">
+            <span class="video-speed-bar__label">재생</span>
+            <button type="button" class="video-duration__btn" data-speed-play="slow">느리게</button>
+            <button type="button" class="video-duration__btn is-active" data-speed-play="normal">보통</button>
+            <button type="button" class="video-duration__btn" data-speed-play="fast">빠르게</button>
+          </div>
+
+          <div id="bgm-panel" class="bgm-panel">
+            <h3 class="bgm-panel__title">BGM 입히기</h3>
+            <p class="bgm-panel__hint">
+              Suno 등에서 만든 음원을 슬롯에 넣거나 바로 업로드한 뒤 영상에 합성합니다. 음원은 이 브라우저에만 저장돼요.
+            </p>
+
+            <div id="bgm-slots" class="bgm-panel__slots"></div>
+
+            <div class="bgm-panel__row">
+              <label class="form__label" for="bgm-upload">바로 업로드 (mp3 / wav / m4a)</label>
+              <input id="bgm-upload" class="bgm-panel__file" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg" />
+            </div>
+
+            <div class="bgm-panel__row bgm-panel__volume-row">
+              <label class="form__label" for="bgm-volume">BGM 볼륨</label>
+              <input id="bgm-volume" class="bgm-panel__volume" type="range" min="10" max="100" value="40" />
+              <span id="bgm-volume-label" class="bgm-panel__volume-label">40%</span>
+            </div>
+
+            <div class="bgm-panel__actions">
+              <button id="bgm-apply" class="form__submit animate-panel__button" type="button">선택한 음원으로 BGM 입히기</button>
+              <button id="bgm-reset" class="review-panel__secondary" type="button">원본 영상으로 되돌리기</button>
+            </div>
+            <p id="bgm-status" class="form__status" hidden></p>
+          </div>
+
+          <div id="youtube-panel" class="youtube-panel">
+            <h3 class="youtube-panel__title">YouTube Shorts 게시 준비</h3>
+            <p class="youtube-panel__hint">아래 순서로 올리면 됩니다. 제목·설명은 원본 프롬프트로 자동 채워져요.</p>
+
+            <ol class="youtube-panel__steps">
+              <li>영상 받기</li>
+              <li>제목·설명 복사</li>
+              <li>YouTube 업로드 창에서 붙여넣기</li>
+            </ol>
+
+            <label class="form__label" for="yt-title">제목</label>
+            <input id="yt-title" class="form__select" type="text" maxlength="100" />
+
+            <label class="form__label" for="yt-description">설명</label>
+            <textarea id="yt-description" class="form__textarea youtube-panel__desc" rows="4" maxlength="4000"></textarea>
+
+            <div class="youtube-panel__actions">
+              <button id="yt-prepare-all" class="form__submit youtube-panel__primary" type="button">
+                한 번에 준비 (받기 + 복사 + YouTube 열기)
+              </button>
+              <button id="yt-download" class="youtube-panel__secondary" type="button">① 영상 받기</button>
+              <button id="yt-copy" class="youtube-panel__secondary" type="button">② 제목·설명 복사</button>
+              <button id="yt-open" class="youtube-panel__secondary" type="button">③ YouTube 열기</button>
+            </div>
+            <p id="youtube-status" class="form__status" hidden></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="gallery">
+      <div class="gallery__header">
+        <h2 class="gallery__title">내 갤러리</h2>
+        <div class="gallery__header-actions">
+          <button id="new-shoot-gallery" class="gallery__new-shoot" type="button">새 장면 시작</button>
+          <button id="clear-gallery" class="gallery__clear" type="button">전체 삭제</button>
+        </div>
+      </div>
+      <div id="gallery-grid" class="gallery__grid"></div>
+      <p id="gallery-empty" class="gallery__empty">아직 저장된 이미지가 없어요.</p>
+    </section>
+  </main>
+
+  <script src="/youtube-shorts.js?v=20260719aj"></script>
+  <script src="/bgm-mixer.js?v=20260719aj"></script>
+  <script src="/app.js?v=20260719aj"></script>
+</body>
+</html>
