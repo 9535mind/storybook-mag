@@ -981,6 +981,8 @@ function polishConceptText(text) {
   t = t.replace(/되엇/g, '되었')
   t = t.replace(/햇다/g, '했다')
   t = t.replace(/촉옷/g, '속옷')
+  t = t.replace(/않자/g, '앉아')
+  t = t.replace(/위애/g, '위에')
   return t.replace(/\s+/g, ' ').trim()
 }
 
@@ -1966,10 +1968,10 @@ reviseApplyButton.addEventListener('click', async () => {
     }
     // 수정 적용 후: 수정 패널 닫고 수정하기 / 다시 생성 / 수용하기 복구
     setReviewChrome('idle')
-    if (data.structuralRegen) {
+    if (data.structuralRegen || getGenMode() === 'free') {
       setReviseStatus(
         (data.message ||
-          '전신·속옷처럼 큰 수정은 장면 재생성으로 처리했어요. 얼굴이 조금 달라질 수 있어요.') +
+          '자유 일러스트 수정은 장면 재생성으로 처리했어요. 동물·구도를 유지한 채 반영합니다.') +
           ' 확정하려면 수용하기를 누르세요.',
         false,
       )

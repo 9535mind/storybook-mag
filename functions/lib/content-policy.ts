@@ -108,15 +108,49 @@ export function polishKoreanPromptText(text: string): string {
   // 란제리촉옷차림 → 란제리 속옷차림
   t = t.replace(/촉옷/g, '속옷')
   t = t.replace(/란제리\s*속옷/g, '란제리 속옷')
+  t = t.replace(/않자/g, '앉아')
+  t = t.replace(/위애/g, '위에')
   return t.replace(/\s+/g, ' ').trim()
 }
 
-/** 전신·속옷·장면처럼 img2img로는 얼굴이 깨지기 쉬운 큰 수정 */
+/** 화보 모드: 전신·의상처럼 img2img로 얼굴이 깨지기 쉬운 큰 수정 */
 export function isStructuralRefineRevision(revision: string): boolean {
   const r = polishKoreanPromptText(revision)
   return /전신|풀\s*바디|풀바디|full\s*body|머리부터|발끝까지|속옷|란제리|underwear|lingerie|브래지|팬티|거울|차림으로|누드|나체|nude|다시\s*그려|재생성/i.test(
     r,
   )
+}
+
+/** 자유 모드: 동물·소품·구도 추가 등 장면 구성 변경 → 반드시 장면 재생성 */
+export function isFreeSceneRevision(revision: string, baseDescription = ''): boolean {
+  const r = polishKoreanPromptText(`${baseDescription}\n${revision}`)
+  if (!revision.trim()) return false
+  // 동물·다중 주체·위치 관계·장면 동사
+  if (
+    /토끼|개구리|여우|사자|호랑이|고양이|강아지|원숭|당나귀|곰|늑대|새\b|말\b|동물|frog|rabbit|fox|lion|tiger|cat|dog|monkey|bear|bird|horse|animal/i.test(
+      r,
+    )
+  ) {
+    return true
+  }
+  if (/위에|아래|등에|등에\s*타|타고|안[자줘]|앉아|들고|함께|추가|넣어|장면|들판|가로질러|달린|뛰는|쫓/i.test(r)) {
+    return true
+  }
+  // 자유 모드 텍스트 수정은 기본적으로 장면 재생성(아래 refine.ts에서 강제)
+  return true
+}
+
+/** 자유 일러스트 수정용 설명 병합 */
+export function mergeFreeRevisionDescription(base: string, revision: string): string {
+  const b = polishKoreanPromptText(base)
+  const r = polishKoreanPromptText(revision)
+  if (!b) return r
+  if (!r) return b
+  return [
+    b,
+    `수정 반영(원 장면을 유지한 채 반드시 적용): ${r}`,
+    'Keep every original subject and setting; apply the revision exactly without replacing animals with a human model.',
+  ].join(' ')
 }
 
 function resolveFramingHint(size: string | undefined): string {
@@ -431,15 +465,41 @@ export function buildFreeNegativePrompt(description: string): string {
   return extras.length ? `${FREE_NEGATIVE_PROMPT}, ${extras.join(', ')}` : FREE_NEGATIVE_PROMPT
 }
 
-/** 텍스트 수정 / 영역 수정용 프롬프트 — 원본 인물·구도 유지가 최우선. */
+/** 텍스트 수정 / 영역 수정용 프롬프트. genMode=free면 사람 얼굴 락을 쓰지 않는다. */
 export function buildRefinePrompt(input: {
   baseDescription: string
   revision: string
   mode: 'text' | 'region'
+  genMode?: 'free' | 'fashion'
 }): string {
   const base = polishKoreanPromptText(input.baseDescription)
   const revision = polishKoreanPromptText(input.revision)
-  const revisionAmplify = amplifyClothingAndScene(`${base} ${revision}`)
+  const free = input.genMode === 'free'
+  const revisionAmplify = free ? '' : amplifyClothingAndScene(`${base} ${revision}`)
+
+  if (free) {
+    if (input.mode === 'region') {
+      return [
+        'Local edit of an existing illustration/photo. ONLY change the masked white areas.',
+        `Local change: ${revision}.`,
+        'Do NOT replace animals with a human fashion model. Preserve species, pose, and unmasked scene.',
+        base ? `Scene context: ${base}.` : '',
+        'Photorealistic seamless inpaint, same lighting.',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    }
+    return [
+      'Edit the SAME scene. Keep original subjects (animals/objects) and setting.',
+      `Apply exactly: ${revision}.`,
+      'CRITICAL: Do NOT invent a human woman, fashion model, bathrobe, or studio portrait.',
+      base ? `Original scene (must still hold): ${base}.` : '',
+      'Photorealistic illustration fidelity to the brief.',
+    ]
+      .filter(Boolean)
+      .join(' ')
+  }
+
   if (input.mode === 'region') {
     return [
       'Local edit of an existing photo. ONLY change the masked white areas.',
