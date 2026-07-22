@@ -100,27 +100,41 @@ export function evaluateTaleScenePolicy(promptText: string): ContentPolicyVerdic
   return { allowed: true, blockedReason: null, matchedSignals: [] }
 }
 
-// 한국어는 명사와 동사 사이에 조사(을/를/이/가/은/는/도)가 붙는 게 훨씬 자연스러운 말투다
-// ("속옷을 제거해줘", "옷을 벗겨줘") — 기존엔 \s*(공백만 허용)라 조사가 끼면 매칭에서
-// 빠져서, 정밀모드 전환·negative prompt 조정이 통째로 안 걸리는 버그가 있었다. 조사를
-// 선택적으로 허용하는 조각을 명사+동사 패턴 사이에 넣어 고친다.
-const KO_PARTICLE_GAP = '(?:을|를|이|가|은|는|도)?\\s*'
+// 한국어는 명사와 동사 사이에 조사(을/를/이/가/은/는/도/만)가 붙는 게 훨씬 자연스러운
+// 말투다("속옷을 제거해줘", "가운만 입혀라") — 기존엔 \s*(공백만 허용)라 조사가 끼면
+// 매칭에서 빠져서, 정밀모드 전환·negative prompt 조정이 통째로 안 걸리는 버그가 있었다.
+// "옷을 다 벗겨줘"/"옷을 전부 벗어라"처럼 조사 뒤에 "다/전부/완전히" 같은 강조 부사가 한
+// 번 더 끼는 것도 실제로 매우 흔하다 — 조사와 부사를 모두 선택적으로 허용하는 조각을
+// 명사+동사 패턴 사이에 넣어 고친다.
+const KO_PARTICLE_GAP =
+  '(?:을|를|이|가|은|는|도|만)?\\s*(?:다|전부|모두|완전히|싹|모조리)?\\s*'
 
-// 탈의 요청에 등장하는 의류 명사 전체 목록. "가운/로브/옷"만 있던 예전엔 "브래지어를
+// 착의·탈의 요청에 등장하는 의류 명사 전체 목록. "가운/로브/옷"만 있던 예전엔 "브래지어를
 // 벗겨줘", "치마를 제거해줘"처럼 세부 품목을 지칭하면 놓치는 사고가 있었다 — 사용자가
 // 실제로 쓸 만한 상의/하의/속옷 명칭을 폭넓게 담아둔다. "브라(?!운)"은 "브라운"(색상)
 // 오발동 방지(기존 wantsUnderwearLook과 동일 이유).
 const KO_CLOTHING_NOUN =
-  '옷|가운|로브|속옷|언더웨어|상의|하의|티셔츠|셔츠|니트|블라우스|브래지어|브라(?!운)|바지|팬츠|팬티|치마|스커트|드레스|원피스|자켓|재킷|코트|조끼|탑'
+  '옷|가운|로브|속옷|언더웨어|상의|하의|티셔츠|셔츠|니트|블라우스|브래지어|브라(?!운)|바지|팬츠|팬티|치마|스커트|드레스|원피스|자켓|재킷|코트|조끼|탑|스타킹|양말'
 
 // "벗다"뿐 아니라 "제거/없애/지우다"도 실제로 쓰이는 탈의 표현이다. 동사 어간만 매칭해서
 // 활용형(제거하다/제거해줘/제거하라, 없애다/없애줘/없애라, 지우다/지워줘/지워라, 벗다/
 // 벗어/벗겨/벗기/벗김/벗을/벗었 등)을 활용형 하나하나 나열하지 않고 전부 커버한다.
 const KO_REMOVE_VERB_STEM = '(?:제거|없애|지워|지우|벗)'
 
-// 의류 명사 + (조사) + 제거 동사 어간 — "명사마다 동사마다" 조합을 일일이 나열하는 대신
-// 하나의 조합 패턴으로 일반화한다(예: 상의를 벗겨줘 / 치마 제거해줘 / 팬티 없애줘 모두 매칭).
+// 반대 방향(착의) 동사 어간 — 입다/착용하다/걸치다/두르다/씌우다의 모든 활용형을 어간만으로 커버.
+const KO_DRESS_VERB_STEM = '(?:입|착용|걸치|두르|씌우)'
+
+// "바꾸다/교체하다/변경하다/대체하다/A 대신 B" — 명사 바로 옆이 아니라 문장 뒤쪽에 오는
+// 경우가 많아(예: "바지를 스커트로 바꿔줘") 인접 매칭 대신 문장 전체에서 별도로 검사한다.
+// "바꾸다"는 어미가 붙으며 어간이 "바꿔/바꾼/바꿨"으로 불규칙 활용되므로(바꾸+어→바꿔)
+// "바꾸" 어간 자체로는 매칭되지 않는다 — 활용형을 별도로 나열한다.
+const KO_REPLACE_WORD_PATTERN = /바꾸|바꿔|바꾼|바꿨|바뀌|교체|변경|대체|대신/i
+
+// 의류 명사 + (조사) + 제거/착의 동사 어간 — "명사마다 동사마다" 조합을 일일이 나열하는 대신
+// 하나의 조합 패턴으로 일반화한다(예: 상의를 벗겨줘 / 치마 제거해줘 / 팬티 없애줘 / 가운만
+// 입혀라 모두 매칭).
 const KO_UNDRESS_NOUN_VERB_PATTERN = `(?:${KO_CLOTHING_NOUN})${KO_PARTICLE_GAP}${KO_REMOVE_VERB_STEM}`
+const KO_DRESS_NOUN_VERB_PATTERN = `(?:${KO_CLOTHING_NOUN})${KO_PARTICLE_GAP}${KO_DRESS_VERB_STEM}`
 
 /** 누드·탈의·의류제거 의도 (성인 허용 — 순화하지 않음) */
 export function wantsNudeOrUndress(text: string): boolean {
@@ -186,9 +200,12 @@ export function wantsDressAction(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
   const pattern = new RegExp(
     [
+      // "입"은 흔한 단어(입구/가입/수입 등)에도 등장해 명사 없이 단독으로는 못 쓰지만,
+      // 아래 구체적 활용형(입는/입어/입기/입혀/입힌다/입힘/입을/입었)은 안전하게 단독 매칭된다.
       '입는', '입어', '입기', '입혀', '입힌다', '입힘', '입을', '입었',
-      `옷${KO_PARTICLE_GAP}입`, `드레스${KO_PARTICLE_GAP}입`, `가운${KO_PARTICLE_GAP}걸치`,
-      `로브${KO_PARTICLE_GAP}걸치`, '걸쳐\\s*입', '걸쳐\\s*걸치',
+      '착용', '걸치', '두르', '씌우',
+      KO_DRESS_NOUN_VERB_PATTERN,
+      '걸쳐\\s*입', '걸쳐\\s*걸치',
       'get(?:s|ting)?\\s*dressed', 'dress(?:es|ing)?\\s*(?:her)?self',
       'puts?\\s*on\\s*(?:her\\s*|a\\s*|the\\s*)?(?:clothes|clothing|dress|robe|lingerie|underwear|outfit)',
       'wraps?\\s*(?:herself\\s*)?in\\s*(?:a\\s*|the\\s*)?(?:robe|dress|coat)',
@@ -196,6 +213,36 @@ export function wantsDressAction(text: string): boolean {
     'i',
   )
   return pattern.test(t)
+}
+
+/**
+ * "바지를 벗기고 치마를 입혀라"/"팬티는 벗기고 가운만 입혀라"처럼 한 문장에 탈의+착의가
+ * 같이 있으면 실제로는 옷을 "교체"하는 것뿐이지 최종적으로 누드가 되는 게 아니다.
+ * wantsNudeOrUndress는 탈의 동사만 있으면 무조건 true라서, 프롬프트/네거티브 문구를
+ * 그대로 만들면 "옷을 입지 말라"는 정반대 지시가 함께 섞여 들어가는 사고가 났다(실측
+ * 확인). 명시적 상태 단어(누드/나체 등)는 다른 조건과 무관하게 항상 최종 누드로 취급하고,
+ * 그 외에는 "탈의 동작은 있는데 착의 동작이 전혀 없을 때"만 최종 누드로 판단한다.
+ */
+export function wantsFullNude(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  if (/누드|나체|nude|naked|fully\s*nude|bare\s*(?:skin|body)|완전\s*노출|전라/i.test(t)) return true
+  if (!wantsNudeOrUndress(t)) return false
+  return !wantsDressAction(t)
+}
+
+/**
+ * "옷을 교체/스왑"하는 큰 수정인지 폭넓게 판별한다. 탈의(옷을 벗다)·착의(옷을 입다)·교체
+ * ("A 대신 B로", "A를 B로 바꿔줘") 세 가지 표현 방식을 모두 하나의 판별로 묶어서, 의류
+ * 명사·동사 조합을 사용자가 쓸 때마다 하나씩 나열하지 않아도 되게 한다.
+ */
+export function isClothingChangeRevision(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  if (wantsNudeOrUndress(t) || wantsDressAction(t)) return true
+  // "바지를 스커트로 바꿔줘/교체해줘"처럼 명사와 교체 동사가 붙어있지 않고 문장 뒤쪽에
+  // 떨어져 있는 경우는 인접 매칭으로 못 잡는다 — 의류 명사가 하나라도 있고 교체 계열
+  // 표현이 있으면 옷 교체 요청으로 간주한다.
+  const mentionsClothing = new RegExp(KO_CLOTHING_NOUN, 'i').test(t)
+  return mentionsClothing && KO_REPLACE_WORD_PATTERN.test(t)
 }
 
 /**
@@ -307,7 +354,10 @@ export function buildFashionNegativePrompt(description: string): string {
   const extras: string[] = []
   let base = DEFAULT_NEGATIVE_PROMPT
 
-  if (wantsNudeOrUndress(description)) {
+  // wantsNudeOrUndress가 아니라 wantsFullNude를 쓴다 — "바지를 벗기고 치마를 입혀라"
+  // 같은 옷 교체 요청까지 wantsNudeOrUndress만으로 판단하면 "옷을 입지 말라"는 네거티브를
+  // 추가해버려서 사용자가 명시적으로 요청한 착의(치마)와 정반대로 충돌하는 사고가 있었다.
+  if (wantsFullNude(description)) {
     // "missing outfit"은 누드(=의상 없음)와 정면 충돌 → 제거
     base = base.replace(OUTFIT_FORCE_NEGATIVE, '')
     extras.push(
@@ -402,17 +452,16 @@ export function isStructuralRefineRevision(revision: string): boolean {
     [
       '전신', '풀\\s*바디', '풀바디', 'full\\s*body', '머리부터', '발끝까지',
       '속옷', '란제리', 'underwear', 'lingerie', '브래지', '팬티', '거울', '차림으로',
-      '누드', '나체', 'nude', '다시\\s*그려', '재생성',
-      // 상의·바지·치마 등 특정 의류를 "벗다·제거·없애다"해 달라는 요청(탈의)은 실제로는
-      // 의상이 통째로 바뀌는 만큼 큰 수정이다 — 이 목록에 없어서 낮은 strength(0.28)로만
-      // 처리되다가 반영이 거의 안 되는 문제가 있었다. wantsNudeOrUndress와 동일한 탈의
-      // 패턴(KO_UNDRESS_NOUN_VERB_PATTERN)을 여기서도 인식해서(nudeRevision과 함께) 얼굴
-      // 보존 고강도 경로(strength 0.6·정밀모드)로 승격시킨다.
-      '탈의', KO_UNDRESS_NOUN_VERB_PATTERN,
+      '누드', '나체', 'nude', '다시\\s*그려', '재생성', '탈의',
     ].join('|'),
     'i',
   )
-  return pattern.test(r)
+  // 특정 의류를 "벗다·제거·없애다"(탈의), "입다·착용하다"(착의), "A 대신 B로/A를 B로 바꿔"
+  // (교체)해 달라는 요청은 무엇이든 실제로는 의상이 통째로 바뀌는 만큼 큰 수정이다 — 이걸
+  // 놓치면 낮은 strength(0.28)로만 처리되다가 반영이 거의 안 되는 문제가 있었다.
+  // isClothingChangeRevision 하나로 세 가지 표현 방식을 전부 통틀어 판별한다(뒤에서
+  // nudeRevision과 함께 얼굴 보존 고강도 경로(strength 0.6·정밀모드)로 승격시킨다).
+  return pattern.test(r) || isClothingChangeRevision(r)
 }
 
 /** "귀걸이 추가해줘"/"나비 넣어줘"처럼 원본에 없던 새 물체·요소를 더하는 수정인지 판별한다.
@@ -530,7 +579,9 @@ function resolveFramingHint(size: string | undefined): string {
 /** 한국어 의상/장소 키워드를 영어 강제 지시로 보강 (모델이 정장·스튜디오로 이탈하는 경우 억제). */
 function amplifyClothingAndScene(description: string): string {
   const extras: string[] = []
-  const nude = wantsNudeOrUndress(description)
+  // wantsFullNude — "바지를 벗기고 치마를 입혀라" 같은 옷 교체 요청까지 "no clothing, bare
+  // skin" 태그를 강제로 붙이면 사용자가 명시한 착의 지시(치마)와 정반대로 충돌한다.
+  const nude = wantsFullNude(description)
 
   // 누드/탈의는 의상 강제보다 우선 — "속옷제거"가 속옷 착용으로 오인되지 않게
   if (nude) {
@@ -749,7 +800,7 @@ function amplifyFreeScene(description: string): string {
   if (/지구|earth|globe/i.test(description)) {
     extras.push('planet Earth clearly visible as requested')
   }
-  if (wantsNudeOrUndress(description)) {
+  if (nude) {
     if (/(뒷모습|후면|등\s*뒤|back\s*view|rear)/i.test(description)) {
       extras.push('adult nude from the BACK, rear three-quarter view, bare skin, no clothing')
     } else if (/(옆|비스듬|측면|side\s*view|profile)/i.test(description)) {
@@ -957,7 +1008,9 @@ function buildFashionPromptSuffixParts(input: {
   rawDescription: string
 }): { ethnicityTag: string; amplify: string; nudeFlag: string; moodTag: string; framing: string; qualitySuffix: string } {
   const ethnicitySource = polishKoreanPromptText(input.rawDescription)
-  const nude = wantsNudeOrUndress(ethnicitySource)
+  // wantsFullNude — 옷 교체 요청("바지를 벗고 치마만 입혀라")까지 "no bra, no panties"를
+  // 양성 프롬프트에 박아버리면 착의 지시와 충돌한다(amplifyClothingAndScene과 동일 이유).
+  const nude = wantsFullNude(ethnicitySource)
   const ethnicityTag = defaultEthnicityTag(ethnicitySource)
   // 누드 요청 시 "no bra, no panties"까지 양성(positive) 프롬프트에 직접 못박아 둔다.
   // 예전엔 negative prompt(lingerie, underwear, bra, panties)에만 의존했는데, Lightning
@@ -1136,7 +1189,9 @@ export function buildRefinePrompt(input: {
     return [
       'Edit the SAME scene. Keep original subjects (animals/objects) and setting.',
       `Apply exactly: ${revision}.`,
-      wantsNudeOrUndress(revision)
+      // wantsFullNude — "치마를 벗기고 바지를 입혀라" 같은 옷 교체 요청까지 "bare skin,
+      // remove garments" 지시를 넣으면 착의 지시와 정반대로 충돌한다.
+      wantsFullNude(revision)
         ? 'Adult nude/undress as requested: bare skin, remove garments — do not keep underwear or robes.'
         : 'CRITICAL: Do NOT invent a human woman, fashion model, bathrobe, or studio portrait.',
       freeEthnicity,
@@ -1156,7 +1211,7 @@ export function buildRefinePrompt(input: {
       // 예전엔 이 분기엔 없어서, 마스크한 부분에서 옷/속옷을 지워달라고 해도 모델이 학습
       // 편향으로 브라·팬티를 다시 그려 넣는 사고가 텍스트 수정 경로보다도 더 흔했다
       // (마스크 영역이 좁아 모델이 "뭔가로는 채워야 한다"고 판단하기 쉬움).
-      wantsNudeOrUndress(revision)
+      wantsFullNude(revision)
         ? 'Adult nude/undress as requested inside the mask: bare skin, remove the garment — do NOT redraw a bra, panties, lingerie, or any covering fabric in its place.'
         : '',
       'Do NOT invent a new person, new face, new body, or new scene outside the mask.',
@@ -1198,7 +1253,7 @@ export function buildRefinePrompt(input: {
   const applyPrefix = 'ONLY apply this change:'
   const bgAndPoseNote = 'Keep background and pose unchanged unless the change requires it.'
   const bathrobeNote = 'Do not add a bathrobe, kimono, or coat unless requested.'
-  const nudeOrLingerieNote = wantsNudeOrUndress(revision)
+  const nudeOrLingerieNote = wantsFullNude(revision)
     ? 'Nude/undress requested: bare skin, remove garments, no bra or panties left.'
     : 'If lingerie/underwear is requested, show it, never a robe.'
   const contextPrefix = 'Context (must still hold):'
@@ -1265,7 +1320,10 @@ export function buildAnimationPrompt(input: { prompt?: string; motion?: string }
   // 이미 누드인 이미지에 단순 포즈/움직임만 요청해도 "옷이 벗겨지는 동작" 문구가 붙어서
   // 영상이 "옷을 입은 상태에서 시작 → 벗는" 서사를 만들어내고, 그 결과 원본엔 없던
   // 옷/속옷/드레스가 프레임에 나타나는 부작용이 있었다.
-  const sourceIsNude = wantsNudeOrUndress(fullOriginal)
+  // wantsFullNude — 누적된 설명이 "바지를 벗기고 치마를 입혀라" 같은 옷 교체 지시를
+  // 담고 있을 때 wantsNudeOrUndress만 쓰면 현재 실제로는 치마를 입은 상태인데도 "소스가
+  // 누드"로 잘못 판정돼 이후 로직이 뒤틀리는 문제가 있었다.
+  const sourceIsNude = wantsFullNude(fullOriginal)
   // wantsUndressAction은 "벗다/제거/undress/strip" 같은 동작 동사만 잡는다. 그런데 "누드인
   // 상태로 만들어라/누드로 바꿔줘"처럼 동작 동사 없이 '상태'만 요청하는 경우가 실측으로 흔했고,
   // 이때 undressAction이 false로 판정되어 "탈의 동작" 지시가 전혀 안 붙어서 옷이 그대로
