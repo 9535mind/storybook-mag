@@ -1358,6 +1358,9 @@ function renderGalleryInto(items, gridEl, emptyEl, currentMode) {
         menuCheckbox.checked = false
         menuSelect.hidden = true
         if (action === 'delete') {
+          if (!window.confirm('이 항목을 삭제할까요? (영구 저장된 파일도 함께 삭제돼요)')) return
+          deletePermanentMediaIfNeeded(item.imageUrl)
+          deletePermanentMediaIfNeeded(item.videoUrl)
           const remaining = readGallery().filter((entry) => entry.id !== item.id)
           writeGallery(remaining)
           renderGallery()
@@ -2090,9 +2093,28 @@ async function requestAnimate() {
       motion: motionBase,
       youtubeDraft: draft,
     })
+    // 다시 만들기로 옛 영상이 이미 R2에 영구 저장돼 있었다면, 새 영상이 안전하게
+    // 저장된 뒤에 지운다.
+    const animatedItemId = currentResult.itemId
+    const previousPermanentVideoUrl = animatedItemId
+      ? (() => {
+          const prev = readGallery().find((entry) => entry.id === animatedItemId)?.videoUrl
+          return isPermanentMediaUrl(prev) ? prev : null
+        })()
+      : null
     updateGalleryItemVideo(currentResult.itemId, finalData.videoUrl, draft)
     const dur = finalData.durationSec || durationSec
-    setAnimateStatus(`쇼츠 영상 제작 완료(약 ${dur}초 · ${speedLabel})!`, false)
+    setAnimateStatus(`쇼츠 영상 제작 완료(약 ${dur}초 · ${speedLabel})! (영상을 영구 저장하는 중…)`, false)
+
+    // 영상도 replicate.delivery의 임시 CDN 링크라 시간이 지나면 만료된다. 이미지와
+    // 마찬가지로 갤러리에 남는 즉시 R2로 백그라운드 복사해 영구 주소로 바꿔둔다.
+    const animatedVideoUrl = finalData.videoUrl
+    persistImageToPermanentStorage(animatedVideoUrl).then((permanentUrl) => {
+      if (!permanentUrl) return
+      applyPersistedVideoUrl(animatedItemId, animatedVideoUrl, permanentUrl)
+      if (previousPermanentVideoUrl) deletePermanentMediaIfNeeded(previousPermanentVideoUrl)
+      setAnimateStatus(`쇼츠 영상 제작 완료(약 ${dur}초 · ${speedLabel})! 영상도 영구 저장했어요.`, false)
+    })
   } catch (error) {
     stopTimer()
     setAnimateStatus(
@@ -2616,14 +2638,15 @@ document.addEventListener('paste', (event) => {
   }
 })
 
-// fal/replicate 임시 CDN 링크는 시간이 지나면 만료된다. 「수용하기」 시점에 그 이미지를
-// storymag-media R2 버킷으로 복사해 영구 주소로 바꿔둔다 (실패해도 원래 링크로 그대로 동작).
-async function persistImageToPermanentStorage(imageUrl) {
+// fal/replicate 임시 CDN 링크는 시간이 지나면 만료된다. 「수용하기」/영상 완성 시점에
+// 그 파일(이미지·영상 모두)을 storymag-media R2 버킷으로 복사해 영구 주소로 바꿔둔다.
+// (실패해도 원래 링크로 그대로 동작 — 실패는 조용히 무시)
+async function persistImageToPermanentStorage(mediaUrl) {
   try {
     const response = await fetch('/api/persist-media', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ url: imageUrl }),
+      body: JSON.stringify({ url: mediaUrl }),
     })
     const data = await response.json().catch(() => ({}))
     if (!data.ok || !data.url) return null
@@ -2631,6 +2654,23 @@ async function persistImageToPermanentStorage(imageUrl) {
   } catch {
     return null
   }
+}
+
+// R2에 이미 저장된 파일인지(우리 버킷 소유의 영구 주소인지) 대략 판별한다.
+// 아직 임시 CDN 링크(fal.media/replicate.delivery)면 false.
+function isPermanentMediaUrl(url) {
+  return typeof url === 'string' && /\br2\.dev\//.test(url)
+}
+
+// 갤러리 항목이 교체되거나 지워질 때, 이미 R2에 영구 저장돼 있던 옛 파일을 정리한다.
+// 실패해도 사용자에게 영향 없는 백그라운드 정리 작업이라 결과를 기다리거나 알리지 않는다.
+function deletePermanentMediaIfNeeded(url) {
+  if (!isPermanentMediaUrl(url)) return
+  fetch('/api/delete-media', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ url }),
+  }).catch(() => {})
 }
 
 function applyPersistedImageUrl(itemId, originalUrl, permanentUrl) {
@@ -2644,6 +2684,25 @@ function applyPersistedImageUrl(itemId, originalUrl, permanentUrl) {
   if (currentResult.itemId === itemId && currentResult.imageUrl === originalUrl) {
     currentResult.imageUrl = permanentUrl
     if (resultImage) resultImage.src = permanentUrl
+  }
+}
+
+function applyPersistedVideoUrl(itemId, originalUrl, permanentUrl) {
+  const items = readGallery()
+  const index = items.findIndex((entry) => entry.id === itemId)
+  if (index !== -1 && items[index].videoUrl === originalUrl) {
+    items[index] = { ...items[index], videoUrl: permanentUrl }
+    writeGallery(items)
+    renderGallery()
+  }
+  if (currentResult.itemId === itemId) {
+    if (currentResult.videoUrl === originalUrl) {
+      currentResult.videoUrl = permanentUrl
+      if (resultVideo) resultVideo.src = permanentUrl
+    }
+    if (currentResult.originalVideoUrl === originalUrl) {
+      currentResult.originalVideoUrl = permanentUrl
+    }
   }
 }
 
@@ -2958,6 +3017,12 @@ reviseApplyButton.addEventListener('click', async () => {
     if (currentResult.itemId) {
       const items = readGallery()
       const index = items.findIndex((entry) => entry.id === currentResult.itemId)
+      // 교체되기 전 이미지/영상이 이미 R2에 영구 저장돼 있었다면, 새 수정본이 안전하게
+      // 저장된 뒤에 지운다(교체 전에 미리 지우면 새 저장이 실패했을 때 아예 잃어버림).
+      const previousPermanentImageUrl =
+        index !== -1 && isPermanentMediaUrl(items[index].imageUrl) ? items[index].imageUrl : null
+      const previousPermanentVideoUrl =
+        index !== -1 && isPermanentMediaUrl(items[index].videoUrl) ? items[index].videoUrl : null
       if (index !== -1) {
         items[index] = {
           ...items[index],
@@ -2970,12 +3035,16 @@ reviseApplyButton.addEventListener('click', async () => {
         writeGallery(items)
         renderGallery()
       }
+      // 영상은 이제 이미지와 안 맞으니(위에서 videoUrl: null) 옛 영상은 곧바로 정리한다.
+      if (previousPermanentVideoUrl) deletePermanentMediaIfNeeded(previousPermanentVideoUrl)
       // 이 수정본도 임시 CDN 링크이므로, 갤러리에 남는 즉시 영구 저장소로 백그라운드 복사한다.
       const revisedItemId = currentResult.itemId
       const revisedImageUrl = data.imageUrl
       persistImageToPermanentStorage(revisedImageUrl).then((permanentUrl) => {
         if (!permanentUrl) return
         applyPersistedImageUrl(revisedItemId, revisedImageUrl, permanentUrl)
+        // 새 수정본이 안전하게 저장된 뒤에야 교체된 옛 이미지를 지운다.
+        if (previousPermanentImageUrl) deletePermanentMediaIfNeeded(previousPermanentImageUrl)
       })
     }
     // 수정 적용 후: 수정 패널 닫고 수정하기 / 수용하기 복구
@@ -3245,13 +3314,23 @@ bgmResetButton?.addEventListener('click', () => {
 
 clearGalleryButton.addEventListener('click', () => {
   if (!window.confirm('내 갤러리(자유 일러스트)에 저장된 모든 이미지를 삭제할까요? 관리자 전용 갤러리는 남아있어요.')) return
-  writeGallery(readGallery().filter((item) => item.genMode === 'fashion'))
+  const items = readGallery()
+  items.filter((item) => item.genMode !== 'fashion').forEach((item) => {
+    deletePermanentMediaIfNeeded(item.imageUrl)
+    deletePermanentMediaIfNeeded(item.videoUrl)
+  })
+  writeGallery(items.filter((item) => item.genMode === 'fashion'))
   renderGallery()
 })
 
 clearAdminGalleryButton?.addEventListener('click', () => {
   if (!window.confirm('관리자 전용 갤러리에 저장된 모든 이미지를 삭제할까요? 내 갤러리는 남아있어요.')) return
-  writeGallery(readGallery().filter((item) => item.genMode !== 'fashion'))
+  const items = readGallery()
+  items.filter((item) => item.genMode === 'fashion').forEach((item) => {
+    deletePermanentMediaIfNeeded(item.imageUrl)
+    deletePermanentMediaIfNeeded(item.videoUrl)
+  })
+  writeGallery(items.filter((item) => item.genMode !== 'fashion'))
   renderGallery()
 })
 
@@ -3339,17 +3418,22 @@ galleryImportInput?.addEventListener('change', () => {
 /** R2 영구 저장 기능이 생기기 전에 이미 갤러리에 있던 항목은 여전히 fal/replicate
  *  임시 링크를 그대로 들고 있다. 그 항목들만 찾아 지금 R2로 옮긴다(이미 영구 저장된
  *  항목은 건드리지 않음). 각 요청 사이에 살짝 간격을 둬서 레이트리밋에 걸리지 않게 한다. */
-function isPermanentMediaUrl(url) {
-  return typeof url === 'string' && /\br2\.dev\//.test(url)
-}
-
 let galleryMigrateRunning = false
 
 async function migrateGalleryToPermanentStorage(triggerButtons) {
   if (galleryMigrateRunning) return
-  const targets = readGallery().filter((item) => item.imageUrl && !isPermanentMediaUrl(item.imageUrl))
-  if (!targets.length) {
-    setFormStatus('이미 모든 갤러리 이미지가 영구 저장돼 있어요.', false)
+  const items = readGallery()
+  const tasks = []
+  items.forEach((item) => {
+    if (item.imageUrl && !isPermanentMediaUrl(item.imageUrl)) {
+      tasks.push({ itemId: item.id, kind: 'image', url: item.imageUrl })
+    }
+    if (item.videoUrl && !isPermanentMediaUrl(item.videoUrl)) {
+      tasks.push({ itemId: item.id, kind: 'video', url: item.videoUrl })
+    }
+  })
+  if (!tasks.length) {
+    setFormStatus('이미 모든 갤러리 이미지·영상이 영구 저장돼 있어요.', false)
     return
   }
 
@@ -3358,11 +3442,16 @@ async function migrateGalleryToPermanentStorage(triggerButtons) {
   let done = 0
   let failed = 0
   try {
-    for (const target of targets) {
-      setFormStatus(`옛 이미지를 영구 저장소로 옮기는 중… (${done + failed + 1}/${targets.length})`, false)
-      const permanentUrl = await persistImageToPermanentStorage(target.imageUrl)
+    for (const task of tasks) {
+      const kindLabel = task.kind === 'video' ? '영상' : '이미지'
+      setFormStatus(`옛 ${kindLabel}을 영구 저장소로 옮기는 중… (${done + failed + 1}/${tasks.length})`, false)
+      const permanentUrl = await persistImageToPermanentStorage(task.url)
       if (permanentUrl) {
-        applyPersistedImageUrl(target.id, target.imageUrl, permanentUrl)
+        if (task.kind === 'video') {
+          applyPersistedVideoUrl(task.itemId, task.url, permanentUrl)
+        } else {
+          applyPersistedImageUrl(task.itemId, task.url, permanentUrl)
+        }
         done += 1
       } else {
         failed += 1
@@ -3377,11 +3466,11 @@ async function migrateGalleryToPermanentStorage(triggerButtons) {
 
   if (failed > 0) {
     setFormStatus(
-      `영구 저장 완료: ${done}개 성공, ${failed}개 실패(이미 만료된 링크일 수 있어요 — 이미지를 다시 생성해 주세요).`,
-      failed === targets.length,
+      `영구 저장 완료: ${done}개 성공, ${failed}개 실패(이미 만료된 링크일 수 있어요 — 다시 생성해 주세요).`,
+      failed === tasks.length,
     )
   } else {
-    setFormStatus(`영구 저장 완료: ${done}개 이미지를 옮겼어요.`, false)
+    setFormStatus(`영구 저장 완료: ${done}개 이미지·영상을 옮겼어요.`, false)
   }
 }
 
