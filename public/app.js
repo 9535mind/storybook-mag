@@ -1156,11 +1156,13 @@ function updateCompareButtons() {
   })
 }
 
-/** 비교 중엔 지금 보이는 이미지가 수정 전이라 수정/수용을 잠깅다 — 헷갈리지 않게 먼저 복귀시켜야 함. */
+/** 비교 중엔 지금 보이는 이미지가 수정 전이라 "수정"만 잠긴다(어느 버전을 이어서 고칠지
+ * 헷갈리지 않게, 수정하려면 먼저 「이 버전에서 다시 수정」으로 전환해야 함).
+ * 「수용하기」는 잠그지 않는다 — 지금 보이는(이전) 버전을 그대로 채택하고 싶을 수도 있어서,
+ * 수용 클릭 시 accept 핸들러가 스스로 currentResult를 이 버전으로 맞바꾼 뒤 저장한다. */
 function setActionsLockedForCompare(locked) {
   if (reviseToggleButton) reviseToggleButton.disabled = locked
   if (reviseAgainButton) reviseAgainButton.disabled = locked
-  if (acceptButton) acceptButton.disabled = locked
 }
 
 /** 비교 미리보기를 끄고 현재(최신) 이미지로 화면을 되돌린다. */
@@ -2792,6 +2794,10 @@ function applyPersistedVideoUrl(itemId, originalUrl, permanentUrl) {
 }
 
 acceptButton.addEventListener('click', () => {
+  // 「이전과 비교」로 이전 버전을 보고 있는 중에 수용하기를 누르면, 화면에 보이는(=이전) 버전을
+  // 그대로 채택하려는 의도다. currentResult는 아직 최신 버전을 들고 있으므로, 저장 전에
+  // 먼저 previousSnapshot과 맞바꿔서 지금 보이는 이미지/설명/무드 등이 실제로 저장되게 한다.
+  if (comparingPrevious) revertToPreviousSnapshot()
   if (!currentResult.imageUrl) return
   const itemId = currentResult.itemId || crypto.randomUUID()
   currentResult.itemId = itemId
