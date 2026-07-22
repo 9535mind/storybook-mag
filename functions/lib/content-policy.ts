@@ -213,6 +213,79 @@ const OUTFIT_FORCE_NEGATIVE =
 const DYNAMIC_ACTION_PATTERN =
   /힘차게|힘있게|역동적|다이나믹|달린다|달리는|질주|전속력|스피드|속도감|뛰는|뛰어가|페달\s*을?\s*밟|바람에\s*날리|dynamic|running|sprinting|speeding|pedaling|galloping|mid-action|in\s*motion/i
 
+/**
+ * "춤춘다"만으로는 팔다리를 어떻게 둬야 할지 모델에게 정보가 거의 없어서(추상적 행위
+ * 라벨일 뿐 구체적 자세가 아님), 실측으로 뻣뻣하게 서 있는 자세로 뭉개지는 경우가 반복
+ * 확인됐다. 반면 왈츠/발레/살사 같은 구체적 장르는 학습 데이터에 특징적 자세(파트너 홀드,
+ * 발끝 세우기 등)가 뚜렷해서 훨씬 안정적으로 반영된다 — 장르가 감지되면 그 장르의 전형적
+ * 자세를 직접 명시하고, 장르가 없으면 최소한 "역동적인 춤 동작" 정도의 범용 태그를 붙여서
+ * 완전히 뻣뻣한 정자세로 새는 것만이라도 막는다. DYNAMIC_ACTION_PATTERN(달리기/질주 계열)과
+ * 는 성격이 달라 별도 패턴/함수로 분리한다(그 태그는 "몸을 앞으로 숙이고 바람에 날리는"
+ * 식이라 춤에는 안 맞는 경우가 많다).
+ */
+const DANCE_GENRE_TAGS: Array<{ pattern: RegExp; en: string }> = [
+  {
+    pattern: /왈츠|활츠|waltz/i,
+    en: 'elegant ballroom waltz pose, partner dance hold with one arm raised, flowing gown swirling mid-turn, graceful spin, poised ballroom dancer posture',
+  },
+  {
+    pattern: /발레|ballet/i,
+    en: 'classical ballet pose, pointed toes en pointe, arms in ballet fifth position, graceful ballerina posture',
+  },
+  {
+    pattern: /탱고|tango/i,
+    en: 'dramatic tango pose, sharp partner embrace, extended leg line, intense passionate posture',
+  },
+  {
+    pattern: /살사|salsa/i,
+    en: 'salsa dance pose, hip movement mid-turn, dynamic partner dance footwork',
+  },
+  {
+    pattern: /플라멩코|flamenco/i,
+    en: 'flamenco dance pose, dramatic arm and hand flourish, sharp footwork stance, passionate posture',
+  },
+  {
+    pattern: /벨리\s*댄스|belly\s*dance/i,
+    en: 'belly dance pose, fluid hip movement, flowing arm gestures, ornate dance costume',
+  },
+  {
+    pattern: /브레이크\s*댄스|breakdance|비\s*보잉|b-?boying/i,
+    en: 'breakdance pose, dynamic acrobatic street dance freeze, energetic street dance stance',
+  },
+  {
+    pattern: /현대\s*무용|컨템포러리|contemporary\s*dance/i,
+    en: 'contemporary dance pose, expressive fluid body line, artistic modern dance movement',
+  },
+  {
+    pattern: /재즈\s*댄스|jazz\s*dance/i,
+    en: 'jazz dance pose, sharp dynamic body line, theatrical dance stance',
+  },
+  {
+    pattern: /케이팝|k-?pop\s*댄스|아이돌\s*댄스/i,
+    en: 'k-pop choreography dance pose, sharp synchronized dance move, confident performance stance',
+  },
+  {
+    pattern: /힙합|hip-?hop/i,
+    en: 'hip-hop dance pose, street dance stance with bent knees, sharp expressive arm movement',
+  },
+]
+
+const GENERIC_DANCE_PATTERN = /춤\s*추|춤춘다|춤을|댄스\s*를?\s*추|dancing|\bdance\b/i
+
+/** 춤 감지 — 장르가 명시돼 있으면 그 장르 전용 자세, 없으면 범용 댄스 자세 태그를 반환. */
+function resolveDanceTag(description: string): string {
+  const genre = DANCE_GENRE_TAGS.find((g) => g.pattern.test(description))
+  if (genre) return genre.en
+  if (GENERIC_DANCE_PATTERN.test(description)) {
+    return 'dynamic dance pose, mid-dance movement, expressive body line, graceful arm gesture, NOT a static standing portrait, NOT stiff arms at sides'
+  }
+  return ''
+}
+
+function isDanceRevision(description: string): boolean {
+  return GENERIC_DANCE_PATTERN.test(description) || DANCE_GENRE_TAGS.some((g) => g.pattern.test(description))
+}
+
 /** 화보 네거티브 — 속옷·누드·거울 요청에 맞춰 이탈 억제 */
 export function buildFashionNegativePrompt(description: string): string {
   const extras: string[] = []
@@ -267,6 +340,13 @@ export function buildFashionNegativePrompt(description: string): string {
   if (DYNAMIC_ACTION_PATTERN.test(description)) {
     extras.push(
       'static pose, standing still, calm posed portrait, looking back over the shoulder, relaxed stationary stance, studio glamour pose without motion, frozen with no motion blur',
+    )
+  }
+  // 춤 요청인데 팔이 몸에 붙은 뻣뻣한 정자세로 새는 실패가 실측으로 반복 확인됨 — 위
+  // DYNAMIC_ACTION_PATTERN(달리기/질주 계열) negative와는 별도로 춤 전용 억제를 건다.
+  if (isDanceRevision(description)) {
+    extras.push(
+      'static standing pose, stiff arms at sides, arms glued to body, calm posed portrait, awkward frozen unnatural dance pose, motionless stance',
     )
   }
   return extras.length ? `${base}, ${extras.join(', ')}` : base
@@ -454,7 +534,9 @@ function amplifyClothingAndScene(description: string): string {
   }
   const isLaceLingerie = !nude && /란제리|레이스\s*브래지|lingerie|lace\s*bra|thong|탠가/i.test(description)
   if (isLaceLingerie) {
-    extras.push('wearing a lace lingerie set (bra and panties), sheer lace fabric visible')
+    // 거울/야경/흰배경 같은 다른 "장면 정의" 태그와 한 문장에 자주 겹쳐서 amplify 예산을
+    // 같이 나눠 써야 하는 경우가 많다 — 의미 손실 없이 3단어를 줄인 짧은 버전을 쓴다.
+    extras.push('wearing lace lingerie (bra, panties), sheer lace fabric')
   } else if (wantsUnderwearLook(description)) {
     // wantsUnderwearLook은 "란제리/lingerie"도 함께 매칭하는 더 넓은 판정이라, 위 레이스
     // 태그와 동시에 걸리면 같은 내용을 두 번 말하며 예산을 낭비했다 — 더 구체적인 레이스
@@ -466,7 +548,9 @@ function amplifyClothingAndScene(description: string): string {
   // 같은 장식적 디테일(오블리크 앵글, 감상하는 시선, 자신감 포즈)은 이 함수 맨 뒤로
   // 옮겨서 다중 키워드가 겹치는 밀도 높은 요청에서도 배경 요소가 먼저 살아남게 한다.
   if (/거울|mirror/i.test(description)) {
-    extras.push('posed in front of a mirror, mirror visible in frame')
+    // "posed in front of... mirror visible in frame"(9단어)는 거울/야경/흰배경이 겹칠 때
+    // 예산을 많이 차지했다 — 같은 의미를 6단어로 줄인다.
+    extras.push('in front of a mirror, mirror visible')
   }
   const wantsCityOrNightHere = /도시|시티|어반|거리|야경|\burban\b|\bcity\b|\bstreet\b/i.test(description)
   const wantsNightHere = /야경|밤\s*풍경|저녁\s*풍경|night\s*view|night\s*skyline|nighttime/i.test(description)
@@ -477,9 +561,13 @@ function amplifyClothingAndScene(description: string): string {
   // 한 번에 못박는다. 거울과 마찬가지로 "장면을 정의하는" 핵심 요소라서 흰 배경 디테일
   // (덜 중요)보다 앞에 배치해 예산이 부족할 때 먼저 살아남게 한다.
   if (wantsNightHere) {
-    extras.push('nighttime city view through the window, dark sky with glowing city lights')
+    // 예전 문구(12단어: "nighttime city view through the window, dark sky with glowing
+    // city lights")는 란제리+거울+흰배경과 한 문장에 겹치면 amplify 예산 초과로 뒷부분
+    // ("dark sky..." 이후)이 통째로 잘려나가는 사고가 실측으로 확인됐다 — 같은 의미를
+    // 8단어로 줄여 겹침 상황에서도 끝까지 살아남게 한다.
+    extras.push('night city skyline through window, dark sky, city lights')
   } else if (wantsCityOrNightHere) {
-    extras.push('city background with buildings visible through the window, NOT a plain grey studio wall')
+    extras.push('city buildings visible through window, not grey studio wall')
   }
   if (/흰\s*배경|흰색\s*배경|백색\s*배경|white\s*background|클린\s*화이트/i.test(description)) {
     // "흰 배경 + 창밖 야경"처럼 실내는 화이트인데 창 너머는 어두운 밤인 조합을 요청했을 때,
@@ -487,8 +575,8 @@ function amplifyClothingAndScene(description: string): string {
     // 충돌해서 서로를 지워버리는 사고가 있었다 — 야경/도시가 함께 요청되면 그 문구만 뺀다.
     extras.push(
       wantsCityOrNightHere
-        ? 'white interior walls, NOT grey or beige'
-        : 'pure bright white seamless studio background, NOT grey, NOT beige, NOT dark backdrop',
+        ? 'white interior walls, not grey'
+        : 'pure white seamless studio background, not grey, not beige, not dark',
     )
   }
   if (/귀[^.]{0,30}(가려|보이지\s*않|안\s*보임|관찰되지\s*않|없다|없음)/.test(description)) {
@@ -529,6 +617,11 @@ function amplifyClothingAndScene(description: string): string {
       'dynamic mid-action pose captured in motion, body leaning forward into the movement, muscles visibly engaged and tensed, motion blur in the background suggesting speed, hair and loose fabric blown backward by the wind, dramatic low action-photography angle',
       'NOT a static standing pose, NOT a calm posed portrait, NOT looking back over the shoulder, NOT frozen mid-stride with no motion cues',
     )
+  }
+  // 춤 요청 — 장르가 있으면 그 장르 전용 자세, 없으면 범용 댄스 자세 태그.
+  const danceTag = resolveDanceTag(description)
+  if (danceTag) {
+    extras.push(danceTag)
   }
   // 태그 스타일로 이어붙일 수 있게 쉼표로만 구분한다("Hard constraints:" 같은 지시문 단어는
   // CLIP한테는 그냥 토큰 낭비라 뺀다 — CLIP은 문장을 "이해"하지 못하고 토큰 뭉치로만 본다).
@@ -576,6 +669,10 @@ function amplifyFreeScene(description: string): string {
   }
   if (/달리|뛰|레이스|runn?ing|race/i.test(description)) {
     extras.push('subjects in motion / running, dynamic body language')
+  }
+  const danceTag = resolveDanceTag(description)
+  if (danceTag) {
+    extras.push(danceTag)
   }
 
   // 종 고정 — 요청한 동물만, 다른 종으로 바꾸지 말 것
@@ -658,6 +755,7 @@ function amplifyFreeScene(description: string): string {
     /싸우|격투|축구|농구|야구|달리|뛰|soccer|football|fight|running|action|젖\s*을?\s*먹|수유|두\s*마리|엄마|새끼|아기/i.test(
       description,
     ) ||
+    isDanceRevision(description) ||
     (hasLion && hasTiger) ||
     hasMonkey
   if (isSceneShot) {
@@ -803,9 +901,12 @@ const SDXL_MAX_DESCRIPTION_WORDS = 60
  * description 예약분을 단계적으로 줄인다.
  */
 function resolveMinDescriptionWords(rawAmplifyWords: number): number {
-  if (rawAmplifyWords > 60) return 8
-  if (rawAmplifyWords > 40) return 12
-  if (rawAmplifyWords > 25) return 16
+  // 실측(란제리+거울+흰배경+야경 4개 겹침 = rawAmplify 40대 중반)으로 기존 ">40 → 12"
+  // 구간이 여전히 부족해서, 거울/야경 태그 자체가 amplify 안에서 중간에 잘리는 사고가
+  // 있었다 — 브래킷을 더 촘촘하고 공격적으로 나눠 amplify 쪽에 더 넉넉히 양보한다.
+  if (rawAmplifyWords > 55) return 6
+  if (rawAmplifyWords > 35) return 9
+  if (rawAmplifyWords > 22) return 12
   return SDXL_MIN_DESCRIPTION_WORDS
 }
 
@@ -968,6 +1069,9 @@ export function buildFreeNegativePrompt(description: string): string {
   }
   if (/젖\s*을?\s*먹|수유|breastfeed|nurs/i.test(description)) {
     extras.push('two identical adult faces, mirrored clone portrait, no infant')
+  }
+  if (isDanceRevision(description)) {
+    extras.push('static standing pose, stiff arms at sides, arms glued to body, motionless stance, awkward frozen unnatural dance pose')
   }
   return extras.length ? `${FREE_NEGATIVE_PROMPT}, ${extras.join(', ')}` : FREE_NEGATIVE_PROMPT
 }

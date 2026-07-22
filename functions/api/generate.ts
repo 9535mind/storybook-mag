@@ -9,7 +9,7 @@ import {
 } from '../lib/content-policy'
 import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, resolveFalImageSize } from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
-import { generateReplicateImage, resolveReplicateImageSize } from '../lib/replicate-client'
+import { generateFaceIdImage, generateReplicateImage, resolveReplicateImageSize } from '../lib/replicate-client'
 import {
   compileResponsiveFreePrompt,
   isRealWildlifeScene,
@@ -39,6 +39,11 @@ interface Env {
   REPLICATE_PRECISION_MODEL_NAME?: string
   REPLICATE_PRECISION_MODEL_VERSION?: string
 
+  // 얼굴 고정(InstantID) 전용 모델(선택) — 비워두면 zsxkib/instant-id(공개 모델) 사용.
+  REPLICATE_FACEID_MODEL_OWNER?: string
+  REPLICATE_FACEID_MODEL_NAME?: string
+  REPLICATE_FACEID_MODEL_VERSION?: string
+
   // 보조 엔진 (secondary / fallback) — fal.ai: Flux.2 Pro
   FAL_KEY?: string
   FAL_MODEL_ID?: string
@@ -67,7 +72,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const limited = await enforceRateLimit(env, 'generate', rateLimitIdentity(auth), 24, 3600)
     if (limited) return limited
 
-    let body: { description?: string; mood?: string; size?: string; mode?: string; precision?: boolean }
+    let body: {
+      description?: string
+      mood?: string
+      size?: string
+      mode?: string
+      precision?: boolean
+      /** 관리자 전용 — 저장해둔 얼굴 레퍼런스 사진으로 정체성을 고정해 생성(InstantID 경로). */
+      useFaceReference?: boolean
+    }
     try {
       body = await request.json()
     } catch {
@@ -170,6 +183,61 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const attempts: EngineAttempt[] = []
+
+    // 얼굴 고정(InstantID) 경로 — 관리자가 「내 얼굴 관리」에 저장해둔 얼굴 사진이 있고
+    // useFaceReference를 켰을 때만 시도한다. 텍스트 태그("Korean woman, attractive face")
+    // 만으로는 특정 인물을 재현할 수 없다는 한계를 우회하기 위한 별도 경로 — 순수 T2I보다
+    // 먼저 시도하고, 실패하면(모델 미설정·저장된 사진 없음 등) 기존 경로로 자연스럽게 폴백한다.
+    const wantsFaceId = mode === 'fashion' && Boolean(body.useFaceReference) && isAdminEmail(auth.user.email)
+    const tryFaceId = async () => {
+      if (!env.REPLICATE_API_TOKEN?.trim()) {
+        attempts.push({ engine: 'faceid', error: 'replicate_token_not_configured' })
+        return null
+      }
+      if (!env.DB) {
+        attempts.push({ engine: 'faceid', error: 'storage_not_configured' })
+        return null
+      }
+      try {
+        const row = await env.DB.prepare('SELECT value FROM app_settings WHERE key = ? LIMIT 1')
+          .bind('face_reference_url')
+          .first<{ value: string }>()
+        const faceImageUrl = row?.value?.trim()
+        if (!faceImageUrl) {
+          attempts.push({ engine: 'faceid', error: 'face_reference_not_set' })
+          return null
+        }
+        const modelOwner = env.REPLICATE_FACEID_MODEL_OWNER?.trim() || 'zsxkib'
+        const modelName = env.REPLICATE_FACEID_MODEL_NAME?.trim() || 'instant-id'
+        const { imageUrl } = await generateFaceIdImage({
+          apiToken: env.REPLICATE_API_TOKEN,
+          modelOwner,
+          modelName,
+          modelVersion: env.REPLICATE_FACEID_MODEL_VERSION,
+          faceImageUrl,
+          prompt,
+          negativePrompt,
+          ...resolveReplicateImageSize(size),
+        })
+        return jsonResponse(
+          {
+            ok: true,
+            imageUrl,
+            prompt,
+            mode,
+            scene: sceneMeta,
+            engine: 'faceid',
+            engineLabel: `Replicate · ${modelOwner}/${modelName} (내 얼굴 고정)`,
+            faceReferenceUsed: true,
+          },
+          200,
+        )
+      } catch (error) {
+        attempts.push({ engine: 'faceid', error: error instanceof Error ? error.message : 'unknown_error' })
+        return null
+      }
+    }
+
     // wantsNudeOrUndress로 조사(을/를 등) 붙은 자연스러운 한국어까지 포함해서 판별한다 —
     // 예전엔 이 정규식이 \s*(공백만)라 "속옷을 제거해줘"처럼 흔한 말투를 놓쳐서, fal(엄격한
     // 콘텐츠 검열)로 먼저 시도했다가 거부당하고서야 Replicate로 넘어가는 낭비가 있었다.
@@ -292,6 +360,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         })
         return null
       }
+    }
+
+    // 얼굴 고정을 요청했으면 다른 어떤 엔진보다 먼저 시도한다 — 실패해도(모델 미설정 등)
+    // 아래 기존 분기(야생동물/일반)로 조용히 폴백해서 생성 자체가 막히지 않게 한다.
+    if (wantsFaceId) {
+      const faceIdRes = await tryFaceId()
+      if (faceIdRes) return faceIdRes
     }
 
     // 실제 동물 장면: Flux가 지시 따르기에 유리 → fal 우선, Juggernaut는 보조

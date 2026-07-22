@@ -1,5 +1,5 @@
 import { requireAuth } from '../lib/auth'
-import { uploadDataUrlToFal } from '../lib/fal-client'
+import { FACE_REFERENCE_UPLOAD_TTL_SECONDS, uploadDataUrlToFal } from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 
 interface Env {
@@ -34,7 +34,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonResponse({ ok: false, error: 'upload_engine_not_configured' }, 500)
   }
 
-  let body: { dataUrl?: string }
+  let body: { dataUrl?: string; purpose?: string }
   try {
     body = await request.json()
   } catch {
@@ -55,10 +55,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const ext = /^data:image\/png/i.test(dataUrl) ? 'png' : /^data:image\/webp/i.test(dataUrl) ? 'webp' : 'jpg'
 
+  // 얼굴 참조 사진은 계속 재사용해야 하니 더 긴 보관 기한(1년)을 준다.
+  // 그 외(임시 편집용 원본, 마스크 등)는 fal-client의 기본값(30일)을 그대로 쓴다.
+  const lifecycleSeconds = body.purpose === 'face-reference' ? FACE_REFERENCE_UPLOAD_TTL_SECONDS : undefined
+
   try {
     const imageUrl = await uploadDataUrlToFal(env.FAL_KEY, dataUrl, `upload-${Date.now()}.${ext}`, {
       maxBytes: MAX_UPLOAD_BYTES,
       tooLargeError: 'image_too_large',
+      lifecycleSeconds,
     })
     return jsonResponse({ ok: true, imageUrl }, 200)
   } catch (error) {

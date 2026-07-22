@@ -47,6 +47,15 @@ const moodField = document.getElementById('mood')
 const sizeField = document.getElementById('size')
 const precisionModeField = document.getElementById('precision-mode')
 const genModeHint = document.getElementById('gen-mode-hint')
+const faceReferencePanel = document.getElementById('face-reference-panel')
+const faceReferenceUploadButton = document.getElementById('face-reference-upload-button')
+const faceReferenceInput = document.getElementById('face-reference-input')
+const faceReferencePreviewWrap = document.getElementById('face-reference-preview-wrap')
+const faceReferencePreview = document.getElementById('face-reference-preview')
+const faceReferenceDeleteButton = document.getElementById('face-reference-delete-button')
+const faceReferenceStatus = document.getElementById('face-reference-status')
+const useFaceReferenceRow = document.getElementById('use-face-reference-row')
+const useFaceReferenceField = document.getElementById('use-face-reference')
 let scenePreviewTimer = null
 let scenePreviewSeq = 0
 
@@ -177,12 +186,27 @@ function syncAdminModeVisibility() {
   if (descriptionEl) {
     descriptionEl.maxLength = admin ? 3000 : 1200
   }
-  const descriptionHintEl = document.getElementById('description-limit-hint')
-  if (descriptionHintEl) {
-    descriptionHintEl.textContent = ''
-    descriptionHintEl.hidden = true
-  }
+  updateDescriptionCounter()
 }
+
+// 실시간 글자수 카운터 — "300자 허용이 실제로 몇 단어로 반영되는지 모르겠다"는 혼란을 줄이려고,
+// 입력창 바로 아래 항상 "n / 한도자"를 보여준다(GStory류 "0/2500" 패턴). 한도에 거의 닿으면
+// 빨간색으로 경고한다. 실제 이미지 생성 시엔 이후 번역·태그압축으로 더 줄어들 수 있다는 안내를
+// 덧붙인다 — 원문 글자수 ≠ 이미지 모델에 실제로 들어가는 단어수라는 착각을 막기 위해서다.
+function updateDescriptionCounter() {
+  const hintEl = document.getElementById('description-limit-hint')
+  if (!hintEl || !descriptionField) return
+  const max = Number(descriptionField.maxLength) > 0 ? Number(descriptionField.maxLength) : 1200
+  const len = (descriptionField.value || '').length
+  const nearLimit = len >= max * 0.9
+  hintEl.textContent =
+    len > 0
+      ? `${len} / ${max}자 · 실제 이미지 생성에는 이후 번역·압축을 거쳐 더 줄어들어요`
+      : `0 / ${max}자`
+  hintEl.hidden = false
+  hintEl.classList.toggle('form__hint--error', nearLimit)
+}
+descriptionField?.addEventListener('input', updateDescriptionCounter)
 const generateButton = document.getElementById('generate-button')
 const formStatus = document.getElementById('form-status')
 
@@ -194,6 +218,10 @@ const reviewBadge = document.getElementById('review-badge')
 const compareBadge = document.getElementById('compare-badge')
 const compareToggleButtons = document.querySelectorAll('.compare-toggle-btn')
 const compareRevertButtons = document.querySelectorAll('.compare-revert-btn')
+const removeBgButtons = [
+  document.getElementById('remove-bg-button'),
+  document.getElementById('remove-bg-button-accepted'),
+].filter(Boolean)
 const reviewPanel = document.getElementById('review-panel')
 const revisePanel = document.getElementById('revise-panel')
 const acceptedActions = document.getElementById('accepted-actions')
@@ -1225,6 +1253,70 @@ function revertToPreviousSnapshot() {
 
 compareToggleButtons.forEach((btn) => btn.addEventListener('click', toggleComparePrevious))
 compareRevertButtons.forEach((btn) => btn.addEventListener('click', revertToPreviousSnapshot))
+
+/** 지금 화면에 떠 있는 결과 이미지의 배경을 제거해 투명 PNG로 바꿔서 새 결과로 반영한다.
+ * 원본은 「이전과 비교」로 그대로 다시 볼 수 있다(showResult가 자동으로 스냅샷을 남김). */
+async function removeBackgroundFromCurrentResult() {
+  if (!currentResult.imageUrl) return
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+  if (comparingPrevious) exitComparePreview()
+
+  removeBgButtons.forEach((btn) => {
+    if (btn) btn.disabled = true
+  })
+  const stopTimer = startProgressTimer(setFormStatus, '배경을 제거하고 있어요…')
+  try {
+    const response = await fetch('/api/remove-background', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ imageUrl: currentResult.imageUrl }),
+    })
+    const data = await response.json().catch(() => ({}))
+    stopTimer()
+
+    if (response.status === 401) {
+      clearAllAuth()
+      showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return
+    }
+    if (response.status === 429) {
+      setFormStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
+      return
+    }
+    if (!data.ok || !data.imageUrl) {
+      setFormStatus(
+        data.error === 'fal_key_not_configured'
+          ? '배경 제거 기능이 서버에 아직 설정되지 않았어요 (FAL_KEY 필요).'
+          : `배경 제거에 실패했어요: ${data.message || data.error || '알 수 없는 오류'}`,
+        true,
+      )
+      return
+    }
+
+    showResult(data.imageUrl, currentResult.engineLabel, currentResult.fallbackUsed, {
+      size: currentResult.size,
+      itemId: currentResult.itemId,
+      prompt: currentResult.prompt,
+      accepted: currentResult.accepted,
+      mood: currentResult.mood,
+      engine: currentResult.engine,
+      genMode: currentResult.genMode,
+      reviseRound: currentResult.reviseRound,
+    })
+    setFormStatus('배경을 제거했어요 (투명 PNG). 「이전과 비교」로 원본과 비교할 수 있어요.', false)
+  } catch (error) {
+    setFormStatus(`배경 제거에 실패했어요: ${error instanceof Error ? error.message : String(error)}`, true)
+  } finally {
+    stopTimer()
+    removeBgButtons.forEach((btn) => {
+      if (btn) btn.disabled = false
+    })
+  }
+}
+removeBgButtons.forEach((btn) => btn.addEventListener('click', removeBackgroundFromCurrentResult))
 
 /** 이미지 URL이 만료되기 전에 서버로 바이트를 읽어 메모리에 보관 */
 async function cacheImageForAnimate(imageUrl) {
@@ -2477,6 +2569,11 @@ form.addEventListener('submit', async (event) => {
   event.preventDefault()
   const description = composeDescription()
   if (!description) {
+    // 예전엔 여기서 아무 메시지 없이 guideWhoField에 포커스만 주고 조용히 끝났다 —
+    // 사용자가 스크롤이 많이 내려가 있으면(예: 화보 스튜디오 하단) 포커스 이동이 화면 밖이라
+    // "버튼을 눌러도 아무 반응이 없다"는 혼란을 낳았다. 이제 눈에 보이는 에러도 함께 띄운다.
+    setFormStatus('캐릭터 / 컨셉 설명(또는 위 가이드 칸)을 입력한 뒤 다시 눌러 주세요.', true)
+    guideWhoField?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     guideWhoField?.focus()
     return
   }
@@ -2503,6 +2600,7 @@ form.addEventListener('submit', async (event) => {
       size: sizeField.value,
       mode: getGenMode(),
       precision: Boolean(precisionModeField?.checked),
+      useFaceReference: Boolean(useFaceReferenceField?.checked),
     })
 
     stopTimer()
@@ -2710,6 +2808,131 @@ loadImageInput?.addEventListener('change', () => {
   const file = loadImageInput.files?.[0]
   if (file) loadImageFromFile(file)
 })
+
+// 「내 얼굴 관리」 — InstantID(얼굴 임베딩) 경로용 얼굴 레퍼런스 사진 등록/삭제.
+// 관리자 · 화보 모드에서만 노출된다(syncGenModeUi에서 표시 여부 결정).
+let faceReferenceLoaded = false
+
+function setFaceReferenceStatus(message, isError) {
+  if (!faceReferenceStatus) return
+  faceReferenceStatus.hidden = !message
+  faceReferenceStatus.textContent = message || ''
+  faceReferenceStatus.classList.toggle('form__hint--error', Boolean(isError))
+}
+
+function renderFaceReferenceState(imageUrl) {
+  if (faceReferencePreview && faceReferencePreviewWrap) {
+    if (imageUrl) {
+      faceReferencePreview.src = imageUrl
+      faceReferencePreviewWrap.hidden = false
+    } else {
+      faceReferencePreview.removeAttribute('src')
+      faceReferencePreviewWrap.hidden = true
+    }
+  }
+  if (useFaceReferenceRow) {
+    useFaceReferenceRow.hidden = !imageUrl || Boolean(faceReferencePanel?.hidden)
+  }
+  if (!imageUrl && useFaceReferenceField) {
+    useFaceReferenceField.checked = false
+  }
+}
+
+async function loadFaceReferenceState() {
+  if (!isAdminUser() || !isLoggedIn()) return
+  faceReferenceLoaded = true
+  try {
+    const response = await fetch('/api/face-reference', { headers: authHeaders() })
+    const data = await response.json().catch(() => ({}))
+    if (data.ok) renderFaceReferenceState(data.imageUrl || null)
+  } catch {
+    /* 조용히 무시 — 못 채워도 생성 자체는 막지 않음 */
+  }
+}
+
+async function uploadFaceReferencePhoto(file) {
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    setFaceReferenceStatus('이미지 파일만 등록할 수 있어요 (PNG/JPEG/WEBP).', true)
+    return
+  }
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+
+  if (faceReferenceUploadButton) faceReferenceUploadButton.disabled = true
+  setFaceReferenceStatus('얼굴 사진을 등록하고 있어요…', false)
+  try {
+    const dataUrl = await prepareImageDataUrl(file)
+    const uploadRes = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ dataUrl, purpose: 'face-reference' }),
+    })
+    const uploadData = await uploadRes.json().catch(() => ({}))
+    if (uploadRes.status === 401) {
+      clearAllAuth()
+      showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return
+    }
+    if (!uploadData.ok || !uploadData.imageUrl) {
+      setFaceReferenceStatus(
+        `사진 업로드에 실패했어요: ${uploadData.message || uploadData.error || '알 수 없는 오류'}`,
+        true,
+      )
+      return
+    }
+
+    const saveRes = await fetch('/api/face-reference', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ imageUrl: uploadData.imageUrl }),
+    })
+    const saveData = await saveRes.json().catch(() => ({}))
+    if (!saveData.ok) {
+      setFaceReferenceStatus(
+        `얼굴 사진 저장에 실패했어요: ${saveData.message || saveData.error || '알 수 없는 오류'}`,
+        true,
+      )
+      return
+    }
+
+    renderFaceReferenceState(saveData.imageUrl)
+    setFaceReferenceStatus('얼굴 사진을 등록했어요. 「내 얼굴로 생성」을 켜면 이 얼굴을 유지한 채 생성돼요.', false)
+  } catch (error) {
+    setFaceReferenceStatus(`등록하지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
+  } finally {
+    if (faceReferenceUploadButton) faceReferenceUploadButton.disabled = false
+    if (faceReferenceInput) faceReferenceInput.value = ''
+  }
+}
+
+async function deleteFaceReferencePhoto() {
+  if (!isLoggedIn()) return
+  if (faceReferenceDeleteButton) faceReferenceDeleteButton.disabled = true
+  setFaceReferenceStatus('삭제하고 있어요…', false)
+  try {
+    const response = await fetch('/api/face-reference', { method: 'DELETE', headers: authHeaders() })
+    const data = await response.json().catch(() => ({}))
+    if (!data.ok) {
+      setFaceReferenceStatus(`삭제에 실패했어요: ${data.message || data.error || '알 수 없는 오류'}`, true)
+      return
+    }
+    renderFaceReferenceState(null)
+    setFaceReferenceStatus('등록한 얼굴 사진을 삭제했어요.', false)
+  } catch (error) {
+    setFaceReferenceStatus(`삭제하지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
+  } finally {
+    if (faceReferenceDeleteButton) faceReferenceDeleteButton.disabled = false
+  }
+}
+
+faceReferenceUploadButton?.addEventListener('click', () => faceReferenceInput?.click())
+faceReferenceInput?.addEventListener('change', () => {
+  const file = faceReferenceInput.files?.[0]
+  if (file) uploadFaceReferencePhoto(file)
+})
+faceReferenceDeleteButton?.addEventListener('click', () => deleteFaceReferencePhoto())
 
 // 화보/일러스트 스튜디오 화면에서 Ctrl+V로 사진을 붙여넣으면 바로 불러온다.
 // 클립보드에 이미지가 없으면(텍스트만 있으면) 아무것도 가로채지 않고 원래 붙여넣기 동작을 둔다.
@@ -3305,6 +3528,16 @@ function syncGenModeUi() {
   if (sizeField && !sizeField.dataset.userPicked) {
     sizeField.value = free ? 'landscape' : 'portrait'
   }
+
+  // 「내 얼굴 관리」 — 관리자 · 화보 모드에서만 노출. InstantID로 얼굴을 유지한 채 생성한다.
+  const showFaceReference = admin && !free
+  if (faceReferencePanel) faceReferencePanel.hidden = !showFaceReference
+  if (useFaceReferenceRow) {
+    useFaceReferenceRow.hidden = !showFaceReference || !faceReferencePreview?.getAttribute('src')
+  }
+  if (showFaceReference && !faceReferenceLoaded) {
+    loadFaceReferenceState()
+  }
 }
 sizeField?.addEventListener('change', () => {
   if (sizeField) sizeField.dataset.userPicked = '1'
@@ -3332,6 +3565,7 @@ document.querySelectorAll('[data-app-area]').forEach((btn) => {
 })
 // bootAuth → showApp 에서 syncAppAreaUi 호출.
 syncGenModeUi()
+updateDescriptionCounter()
 
 newShootHeaderButton.addEventListener('click', startNewShoot)
 document.getElementById('app-home-button')?.addEventListener('click', () => setAppArea('studio'))

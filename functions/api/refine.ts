@@ -80,13 +80,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const mode = body.mode === 'region' ? 'region' : 'text'
-  // 클라이언트가 보낸 genMode를 그대로 신뢰한다(generate.ts와 동일한 패턴).
-  // 예전엔 여기서 무조건 'free'로 강제해서, 화보(관리자) 모드에서 "귀걸이 추가" 같은
-  // 작은 텍스트 수정도 전부 자유 일러스트용 장면 재생성(LLM 기반 동물/사물 재해석)으로
-  // 흘러갔다. 그 결과 이미지가 전혀 "수정"되지 않고 완전히 다른 장면(심지어 사자 같은
-  // 동물)으로 재생성되는 사고가 났다. 화보 모드는 아래의 화보 전용 img2img/재생성 경로를
-  // 타야 하므로, genMode='fashion'이면 자유 장면 재생성 블록을 건너뛰게 한다.
-  const genMode: 'free' | 'fashion' = body.genMode === 'fashion' ? 'fashion' : 'free'
+  // 화보 모드는 아래의 화보 전용 img2img/재생성 경로를 타야 하므로, genMode='fashion'이면
+  // 자유 장면 재생성 블록을 건너뛰게 한다(예전엔 여기서 무조건 'free'로 강제해서, 화보
+  // (관리자) 모드에서 "귀걸이 추가" 같은 작은 텍스트 수정도 전부 자유 일러스트용 장면
+  // 재생성(LLM 기반 동물/사물 재해석)으로 흘러가 이미지가 전혀 "수정"되지 않고 완전히
+  // 다른 장면(심지어 사자 같은 동물)으로 재생성되는 사고가 났었다).
+  //
+  // 단, genMode는 반드시 서버에서 관리자 여부로 재검증해야 한다 — generate.ts는 이미
+  // isAdminEmail로 비관리자의 'fashion' 접근을 막는데(그 커밋 주석: "/api/generate를
+  // 직접 호출하면 비관리자도 'fashion'... 접근할 수 있었다"), 이 파일은 그 검증 없이
+  // body.genMode를 그대로 신뢰하고 있었다 — 즉 SOLO_ADMIN_ONLY=0 환경에서는 비관리자가
+  // /api/refine을 직접 호출해 화보(성인) 파이프라인·긴 프롬프트 예산을 탈 수 있는
+  // 비대칭 구멍이었다. generate.ts와 동일하게 여기서도 막는다.
+  const genMode: 'free' | 'fashion' =
+    body.genMode === 'fashion' && isAdminEmail(auth.user.email) ? 'fashion' : 'free'
   const imageUrl = (body.imageUrl ?? '').trim()
   const baseDescription = polishKoreanPromptText(body.baseDescription ?? '')
   const revision = polishKoreanPromptText(body.revision ?? '')

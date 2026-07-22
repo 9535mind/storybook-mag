@@ -286,6 +286,26 @@
           <span>정밀 모드</span>
         </label>
 
+        <!-- 관리자 · 화보 모드 전용. InstantID(얼굴 임베딩) 경로로 등록된 얼굴 사진의 정체성을
+             유지한 채 생성한다 — 텍스트 태그만으로는 특정 인물을 재현할 수 없다는 한계를 우회. -->
+        <div id="face-reference-panel" class="face-reference-panel" hidden>
+          <div class="face-reference-panel__head">
+            <span class="form__label">내 얼굴 관리</span>
+            <button id="face-reference-upload-button" class="ai-help-btn" type="button">사진 등록</button>
+            <input id="face-reference-input" class="load-image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          </div>
+          <div id="face-reference-preview-wrap" class="face-reference-panel__preview" hidden>
+            <img id="face-reference-preview" class="face-reference-panel__thumb" alt="등록된 얼굴 레퍼런스 사진" />
+            <button id="face-reference-delete-button" class="ai-help-btn" type="button">삭제</button>
+          </div>
+          <p id="face-reference-status" class="form__hint" hidden></p>
+        </div>
+
+        <label class="form__checkbox-row" for="use-face-reference" id="use-face-reference-row" hidden>
+          <input id="use-face-reference" type="checkbox" />
+          <span>내 얼굴로 생성 (등록된 사진의 얼굴을 유지)</span>
+        </label>
+
         <button id="generate-button" class="form__submit" type="submit">이미지 생성</button>
 
         <p id="form-status" class="form__status" hidden></p>
@@ -315,6 +335,7 @@
           <button id="compare-toggle-button" class="review-panel__secondary compare-toggle-btn" type="button" disabled>이전과 비교</button>
           <button id="compare-revert-button" class="review-panel__secondary compare-revert-btn" type="button" hidden>이 버전에서 다시 수정</button>
           <button id="revise-toggle-button" class="review-panel__secondary" type="button">1차 수정</button>
+          <button id="remove-bg-button" class="review-panel__secondary" type="button">배경 제거</button>
           <button id="accept-button" class="form__submit" type="button">수용하기</button>
         </div>
 
@@ -370,6 +391,7 @@
         <button id="compare-toggle-button-accepted" class="review-panel__secondary compare-toggle-btn" type="button" disabled>이전과 비교</button>
         <button id="compare-revert-button-accepted" class="review-panel__secondary compare-revert-btn" type="button" hidden>이 버전에서 다시 수정</button>
         <button id="revise-again-button" class="review-panel__secondary" type="button">1차 수정</button>
+        <button id="remove-bg-button-accepted" class="review-panel__secondary" type="button">배경 제거</button>
         <button id="move-gallery-button" class="review-panel__secondary" type="button" hidden></button>
         <a id="result-download" class="result__download" download="fashion-magazine.png">다운로드</a>
       </div>
