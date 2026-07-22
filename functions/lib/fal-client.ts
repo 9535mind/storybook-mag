@@ -358,6 +358,37 @@ export async function uploadDataUrlToFal(
   return fileUrl
 }
 
+/**
+ * fal CDN 파일을 "삭제 즉시 완전 제거"에 가깝게 만든다.
+ *
+ * fal에는 업로드한 원본 파일을 바이트 단위로 지우는 공개 API가 없다(생성 결과물용
+ * request-payload 삭제 API는 입력 파일까지는 안 지운다고 문서에 명시돼 있음). 대신
+ * File ACL을 `hide`로 바꾸면 그 순간부터 URL을 아는 사람이 요청해도 "존재하지 않는
+ * 파일"처럼 404 처리된다 — 만료 기한(30일/1년)을 기다릴 필요 없이 즉시 접근이 끊긴다.
+ * 우리 쪽 DB 참조 삭제와 함께 호출하면 "삭제 = 더 이상 아무도 못 봄"에 가장 가깝다.
+ */
+export async function revokeFalFileAccess(falKey: string, fileUrl: string): Promise<void> {
+  const url = fileUrl.trim()
+  if (!url) return
+
+  const response = await fetchWithTimeout(
+    `https://api.fal.ai/v1/storage/files/acl?url=${encodeURIComponent(url)}`,
+    {
+      method: 'PUT',
+      headers: {
+        Authorization: `Key ${falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ default: 'hide' }),
+    },
+    10_000,
+  )
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '')
+    throw new Error(`fal_acl_revoke_failed:${response.status}:${detail.slice(0, 200)}`)
+  }
+}
+
 /** 텍스트 수정(img2img) — 원본을 약하게만 고쳐 인물·구도를 유지한다. */
 export async function refineFalImageToImage(options: {
   falKey: string

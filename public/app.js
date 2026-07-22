@@ -2919,7 +2919,14 @@ async function deleteFaceReferencePhoto() {
       return
     }
     renderFaceReferenceState(null)
-    setFaceReferenceStatus('등록한 얼굴 사진을 삭제했어요.', false)
+    if (data.remoteRevoked) {
+      setFaceReferenceStatus('등록한 얼굴 사진을 삭제했어요. (저장소 파일 접근도 즉시 차단됨)', false)
+    } else {
+      setFaceReferenceStatus(
+        '앱에서는 삭제됐지만, 저장소 접근 차단은 실패했어요. 다시 눌러서 한 번 더 시도해 주세요.',
+        true,
+      )
+    }
   } catch (error) {
     setFaceReferenceStatus(`삭제하지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
   } finally {

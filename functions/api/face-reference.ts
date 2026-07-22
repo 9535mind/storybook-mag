@@ -1,10 +1,12 @@
 import { isAdminEmail, requireAuth, type AuthUser } from '../lib/auth'
+import { revokeFalFileAccess } from '../lib/fal-client'
 import { mediaUrlError } from '../lib/media-url'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
+  FAL_KEY?: string
 }
 
 // SOLO_ADMIN_ONLY(혼자 쓰는 개인 앱) 전제라 유저별로 나눌 필요 없이 전역 키 하나로 저장한다.
@@ -112,8 +114,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   try {
     await ensureSettingsTable(env.DB)
+    const previousUrl = await getSetting(env.DB, FACE_REFERENCE_URL_KEY)
     await setSetting(env.DB, FACE_REFERENCE_URL_KEY, imageUrl)
     await setSetting(env.DB, FACE_REFERENCE_LABEL_KEY, label)
+
+    // 새 사진으로 교체된 경우, 옛 사진이 fal 서버에 참조 없이 그대로 남지 않도록 즉시 접근을 끊는다.
+    if (previousUrl && previousUrl !== imageUrl && env.FAL_KEY?.trim()) {
+      try {
+        await revokeFalFileAccess(env.FAL_KEY, previousUrl)
+      } catch {
+        /* 옛 사진 접근 차단 실패는 새 등록 자체를 막을 이유가 아니므로 조용히 무시 */
+      }
+    }
+
     return jsonResponse({ ok: true, imageUrl, label }, 200)
   } catch (error) {
     return jsonResponse(
@@ -123,7 +136,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 }
 
-/** 얼굴 레퍼런스 삭제 — 이후 생성은 다시 일반(얼굴 미고정) 경로로 돌아간다. */
+/**
+ * 얼굴 레퍼런스 삭제 — 이후 생성은 다시 일반(얼굴 미고정) 경로로 돌아간다.
+ *
+ * 우리 DB 참조만 지우면 fal 서버엔 파일이 그대로 남아 만료 기한(1년)까지 URL을 아는
+ * 누구나 접근 가능한 상태가 된다. 그래서 삭제 시 fal File ACL을 `hide`로 바꿔 즉시
+ * 접근을 끊는다(revokeFalFileAccess) — 이게 "삭제 = 그 순간 완전히 제거"에 가장 가깝다.
+ * fal 쪽 호출이 실패해도(네트워크 문제 등) 우리 DB 참조는 반드시 지우고, 실패 사실은
+ * 응답에 남겨서 클라이언트가 사용자에게 정직하게 알릴 수 있게 한다.
+ */
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
   const { request, env } = context
   const auth = await requireAdmin(request, env)
@@ -132,10 +153,24 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
 
   try {
     await ensureSettingsTable(env.DB)
+    const existingUrl = await getSetting(env.DB, FACE_REFERENCE_URL_KEY)
+
+    let remoteRevoked = false
+    let remoteRevokeError: string | null = null
+    if (existingUrl && env.FAL_KEY?.trim()) {
+      try {
+        await revokeFalFileAccess(env.FAL_KEY, existingUrl)
+        remoteRevoked = true
+      } catch (error) {
+        remoteRevokeError = error instanceof Error ? error.message : 'unknown'
+      }
+    }
+
     await env.DB.prepare('DELETE FROM app_settings WHERE key IN (?, ?)')
       .bind(FACE_REFERENCE_URL_KEY, FACE_REFERENCE_LABEL_KEY)
       .run()
-    return jsonResponse({ ok: true }, 200)
+
+    return jsonResponse({ ok: true, remoteRevoked, remoteRevokeError }, 200)
   } catch (error) {
     return jsonResponse(
       { ok: false, error: 'face_reference_delete_failed', message: error instanceof Error ? error.message : 'unknown' },
