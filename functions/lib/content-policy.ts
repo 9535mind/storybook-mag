@@ -226,12 +226,28 @@ export function buildFashionNegativePrompt(description: string): string {
       'white dress shirt, collared blouse, button-up shirt, sweater, cardigan, grey robe',
     )
   }
-  if (/거울|mirror/i.test(description)) {
+  // 이 조건은 반드시 "거울을 요청하지 않았을 때"만 걸려야 한다. amplifyClothingAndScene은
+  // 거울이 언급되면 정반대로 "mirror or vanity glass readable in the scene, NOT a plain
+  // empty studio without a mirror"를 양성 프롬프트에 넣는다 — 예전엔 이 negative가 조건을
+  // 뒤집지 않고 그대로 "거울 언급 시" 걸려서, 사용자가 거울 장면을 요청해도 양성/음성
+  // 프롬프트가 서로 정반대를 강요하는 자기모순이 있었다(실측: 거울·창밖 야경 요청이 거의
+  // 항상 무시되고 텅 빈 스튜디오만 나옴). 거울을 요청하지 않았을 때만 "거울 헐루시네이션
+  // 방지" 용도로 이 negative를 건다.
+  if (!/거울|mirror/i.test(description)) {
     extras.push('no mirror, missing mirror, plain seamless studio mugshot without mirror')
   }
   // 흰 배경을 요청했는데도 회색/베이지로 새는 사례가 실측으로 반복 확인됨 — 색상 이탈을 직접 억제.
   if (/흰\s*배경|흰색\s*배경|백색\s*배경|white\s*background|클린\s*화이트/i.test(description)) {
-    extras.push('grey background, gray background, beige background, tan background, brown background, dark background, colored background, off-white background, cream background')
+    // "흰 배경의 스튜디오 + 창밖 도시 야경"처럼 실내는 화이트인데 창 너머로 어두운 밤 도시가
+    // 보이는 조합은 실제로 흔한 사진 구성인데, "dark background/colored background"를 무조건
+    // 넣으면 amplifyClothingAndScene이 넣는 "도시 배경·거리 조명" 양성 지시와 충돌해서 창밖
+    // 야경 자체가 억제되는 사고가 있었다. 도시/야경 요청이 함께 있으면 그 두 항목만 뺀다
+    // (벽 색이 회색/베이지로 새는 건 여전히 막되, 창 너머 어두운 야경은 허용).
+    const wantsCityOrNight = /도시|시티|어반|거리|야경|urban|city|street/i.test(description)
+    const whiteBgExtras = wantsCityOrNight
+      ? 'grey background, gray background, beige background, tan background, brown background, off-white background, cream background'
+      : 'grey background, gray background, beige background, tan background, brown background, dark background, colored background, off-white background, cream background'
+    extras.push(whiteBgExtras)
   }
   // "한쪽 귀만 보이고 반대쪽은 안 보임" 같은 좌우 비대칭 액세서리 묘사가 실측에서 양쪽 다 보이는
   // 대칭형으로 뭉개지는 경우가 반복 확인됨 — 대칭 귀걸이를 직접 억제.
