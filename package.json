@@ -8,7 +8,8 @@
     "deploy": "wrangler pages deploy public --project-name=storymag --branch=main",
     "db:migrate": "wrangler d1 execute storymag-auth --remote --file=migrations/0001_auth.sql",
     "db:migrate:rate": "wrangler d1 execute storymag-auth --remote --file=migrations/0002_rate_limits.sql",
-    "db:migrate:settings": "wrangler d1 execute storymag-auth --remote --file=migrations/0003_app_settings.sql"
+    "db:migrate:settings": "wrangler d1 execute storymag-auth --remote --file=migrations/0003_app_settings.sql",
+    "r2:cors": "wrangler r2 bucket cors set storymag-media --file=r2-cors-policy.json --force"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"

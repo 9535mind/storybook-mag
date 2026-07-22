@@ -1,0 +1,14 @@
+{
+  "_comment": "storymag-media R2 버킷의 CORS 정책. wrangler.toml에는 CORS 설정이 포함되지 않으므로(R2 API로 별도 관리) 여기 기록해 재현 가능하게 한다. 적용: `wrangler r2 bucket cors set storymag-media --file r2-cors-policy.json --force`. 이미 생성한 이미지·영상만 담는 공개 버킷이라 모든 오리진에 GET/HEAD를 허용해도 안전하다 (BGM 합성이 fetch()로 영상을 바이트째 받아오고, 이미지 비교 기능이 canvas로 픽셀을 읽기 때문에 CORS 허용이 필요함).",
+  "rules": [
+    {
+      "id": "public-media-read",
+      "allowed": {
+        "origins": ["*"],
+        "methods": ["GET", "HEAD"],
+        "headers": ["*"]
+      },
+      "maxAgeSeconds": 86400
+    }
+  ]
+}
