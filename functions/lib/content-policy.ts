@@ -367,10 +367,21 @@ function amplifyClothingAndScene(description: string): string {
       'adult nude, bare skin, no clothing, no lingerie, no underwear, no bra, no panties, no bathrobe, no robe',
       'garments removed / undressed as requested — do NOT keep fabric covering the body',
     )
-  } else if (/실크|슬립|드레스|slip|silk|dress/i.test(description)) {
-    extras.push(
-      'wearing a short silk slip dress (thin silky lingerie-style slip dress), glossy silk fabric clearly visible, NOT a business suit, NOT a blazer',
-    )
+  } else {
+    // "실크/슬립"(재질을 명시)과 "드레스/dress"(그냥 의상 종류)를 분리한다. 예전엔 이 둘을
+    // 한 정규식으로 묶어서, "실크"를 언급한 적이 없는 그냥 "니트 원피스" 같은 설명도
+    // "dress"라는 단어 하나만으로 "glossy silk fabric"을 강제로 덧씌워버렸다 — refine.ts가
+    // baseDescription으로 이전 생성의 압축된 영어 프롬프트(currentResult.prompt)를 재사용하는데,
+    // "원피스"가 Claude 압축 과정에서 "dress"로 번역되기만 해도(재질 언급 없이) 이 규칙이
+    // 오발동해서, 수정 요청과 무관하게 의상 재질이 니트 → 광택 실크로 통째로 바뀌는 사고가
+    // 실측으로 확인됐다. 재질(실크/슬립)을 실제로 언급했을 때만 재질을 강제한다.
+    const wantsSilkOrSlip = /실크|슬립|slip|silk/i.test(description)
+    const wantsDressGarment = /드레스|dress/i.test(description)
+    if (wantsSilkOrSlip) {
+      extras.push('wearing a silk slip dress, glossy silk fabric clearly visible, NOT a business suit, NOT a blazer')
+    } else if (wantsDressGarment) {
+      extras.push('wearing a dress, NOT a business suit, NOT a blazer')
+    }
   }
   if (!nude && /란제리|레이스\s*브래지|lingerie|lace\s*bra|thong|탠가/i.test(description)) {
     extras.push(
@@ -413,7 +424,16 @@ function amplifyClothingAndScene(description: string): string {
   if (/자신감|포즈|confident|pose/i.test(description)) {
     extras.push('confident fashion pose, body language readable in frame')
   }
-  if (/밝|투명|clear|bright/i.test(description)) {
+  // 예전엔 "밝|투명|clear|bright" 아무 데서나 매칭했다 — "머리색을 밝은 갈색으로"나 "change
+  // hair color to bright red"처럼 머리색·의상 색 묘사에 쓴 "밝은"/"bright"에도 걸려서, 얼굴/
+  // 화장과 전혀 무관한 리비전에도 "얼굴을 화사하게 바꿔라" 지시가 끼어드는 사고가 있었다
+  // (실측: 머리색만 바꿔달라 했는데 얼굴까지 달라지는 원인 중 하나였다). 피부/안색/얼굴 근처에서
+  // 밝기를 언급했을 때만 매칭하도록 좁힌다.
+  if (
+    /피부[^,.]{0,10}(밝|맑|투명)|안색[^,.]{0,10}(밝|맑)|(밝|맑|투명)[^,.]{0,10}(피부|안색|얼굴)|clear\s*skin|bright\s*skin|clear\s*complexion|bright\s*complexion|luminous\s*skin/i.test(
+      description,
+    )
+  ) {
     extras.push('bright clear luminous face, natural makeup')
   }
   // "힘차게 달린다/페달을 밟는다" 같은 동작 묘사를 줘도 모델이 정적인 화보 포즈(뒤돌아보는
@@ -895,8 +915,25 @@ export function buildRefinePrompt(input: {
       .filter(Boolean)
       .join(' ')
   }
+  // IDENTITY LOCK 문구가 리비전이 실제로 바꾸려는 속성까지 "그대로 유지하라"고 동시에
+  // 지시하면 모델에게 자기모순된 신호를 준다 — 예: "머리색을 빨간색으로 바꿔줘"인데
+  // 잠금 문구엔 "same hair"가 그대로 박혀 있는 식. 실측으로 이런 모순이 있으면 모델이
+  // 지시 전체의 신뢰도를 낮게 보고 얼굴·의상까지 필요 이상으로 크게 갈아엎는 경향이
+  // 확인됐다. 리비전이 실제로 겨냥하는 속성만 잠금 목록에서 뺀다.
+  const revisionTargetsHair = /머리\s*(색|카락|스타일)|염색|dye|hair\s*color/i.test(revision)
+  const revisionTargetsEyes = /눈\s*(색|동자)|eye\s*color|colored\s*contacts?/i.test(revision)
+  const revisionTargetsLips = /입술\s*색|립스틱|lipstick|lip\s*color/i.test(revision)
+  const revisionTargetsSkinTone = /피부\s*(색|톤)|태닝|skin\s*tone|\btan\b/i.test(revision)
+  const identityLockAttributes = [
+    !revisionTargetsEyes && 'same eyes',
+    'same nose',
+    !revisionTargetsLips && 'same lips',
+    !revisionTargetsHair && 'same hair',
+    !revisionTargetsSkinTone && 'same skin tone',
+  ].filter((v): v is string => Boolean(v))
+
   return [
-    'Image-to-image edit of the SAME photograph. IDENTITY LOCK: keep the exact same adult woman face, same eyes, same nose, same lips, same hair, same skin tone.',
+    `Image-to-image edit of the SAME photograph. IDENTITY LOCK: keep the exact same adult woman face, ${identityLockAttributes.join(', ')}.`,
     `ONLY apply this change: ${revision}.${revisionAmplify}`,
     'Do not replace the subject with a different person. Do not age-shift or beauty-filter into a new face.',
     'If the revision only changes color or a garment detail, keep framing and pose identical.',
