@@ -268,7 +268,14 @@ export function isStructuralRefineRevision(revision: string): boolean {
  * strength를 한 단계 올려서(구조 변경 없이) 새 요소가 실제로 그려질 여지를 준다. */
 export function isAdditiveRefineRevision(revision: string): boolean {
   const r = polishKoreanPromptText(revision)
-  return /추가|넣어|넣기|넣다|덧붙|그려\s*넣|올려\s*줘|씌워|더해|add\b|insert\b|put\b.*\bin\b/i.test(r)
+  // "목걸이를 채워줘"/"귀걸이 착용시켜줘"/"목도리 둘러줘"처럼 장신구·소품을 몸에 걸치게
+  // 하는 표현들도 "새 물체를 그려 넣어라"와 동일한 부류다 — 실측으로 이 표현들이 위
+  // 키워드에 안 걸려서 낮은 strength로 처리되다가, 목걸이 같은 새 물체를 억지로 끼워
+  // 넣으려는 시도 때문에 얼굴·의상까지 통째로 무너지는 "구도 붕괴" 사고가 확인됐다
+  // (추가하려는 시도 자체는 반영됐지만 그 대가로 무관한 부분까지 크게 바뀜).
+  return /추가|넣어|넣기|넣다|덧붙|그려\s*넣|올려\s*줘|씌워|더해|채워|채우|착용|달아|달아줘|매줘|둘러|두르|걸어\s*줘|add\b|insert\b|put\b.*\bin\b/i.test(
+    r,
+  )
 }
 
 const ANIMAL_SUBJECT_PATTERN =
