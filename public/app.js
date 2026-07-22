@@ -806,6 +806,7 @@ function showVideoResult(videoUrl, options) {
     buildYoutubeShortsDraft({
       prompt,
       motion: motion || motionField.value.trim(),
+      genMode: currentResult.genMode,
     })
   fillYoutubeDraftFields(draft)
 
@@ -2174,6 +2175,7 @@ async function requestAnimate() {
     const draft = buildYoutubeShortsDraft({
       prompt: currentResult.prompt,
       motion: motionBase,
+      genMode: currentResult.genMode,
     })
     showVideoResult(finalData.videoUrl, {
       prompt: currentResult.prompt,
@@ -2251,11 +2253,14 @@ function handleYoutubeOpen() {
 
 async function handleYoutubePrepareAll() {
   if (!currentResult.videoUrl) return
+  // YouTube 탭은 반드시 가장 먼저(동기적으로) 연다 — 영상 다운로드(fetch)는 몇 초씩 걸릴 수
+  // 있는데, 그 뒤에 window.open을 호출하면 브라우저가 "사용자 클릭과 무관한 팝업"으로 보고
+  // 조용히 막아버리는 경우가 실측으로 확인됐다(사용자는 아무 반응이 없다고 느낌).
+  handleYoutubeOpen()
   await handleYoutubeDownload()
   await handleYoutubeCopy()
-  handleYoutubeOpen()
   setYoutubeStatus(
-    '준비 완료: 영상 받기 → 제목·설명 복사 → YouTube 열기. 업로드 창에서 붙여넣기만 하면 됩니다.',
+    '준비 완료: YouTube 열기 → 영상 받기 → 제목·설명 복사. 업로드 창에서 붙여넣기만 하면 됩니다.',
     false,
   )
 }

@@ -9,30 +9,44 @@ const YOUTUBE_STUDIO_UPLOAD_URL = 'https://studio.youtube.com/'
 const YOUTUBE_UPLOAD_URL = 'https://www.youtube.com/upload'
 
 /**
- * @param {{ prompt?: string, motion?: string }} input
+ * @param {{ prompt?: string, motion?: string, genMode?: 'free' | 'fashion' }} input
  * @returns {{ title: string, description: string, tags: string[], filename: string, studioUrl: string, uploadUrl: string }}
  */
 function buildYoutubeShortsDraft(input) {
   const prompt = (input.prompt || '').trim()
   const motion = (input.motion || '').trim()
+  // 자유 모드(동물/일러스트 등 화보가 아닌 장면)로 만든 영상까지 항상 "패션 쇼츠"라고
+  // 제목을 붙이면 실제 내용과 안 맞는 제목이 그대로 YouTube에 올라간다 — genMode에 맞춰
+  // 제목/태그를 나눈다.
+  const isFree = input.genMode === 'free'
   const snippet = prompt
     .replace(/\s+/g, ' ')
     .slice(0, 60)
     .trim()
 
-  const titleBase = snippet
-    ? `패션 쇼츠 · ${snippet}`
-    : '패션 매거진 쇼츠'
+  const titleBase = isFree
+    ? snippet
+      ? `쇼츠 · ${snippet}`
+      : 'AI 일러스트 쇼츠'
+    : snippet
+      ? `패션 쇼츠 · ${snippet}`
+      : '패션 매거진 쇼츠'
   const title = truncateTitle(titleBase)
 
+  const hashtagLine = isFree
+    ? '#Shorts #AIArt #Illustration'
+    : '#Shorts #Fashion #Editorial #MagazineLook #FashionFilm'
+
   const descriptionLines = [
-    prompt || '하이엔드 패션 매거진풍 숏폼 영상',
+    prompt || (isFree ? 'AI로 만든 숏폼 일러스트 영상' : '하이엔드 패션 매거진풍 숏폼 영상'),
     motion ? `Motion: ${motion}` : '',
     '',
-    '#Shorts #Fashion #Editorial #MagazineLook #FashionFilm',
+    hashtagLine,
   ].filter((line, index, arr) => !(line === '' && arr[index - 1] === ''))
 
-  const tags = ['Shorts', 'Fashion', 'Editorial', 'Magazine', 'FashionFilm']
+  const tags = isFree
+    ? ['Shorts', 'AIArt', 'Illustration']
+    : ['Shorts', 'Fashion', 'Editorial', 'Magazine', 'FashionFilm']
 
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
   const filename = `fashion-shorts-${stamp}.mp4`
