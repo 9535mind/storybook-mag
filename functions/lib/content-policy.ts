@@ -115,6 +115,9 @@ export function wantsNudeOrUndress(text: string): boolean {
       `속옷${KO_PARTICLE_GAP}제거`, '속옷제거', `속옷${KO_PARTICLE_GAP}벗`,
       '탈의', `옷${KO_PARTICLE_GAP}벗`, `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`,
       `언더웨어${KO_PARTICLE_GAP}제거`,
+      // "제거"는 예전엔 속옷/언더웨어에만 반응했다 — "가운을 제거해줘"처럼 겉옷(가운·로브·옷)에
+      // "제거"를 쓰는 것도 실제로는 "벗다"와 같은 탈의 요청인데 놓치고 있었다.
+      `가운${KO_PARTICLE_GAP}제거`, `로브${KO_PARTICLE_GAP}제거`, `옷${KO_PARTICLE_GAP}제거`,
       // "strip(?:ping|ped)?"에 단어 경계(\b)가 없어서 "striped"(줄무늬 패턴 — 탈의와 무관한
       // 흔한 의상 묘사 단어)의 앞부분 "strip"만 부분일치로 걸려 오발동하는 사고가 실측으로
       // 확인됐다("striped dress" 같은 영어 압축 프롬프트가 이전 라운드 baseDescription으로
@@ -382,9 +385,21 @@ export function polishKoreanPromptText(text: string): string {
 /** 화보 모드: 전신·의상처럼 img2img로 얼굴이 깨지기 쉬운 큰 수정 */
 export function isStructuralRefineRevision(revision: string): boolean {
   const r = polishKoreanPromptText(revision)
-  return /전신|풀\s*바디|풀바디|full\s*body|머리부터|발끝까지|속옷|란제리|underwear|lingerie|브래지|팬티|거울|차림으로|누드|나체|nude|다시\s*그려|재생성/i.test(
-    r,
+  const pattern = new RegExp(
+    [
+      '전신', '풀\\s*바디', '풀바디', 'full\\s*body', '머리부터', '발끝까지',
+      '속옷', '란제리', 'underwear', 'lingerie', '브래지', '팬티', '거울', '차림으로',
+      '누드', '나체', 'nude', '다시\\s*그려', '재생성',
+      // 가운/로브/옷을 "벗다·제거"해 달라는 요청(탈의)은 실제로는 전신 의상이 통째로 바뀌는
+      // 만큼 큰 수정이다 — 이 목록에 없어서 낮은 strength(0.28)로만 처리되다가 반영이 거의
+      // 안 되는 문제가 있었다. wantsNudeOrUndress와 동일한 탈의 패턴을 여기서도 인식해서
+      // (nudeRevision과 함께) 얼굴 보존 고강도 경로(strength 0.6·정밀모드)로 승격시킨다.
+      '탈의', `옷${KO_PARTICLE_GAP}벗`, `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`,
+      `가운${KO_PARTICLE_GAP}제거`, `로브${KO_PARTICLE_GAP}제거`, `옷${KO_PARTICLE_GAP}제거`,
+    ].join('|'),
+    'i',
   )
+  return pattern.test(r)
 }
 
 /** "귀걸이 추가해줘"/"나비 넣어줘"처럼 원본에 없던 새 물체·요소를 더하는 수정인지 판별한다.
