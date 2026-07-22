@@ -1,11 +1,13 @@
 import { requireAuth } from '../lib/auth'
-import { FACE_REFERENCE_UPLOAD_TTL_SECONDS, uploadDataUrlToFal } from '../lib/fal-client'
+import { uploadDataUrlToFal } from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
   FAL_KEY?: string
+  MEDIA?: R2Bucket
+  MEDIA_PUBLIC_BASE_URL?: string
 }
 
 // 사용자가 갖고 있는 사진(예: 오래된 가족 사진)을 스튜디오로 불러와서 그 이미지를 바로
@@ -55,21 +57,50 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const ext = /^data:image\/png/i.test(dataUrl) ? 'png' : /^data:image\/webp/i.test(dataUrl) ? 'webp' : 'jpg'
 
-  // 얼굴 참조 사진은 계속 재사용해야 하니 더 긴 보관 기한(1년)을 준다.
-  // 그 외(임시 편집용 원본, 마스크 등)는 fal-client의 기본값(30일)을 그대로 쓴다.
-  const lifecycleSeconds = body.purpose === 'face-reference' ? FACE_REFERENCE_UPLOAD_TTL_SECONDS : undefined
+  // 얼굴 참조 사진은 남의 서버(fal.ai)를 아예 거치지 않고 우리 R2 버킷에 직접 저장한다.
+  // — 보관·삭제를 전부 우리가 직접 통제할 수 있고(진짜 delete), 제3자에게 원본을 넘기는
+  // 단계 자체가 하나 줄어든다. R2가 아직 설정 안 된 배포 환경을 위해 fal 업로드로 폴백한다.
+  if (body.purpose === 'face-reference' && env.MEDIA && env.MEDIA_PUBLIC_BASE_URL?.trim()) {
+    try {
+      const imageUrl = await uploadDataUrlToOwnStorage(env, dataUrl, ext, MAX_UPLOAD_BYTES)
+      return jsonResponse({ ok: true, imageUrl }, 200)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'upload_failed'
+      return jsonResponse({ ok: false, error: message === 'image_too_large' ? message : 'upload_failed', message }, 502)
+    }
+  }
 
+  // 그 외(임시 편집용 원본, 마스크 등)는 기존대로 fal 스토리지 사용 — 만료 기한 30일.
   try {
     const imageUrl = await uploadDataUrlToFal(env.FAL_KEY, dataUrl, `upload-${Date.now()}.${ext}`, {
       maxBytes: MAX_UPLOAD_BYTES,
       tooLargeError: 'image_too_large',
-      lifecycleSeconds,
     })
     return jsonResponse({ ok: true, imageUrl }, 200)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'upload_failed'
     return jsonResponse({ ok: false, error: message === 'image_too_large' ? message : 'upload_failed', message }, 502)
   }
+}
+
+/** data URI → 우리 storymag-media R2 버킷에 직접 저장 (fal 등 제3자 스토리지 미사용). */
+async function uploadDataUrlToOwnStorage(
+  env: Env,
+  dataUrl: string,
+  ext: string,
+  maxBytes: number,
+): Promise<string> {
+  const blobResponse = await fetch(dataUrl)
+  if (!blobResponse.ok) throw new Error('invalid_data_url')
+  const blob = await blobResponse.blob()
+  if (blob.size > maxBytes) throw new Error('image_too_large')
+
+  const contentType = blob.type || (ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg')
+  const key = `face-ref/${crypto.randomUUID()}.${ext}`
+  await env.MEDIA!.put(key, await blob.arrayBuffer(), { httpMetadata: { contentType } })
+
+  const publicBase = env.MEDIA_PUBLIC_BASE_URL!.trim().replace(/\/+$/, '')
+  return `${publicBase}/${key}`
 }
 
 export const onRequestOptions: PagesFunction<Env> = async () => {

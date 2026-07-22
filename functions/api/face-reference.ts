@@ -7,6 +7,8 @@ interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
   FAL_KEY?: string
+  MEDIA?: R2Bucket
+  MEDIA_PUBLIC_BASE_URL?: string
 }
 
 // SOLO_ADMIN_ONLY(혼자 쓰는 개인 앱) 전제라 유저별로 나눌 필요 없이 전역 키 하나로 저장한다.
@@ -51,6 +53,46 @@ async function setSetting(db: D1Database, key: string, value: string): Promise<v
     )
     .bind(key, value, now)
     .run()
+}
+
+/**
+ * 예전/새 사진을 "완전히" 치운다.
+ *
+ * - 우리 R2(storymag-media) 주소면 env.MEDIA.delete()로 실제 바이트를 그 자리에서 지운다
+ *   (제3자 API에 기대지 않는 진짜 삭제).
+ * - fal.ai에 남아있던 예전 방식(이 기능 초기 버전) URL이면 fal File ACL을 hide로 바꿔
+ *   즉시 접근을 끊는 방식으로 폴백한다.
+ * 실패해도 예외를 던지지 않고 결과만 알려준다 — 삭제/교체 자체를 막을 이유는 아니라서.
+ */
+async function purgeFaceReferenceFile(
+  env: Env,
+  fileUrl: string,
+): Promise<{ deleted: boolean; via: 'r2' | 'fal_acl' | 'none'; error: string | null }> {
+  const url = fileUrl.trim()
+  if (!url) return { deleted: false, via: 'none', error: null }
+
+  const publicBase = env.MEDIA_PUBLIC_BASE_URL?.trim().replace(/\/+$/, '')
+  if (env.MEDIA && publicBase && url.startsWith(`${publicBase}/`)) {
+    const key = url.slice(publicBase.length + 1)
+    try {
+      await env.MEDIA.delete(key)
+      return { deleted: true, via: 'r2', error: null }
+    } catch (error) {
+      return { deleted: false, via: 'r2', error: error instanceof Error ? error.message : 'unknown' }
+    }
+  }
+
+  // 레거시: 이 기능 초기 버전에서 fal.ai에 올라간 사진일 수 있다.
+  if (env.FAL_KEY?.trim()) {
+    try {
+      await revokeFalFileAccess(env.FAL_KEY, url)
+      return { deleted: true, via: 'fal_acl', error: null }
+    } catch (error) {
+      return { deleted: false, via: 'fal_acl', error: error instanceof Error ? error.message : 'unknown' }
+    }
+  }
+
+  return { deleted: false, via: 'none', error: 'no_storage_backend_matched' }
 }
 
 async function requireAdmin(
@@ -118,13 +160,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     await setSetting(env.DB, FACE_REFERENCE_URL_KEY, imageUrl)
     await setSetting(env.DB, FACE_REFERENCE_LABEL_KEY, label)
 
-    // 새 사진으로 교체된 경우, 옛 사진이 fal 서버에 참조 없이 그대로 남지 않도록 즉시 접근을 끊는다.
-    if (previousUrl && previousUrl !== imageUrl && env.FAL_KEY?.trim()) {
-      try {
-        await revokeFalFileAccess(env.FAL_KEY, previousUrl)
-      } catch {
-        /* 옛 사진 접근 차단 실패는 새 등록 자체를 막을 이유가 아니므로 조용히 무시 */
-      }
+    // 새 사진으로 교체된 경우, 옛 사진이 참조 없이 그대로 남지 않도록 즉시 지운다/차단한다.
+    if (previousUrl && previousUrl !== imageUrl) {
+      await purgeFaceReferenceFile(env, previousUrl)
     }
 
     return jsonResponse({ ok: true, imageUrl, label }, 200)
@@ -139,11 +177,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 /**
  * 얼굴 레퍼런스 삭제 — 이후 생성은 다시 일반(얼굴 미고정) 경로로 돌아간다.
  *
- * 우리 DB 참조만 지우면 fal 서버엔 파일이 그대로 남아 만료 기한(1년)까지 URL을 아는
- * 누구나 접근 가능한 상태가 된다. 그래서 삭제 시 fal File ACL을 `hide`로 바꿔 즉시
- * 접근을 끊는다(revokeFalFileAccess) — 이게 "삭제 = 그 순간 완전히 제거"에 가장 가깝다.
- * fal 쪽 호출이 실패해도(네트워크 문제 등) 우리 DB 참조는 반드시 지우고, 실패 사실은
- * 응답에 남겨서 클라이언트가 사용자에게 정직하게 알릴 수 있게 한다.
+ * 우리 DB 참조만 지우면 실제 파일(R2든 레거시 fal 업로드든)이 그대로 남는다. 그래서
+ * 삭제 시 파일 자체도 함께 치운다(purgeFaceReferenceFile) — 우리 R2 파일이면 진짜
+ * delete, 레거시 fal 파일이면 즉시 접근 차단. 파일 정리가 실패해도(네트워크 문제 등)
+ * DB 참조는 반드시 지우고, 실패 사실은 응답에 남겨 클라이언트가 정직하게 알릴 수 있게 한다.
  */
 export const onRequestDelete: PagesFunction<Env> = async (context) => {
   const { request, env } = context
@@ -155,22 +192,18 @@ export const onRequestDelete: PagesFunction<Env> = async (context) => {
     await ensureSettingsTable(env.DB)
     const existingUrl = await getSetting(env.DB, FACE_REFERENCE_URL_KEY)
 
-    let remoteRevoked = false
-    let remoteRevokeError: string | null = null
-    if (existingUrl && env.FAL_KEY?.trim()) {
-      try {
-        await revokeFalFileAccess(env.FAL_KEY, existingUrl)
-        remoteRevoked = true
-      } catch (error) {
-        remoteRevokeError = error instanceof Error ? error.message : 'unknown'
-      }
-    }
+    const purge = existingUrl
+      ? await purgeFaceReferenceFile(env, existingUrl)
+      : { deleted: false, via: 'none' as const, error: null }
 
     await env.DB.prepare('DELETE FROM app_settings WHERE key IN (?, ?)')
       .bind(FACE_REFERENCE_URL_KEY, FACE_REFERENCE_LABEL_KEY)
       .run()
 
-    return jsonResponse({ ok: true, remoteRevoked, remoteRevokeError }, 200)
+    return jsonResponse(
+      { ok: true, remoteRevoked: purge.deleted, remoteRevokeVia: purge.via, remoteRevokeError: purge.error },
+      200,
+    )
   } catch (error) {
     return jsonResponse(
       { ok: false, error: 'face_reference_delete_failed', message: error instanceof Error ? error.message : 'unknown' },
