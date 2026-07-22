@@ -7,10 +7,12 @@ import {
   describesAnimalSubject,
   evaluateContentPolicy,
   isAdditiveRefineRevision,
+  isClothingChangeRevision,
   isStructuralRefineRevision,
   mergeFreeRevisionDescription,
   polishKoreanPromptText,
   resolveFashionDescriptionWordBudget,
+  wantsFullNude,
   wantsNudeOrUndress,
 } from '../lib/content-policy'
 import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, refineFalImageToImage, refineFalInpaint, resolveFalImageSize } from '../lib/fal-client'
@@ -298,7 +300,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // 이 경로는 T2I 재생성보다 옷을 완전히 제거하는 성공률은 다소 낮을 수 있지만, "다른 사람"
   // 이 되어버리는 것보다는 원본 인물을 지키는 쪽이 사용자에게 훨씬 중요하다.
   const nudeRevision = wantsNudeOrUndress(`${baseDescription} ${revision}`)
-  if (structural && !nudeRevision && genMode === 'fashion' && env.REPLICATE_API_TOKEN?.trim()) {
+  // isStructuralRefineRevision은 이제 탈의뿐 아니라 착의·교체("가운을 입혀줘", "바지를
+  // 스커트로 바꿔줘")도 구조적 수정으로 잡는다(옷을 놓치지 않고 반영하기 위함) — 그런데
+  // 이 T2I 재생성 분기는 원본 이미지를 전혀 쓰지 않는 순수 텍스트→이미지 생성이라, 위
+  // nudeRevision 제외만으로는 "착의/교체" 요청까지 걸러지지 않아 원본 인물이 완전히 다른
+  // 사람으로 바뀌는 회귀가 생긴다. 옷과 관련된 변경이면(탈의든 착의든 교체든) 전부 여기를
+  // 건너뛰고 아래 얼굴 보존 img2img 경로로 보낸다 — "전신으로/거울 앞에서" 같은 옷과
+  // 무관한 순수 프레이밍·구도 변경만 이 분기(T2I 재생성)를 탄다.
+  const clothingChangeRevision = isClothingChangeRevision(`${baseDescription} ${revision}`)
+  if (structural && !nudeRevision && !clothingChangeRevision && genMode === 'fashion' && env.REPLICATE_API_TOKEN?.trim()) {
     const merged = [baseDescription, revision].filter(Boolean).join('. ')
     // SDXL/Juggernaut CLIP 인코더의 ~70단어 예산에 맞춰 번역+압축 — generate.ts의 화보 경로와 동일.
     // revision을 따로 넘겨서, 예산 안에서 수정 지시가 조용히 잘려나가지 않게 한다. 예산 자체도
@@ -314,8 +324,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       rawDescription: merged,
     })
     const negativePrompt = buildFashionNegativePrompt(merged)
-    // 이 블록은 위에서 nudeRevision을 걸러냈으므로(285행 주석) 누드/탈의 케이스는 절대
-    // 여기 도달하지 않는다 — "전신으로/거울 앞에서" 같은 순수 프레이밍·구도 변경만 처리한다.
+    // 이 블록은 위에서 nudeRevision·clothingChangeRevision을 모두 걸러냈으므로 누드/탈의/
+    // 착의/교체 케이스는 절대 여기 도달하지 않는다 — "전신으로/거울 앞에서" 같은 옷과
+    // 무관한 순수 프레이밍·구도 변경만 처리한다.
     try {
       const dims = resolveReplicateImageSize(size)
       const { imageUrl: nextUrl } = await generateReplicateImage({
@@ -373,7 +384,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const negativePrompt =
     genMode === 'free' || animalSubject
       ? `${DEFAULT_NEGATIVE_PROMPT}, human fashion model, woman portrait, bathrobe, studio mugshot, replaced animal with human`
-      : buildFashionNegativePrompt(`${baseDescription} ${revision}`)
+      // baseDescription과 revision을 따로 넘긴다 — buildFashionNegativePrompt가 최종 누드
+      // 판별(wantsFullNude)만 내부적으로 분리해서 계산한다. 미리 합친 문자열 하나로 넘기면
+      // baseDescription의 "치마를 입고 있다" 같은 기존 상태 서술 때문에 이번 revision의
+      // 순수 탈의 요청("치마를 벗겨줘")까지 상쇄되어 negative prompt가 "missing outfit"을
+      // 그대로 유지해 옷 제거 요청과 충돌하는 사고가 있었다.
+      : buildFashionNegativePrompt(baseDescription, revision)
   // "추가해줘/넣어줘"처럼 원본에 없던 새 요소를 그리는 요청은 img2img strength를 더 줘야
   // 실제로 반영된다(낮은 strength는 원본 보존이 강해서 새 물체 합성이 잘 안 됨 — 실측 확인).
   const additive = mode === 'text' && !structural && isAdditiveRefineRevision(revision)
@@ -446,28 +462,38 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             mode: 'text',
             genMode: genMode === 'fashion' && animalSubject ? 'free' : genMode,
           })
-          // 누드/탈의 요청도 마찬가지로 기본 Lightning 엔진(8스텝)이 옷을 입혀버리는 편향이
-          // 실측으로 확인된 케이스다 — generate.ts / 위 구조적 재생성 분기와 동일하게
-          // 정밀 모델(스텝·CFG↑)로 자동 전환한다.
+          // 누드/탈의뿐 아니라 착의·교체("가운으로 갈아입혀줘")도 기본 Lightning 엔진(8스텝)
+          // 에서는 반영이 약하게 나오는 편향이 실측으로 확인된 케이스다 — generate.ts / 위
+          // 구조적 재생성 분기와 동일하게 정밀 모델(스텝·CFG↑)로 자동 전환한다.
           const nudeFallback = wantsNudeOrUndress(`${baseDescription} ${revision}`)
-          const fallbackStrength = nudeFallback ? 0.55 : 0.45
+          const clothingChangeFallback = isClothingChangeRevision(`${baseDescription} ${revision}`)
+          const bigClothingFallback = nudeFallback || clothingChangeFallback
+          // 라벨에는 실제로 "최종 상태가 누드인지"만 반영한다 — 옷을 교체하는 요청까지
+          // "누드 요청"이라고 표시하면 사용자에게 혼란을 준다.
+          // wantsFullNude는 revision만 단독으로 검사한다 — baseDescription은 "현재 청바지를
+          // 입고 있다"처럼 기존 상태를 서술할 뿐인데, 이를 revision과 미리 합친 문자열
+          // 하나로 검사하면 상쇄되어버리는 사고가 있었다 — wantsFullNude(revision,
+          // baseDescription) 2-인자 버전을 써서 "이번 지시 우선, 없으면 이전 상태 승계"
+          // 규칙으로 정확히 분리해서 판단한다.
+          const fullNudeFallbackOutcome = bigClothingFallback && wantsFullNude(revision, baseDescription)
+          const fallbackStrength = bigClothingFallback ? 0.55 : 0.45
           const { imageUrl: nextUrl } = await refineReplicateImageToImage({
             apiToken: env.REPLICATE_API_TOKEN,
-            modelOwner: nudeFallback
+            modelOwner: bigClothingFallback
               ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
               : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-            modelName: nudeFallback
+            modelName: bigClothingFallback
               ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
               : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-            modelVersion: nudeFallback ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
+            modelVersion: bigClothingFallback ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
             imageUrl,
             prompt: wholeImagePrompt,
             negativePrompt,
             width: dims.width,
             height: dims.height,
             strength: fallbackStrength,
-            numInferenceSteps: nudeFallback ? 30 : undefined,
-            guidanceScale: nudeFallback ? 7.5 : undefined,
+            numInferenceSteps: bigClothingFallback ? 30 : undefined,
+            guidanceScale: bigClothingFallback ? 7.5 : undefined,
             disableSafetyChecker: true,
           })
           return jsonResponse(
@@ -478,8 +504,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               mode: 'text',
               genMode,
               engine: 'replicate',
-              engineLabel: nudeFallback
-                ? 'Replicate · Img2Img (영역 수정 폴백 · 정밀모드, 누드 요청 자동 전환)'
+              engineLabel: bigClothingFallback
+                ? fullNudeFallbackOutcome
+                  ? 'Replicate · Img2Img (영역 수정 폴백 · 정밀모드, 누드 요청 자동 전환)'
+                  : 'Replicate · Img2Img (영역 수정 폴백 · 정밀모드, 의상 변경 자동 전환)'
                 : 'Replicate · Img2Img (영역 수정 폴백)',
               fallbackUsed: true,
               attempts,
@@ -510,35 +538,43 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // ── 화보 모드 전용: 작은 텍스트 수정만 얼굴 유지 img2img
   // (자유 모드는 위에서 이미 return — 여기 도달하지 않음)
   //
-  // 이 시점에 structural===true(누드 제외)라면, 위 "화보 T2I 재생성" 시도가 이미 실패해서
-  // 여기로 떨어진 것이다(성공했으면 이미 return됨). structural===true이면서 nudeRevision도
-  // true인 경우는 위에서 T2I 재생성을 의도적으로 건너뛴 것이다(얼굴 보존을 위해 — 위 285행
-  // 주석 참고) — "실패해서 대체됐다"가 아니라 "원래 이 경로가 정답"인 케이스이므로 메시지를
-  // 다르게 표시한다. 이 img2img 경로는 원래 "작은 텍스트 수정"용으로 튜닝된 낮은
-  // strength(0.32)라, 전신·란제리·누드 같은 큰 구조 변경 요청을 대신 처리하면 거의 반영이
-  // 안 된다 — 정밀모드 전환·strength 상향으로 대응한다.
+  // 이 시점에 structural===true인데 옷과 무관한 순수 프레이밍(전신·거울 등)이라면, 위
+  // "화보 T2I 재생성" 시도가 이미 실패해서 여기로 떨어진 것이다(성공했으면 이미 return됨).
+  // structural===true이면서 옷과 관련된 변경(탈의/착의/교체)이라면 위에서 T2I 재생성을
+  // 의도적으로 건너뛴 것이다(얼굴 보존을 위해 — 위 302행 주석 참고) — "실패해서 대체됐다"가
+  // 아니라 "원래 이 경로가 정답"인 케이스이므로 메시지를 다르게 표시한다. 이 img2img
+  // 경로는 원래 "작은 텍스트 수정"용으로 튜닝된 낮은 strength(0.32)라, 전신·란제리·누드·
+  // 의상 교체 같은 큰 구조 변경 요청을 대신 처리하면 거의 반영이 안 된다 — 정밀모드
+  // 전환·strength 상향으로 대응한다.
   if (env.REPLICATE_API_TOKEN?.trim()) {
     try {
       const dims = resolveReplicateImageSize(size)
-      const structuralFallbackNude = structural && nudeRevision
-      const strength = structural ? (structuralFallbackNude ? 0.6 : 0.5) : additive ? 0.5 : 0.28
+      // 탈의(nudeRevision)든 착의·교체(clothingChangeRevision)든 옷과 관련된 큰 수정이면
+      // 모두 정밀모드·고강도로 승격한다 — "가운을 입혀줘"처럼 착의만 있는 요청도 기본
+      // Lightning 엔진(8스텝)에서는 반영이 약하게 나오는 경우가 실측으로 확인됐다.
+      const structuralFallbackClothing = structural && (nudeRevision || clothingChangeRevision)
+      // 라벨/메시지에는 실제로 "최종 상태가 누드인지"(wantsFullNude)만 반영한다 — 옷을
+      // 교체하는 요청까지 "누드 요청"이라고 표시하면 사용자에게 혼란을 준다.
+      // wantsFullNude(revision, baseDescription) 2-인자 버전 — 위 477행과 동일한 이유.
+      const fullNudeOutcome = structuralFallbackClothing && wantsFullNude(revision, baseDescription)
+      const strength = structural ? (structuralFallbackClothing ? 0.6 : 0.5) : additive ? 0.5 : 0.28
       const { imageUrl: nextUrl } = await refineReplicateImageToImage({
         apiToken: env.REPLICATE_API_TOKEN,
-        modelOwner: structuralFallbackNude
+        modelOwner: structuralFallbackClothing
           ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
           : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-        modelName: structuralFallbackNude
+        modelName: structuralFallbackClothing
           ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
           : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-        modelVersion: structuralFallbackNude ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
+        modelVersion: structuralFallbackClothing ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
         imageUrl,
         prompt,
         negativePrompt,
         width: dims.width,
         height: dims.height,
         strength,
-        numInferenceSteps: structuralFallbackNude ? 30 : undefined,
-        guidanceScale: structuralFallbackNude ? 7.5 : undefined,
+        numInferenceSteps: structuralFallbackClothing ? 30 : undefined,
+        guidanceScale: structuralFallbackClothing ? 7.5 : undefined,
         disableSafetyChecker: true,
       })
       return jsonResponse(
@@ -550,16 +586,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           genMode,
           structuralRegen: false,
           engine: 'replicate',
-          engineLabel: structuralFallbackNude
-            ? 'Replicate · Img2Img (누드 요청 · 얼굴 보존 · 정밀모드)'
+          engineLabel: structuralFallbackClothing
+            ? fullNudeOutcome
+              ? 'Replicate · Img2Img (누드 요청 · 얼굴 보존 · 정밀모드)'
+              : 'Replicate · Img2Img (의상 변경 · 얼굴 보존 · 정밀모드)'
             : structural
               ? 'Replicate · Img2Img (장면 재생성 실패 · 보조 경로)'
               : additive
                 ? 'Replicate · Img2Img (요소 추가 · strength↑)'
                 : 'Replicate · Img2Img (얼굴 유지 수정)',
-          fallbackUsed: structural && !structuralFallbackNude ? true : undefined,
-          message: structuralFallbackNude
-            ? '원본 인물의 얼굴을 보존하기 위해 장면 재생성 대신 img2img로 처리했어요. 누드가 충분히 반영되지 않았으면 다시 수정하기를 한 번 더 눌러 주세요.'
+          fallbackUsed: structural && !structuralFallbackClothing ? true : undefined,
+          message: structuralFallbackClothing
+            ? fullNudeOutcome
+              ? '원본 인물의 얼굴을 보존하기 위해 장면 재생성 대신 img2img로 처리했어요. 누드가 충분히 반영되지 않았으면 다시 수정하기를 한 번 더 눌러 주세요.'
+              : '원본 인물의 얼굴을 보존하기 위해 장면 재생성 대신 img2img로 처리했어요. 의상 변경이 충분히 반영되지 않았으면 다시 수정하기를 한 번 더 눌러 주세요.'
             : structural
               ? '장면을 통째로 다시 그리는 재생성이 실패해서, 원본을 더 보존하는 보조 방식으로 대체했어요. 큰 변경이 기대만큼 반영되지 않았을 수 있어요 — 필요하면 다시 수정하기를 눌러 재시도해 주세요.'
               : undefined,

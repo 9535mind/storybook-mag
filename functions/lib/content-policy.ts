@@ -127,8 +127,17 @@ const KO_DRESS_VERB_STEM = '(?:입|착용|걸치|두르|씌우)'
 // "바꾸다/교체하다/변경하다/대체하다/A 대신 B" — 명사 바로 옆이 아니라 문장 뒤쪽에 오는
 // 경우가 많아(예: "바지를 스커트로 바꿔줘") 인접 매칭 대신 문장 전체에서 별도로 검사한다.
 // "바꾸다"는 어미가 붙으며 어간이 "바꿔/바꾼/바꿨"으로 불규칙 활용되므로(바꾸+어→바꿔)
-// "바꾸" 어간 자체로는 매칭되지 않는다 — 활용형을 별도로 나열한다.
-const KO_REPLACE_WORD_PATTERN = /바꾸|바꿔|바꾼|바꿨|바뀌|교체|변경|대체|대신/i
+// "바꾸" 어간 자체로는 매칭되지 않는다 — 활용형을 별도로 나열한다. 영어 표현(instead/
+// swap/replace/change into)도 같이 커버한다 — buildRefinePrompt는 이미 번역된 영어
+// revision 텍스트로 이 로직을 다시 타므로 한국어만 있으면 놓친다.
+const KO_REPLACE_WORD_PATTERN =
+  /바꾸|바꿔|바꾼|바꿨|바뀌|교체|변경|대체|대신|instead\s*of|\bswap(?:s|ping|ped)?\b|\breplace(?:s|d|ing)?\b|chang(?:e|es|ed|ing)\s*(?:into|to)/i
+
+// 영어 의류 명사 목록 — KO_CLOTHING_NOUN과 동일한 역할이지만 영어 표현용. buildRefinePrompt는
+// translateDescriptionForImagePrompt로 이미 영어로 번역된 revision을 다시 검사하므로, 한국어
+// 패턴만 있으면 "take off the pants and put on the skirt" 같은 번역문을 전혀 못 잡는다.
+const EN_CLOTHING_NOUN =
+  '(?:clothes|clothing|dress|robe|bathrobe|kimono|lingerie|underwear|bra|panties|pants|jeans|trousers|skirt|shirt|blouse|jacket|coat|top|stockings|socks|outfit)'
 
 // 의류 명사 + (조사) + 제거/착의 동사 어간 — "명사마다 동사마다" 조합을 일일이 나열하는 대신
 // 하나의 조합 패턴으로 일반화한다(예: 상의를 벗겨줘 / 치마 제거해줘 / 팬티 없애줘 / 가운만
@@ -149,7 +158,8 @@ export function wantsNudeOrUndress(text: string): boolean {
       // 재사용될 때 특히 위험). \b를 앞뒤로 둬서 "strip"/"stripping"/"stripped"(동사, 겹자음
       // pp)만 매칭되고 "striped"(명사 stripe+d, 단자음 p)는 매칭되지 않게 한다.
       'undress', 'disrobe', '\\bstrip(?:ping|ped)?\\b',
-      'remove\\s*(?:her\\s*)?(?:clothes|clothing|underwear|lingerie)',
+      `remove\\s*(?:her\\s*)?${EN_CLOTHING_NOUN}`,
+      `take(?:s|ing)?\\s*off\\s*(?:her\\s*|the\\s*)?${EN_CLOTHING_NOUN}`,
       'fully\\s*nude', 'bare\\s*(?:skin|body)', '완전\\s*노출', '전라',
     ].join('|'),
     'i',
@@ -207,7 +217,8 @@ export function wantsDressAction(text: string): boolean {
       KO_DRESS_NOUN_VERB_PATTERN,
       '걸쳐\\s*입', '걸쳐\\s*걸치',
       'get(?:s|ting)?\\s*dressed', 'dress(?:es|ing)?\\s*(?:her)?self',
-      'puts?\\s*on\\s*(?:her\\s*|a\\s*|the\\s*)?(?:clothes|clothing|dress|robe|lingerie|underwear|outfit)',
+      `puts?\\s*on\\s*(?:her\\s*|a\\s*|the\\s*|only\\s*)?${EN_CLOTHING_NOUN}`,
+      `wear(?:s|ing)?\\s*(?:a\\s*|the\\s*|only\\s*|just\\s*)?${EN_CLOTHING_NOUN}`,
       'wraps?\\s*(?:herself\\s*)?in\\s*(?:a\\s*|the\\s*)?(?:robe|dress|coat)',
     ].join('|'),
     'i',
@@ -215,19 +226,37 @@ export function wantsDressAction(text: string): boolean {
   return pattern.test(t)
 }
 
+const NUDE_STATE_WORD_PATTERN =
+  /누드|나체|nude|naked|fully\s*nude|bare\s*(?:skin|body)|완전\s*노출|전라/i
+
 /**
  * "바지를 벗기고 치마를 입혀라"/"팬티는 벗기고 가운만 입혀라"처럼 한 문장에 탈의+착의가
  * 같이 있으면 실제로는 옷을 "교체"하는 것뿐이지 최종적으로 누드가 되는 게 아니다.
  * wantsNudeOrUndress는 탈의 동사만 있으면 무조건 true라서, 프롬프트/네거티브 문구를
- * 그대로 만들면 "옷을 입지 말라"는 정반대 지시가 함께 섞여 들어가는 사고가 났다(실측
- * 확인). 명시적 상태 단어(누드/나체 등)는 다른 조건과 무관하게 항상 최종 누드로 취급하고,
- * 그 외에는 "탈의 동작은 있는데 착의 동작이 전혀 없을 때"만 최종 누드로 판단한다.
+ * 그대로 만들면 "옷을 입지 말라"는 정반대 지시가 함께 섞여 들어가는 사고가 났다(실측 확인).
+ *
+ * revision(이번 수정 지시)과 baseDescription(누적된 이전 상태 서술)을 분리해서 받는다 —
+ * 둘을 미리 합친 문자열 하나로 판단하면, baseDescription이 항상 "치마를 입고 있다"류의
+ * 착의 서술을 담고 있어서(현재 이미지가 옷을 입은 사진이라면 당연히 그렇게 서술됨) 이번
+ * revision이 순수 탈의("치마를 벗겨줘")여도 매번 "착의 동작이 있다"고 오판해 상쇄되는
+ * 사고가 있었다. 우선순위:
+ *   1) revision이든 base든 명시적 상태 단어(누드/나체 등)가 있으면 항상 최종 누드.
+ *   2) revision 자체가 착의 동작이면(예: "가운을 입혀줘") base가 뭐라든 이번 수정 이후엔
+ *      옷을 입은 상태다.
+ *   3) revision 자체가 탈의 동작이면(위에서 착의가 없다는 게 이미 확인됨) 최종 누드다.
+ *   4) revision이 옷 얘기를 전혀 안 하면, base가 이미 누드/탈의 상태였는지로 판단한다
+ *      (여러 번 수정을 거치며 이전 라운드의 누드 상태가 그대로 이어지게 — 단, base에
+ *      착의 동작이 있으면 그건 상태 서술이 아니라 "새로 입었다"는 뜻이므로 누드가 아니다).
  */
-export function wantsFullNude(text: string): boolean {
-  const t = polishKoreanPromptText(text || '')
-  if (/누드|나체|nude|naked|fully\s*nude|bare\s*(?:skin|body)|완전\s*노출|전라/i.test(t)) return true
-  if (!wantsNudeOrUndress(t)) return false
-  return !wantsDressAction(t)
+export function wantsFullNude(revision: string, baseDescription?: string): boolean {
+  const rev = polishKoreanPromptText(revision || '')
+  const base = polishKoreanPromptText(baseDescription || '')
+  if (NUDE_STATE_WORD_PATTERN.test(rev) || NUDE_STATE_WORD_PATTERN.test(base)) return true
+  if (wantsDressAction(rev)) return false
+  if (wantsNudeOrUndress(rev)) return true
+  if (!base) return false
+  if (wantsDressAction(base)) return false
+  return wantsNudeOrUndress(base)
 }
 
 /**
@@ -350,14 +379,24 @@ function isDanceRevision(description: string): boolean {
 }
 
 /** 화보 네거티브 — 속옷·누드·거울 요청에 맞춰 이탈 억제 */
-export function buildFashionNegativePrompt(description: string): string {
+/**
+ * @param descriptionOrBase 화면 전체 컨텍스트(거울·배경·귀걸이·춤 등 옷 이외의 판별에 계속
+ * 이 전체 텍스트를 쓴다) — refine.ts처럼 revision을 따로 넘기지 않으면 이 값 하나로 전부
+ * 판단한다(기존 동작과 동일, generate.ts의 단일 description 호출과 하위 호환).
+ * @param revision (선택) 이번 수정 지시만 별도로 넘기면, 최종 누드 판별(wantsFullNude)만
+ * revision·base를 분리해서 정확히 계산한다 — descriptionOrBase가 이미 "baseDescription
+ * ${revision}" 형태로 합쳐져 있어도, base의 "치마를 입고 있다" 같은 서술 때문에 이번
+ * revision의 순수 탈의 지시가 상쇄되는 사고를 막는다(wantsFullNude 주석 참고).
+ */
+export function buildFashionNegativePrompt(descriptionOrBase: string, revision?: string): string {
+  const description = revision === undefined ? descriptionOrBase : `${descriptionOrBase} ${revision}`.trim()
   const extras: string[] = []
   let base = DEFAULT_NEGATIVE_PROMPT
 
   // wantsNudeOrUndress가 아니라 wantsFullNude를 쓴다 — "바지를 벗기고 치마를 입혀라"
   // 같은 옷 교체 요청까지 wantsNudeOrUndress만으로 판단하면 "옷을 입지 말라"는 네거티브를
   // 추가해버려서 사용자가 명시적으로 요청한 착의(치마)와 정반대로 충돌하는 사고가 있었다.
-  if (wantsFullNude(description)) {
+  if (wantsFullNude(revision ?? descriptionOrBase, revision === undefined ? '' : descriptionOrBase)) {
     // "missing outfit"은 누드(=의상 없음)와 정면 충돌 → 제거
     base = base.replace(OUTFIT_FORCE_NEGATIVE, '')
     extras.push(
@@ -576,12 +615,17 @@ function resolveFramingHint(size: string | undefined): string {
   return 'full body, head to toe, feet visible, entire outfit visible'
 }
 
-/** 한국어 의상/장소 키워드를 영어 강제 지시로 보강 (모델이 정장·스튜디오로 이탈하는 경우 억제). */
-function amplifyClothingAndScene(description: string): string {
+/**
+ * 한국어 의상/장소 키워드를 영어 강제 지시로 보강 (모델이 정장·스튜디오로 이탈하는 경우 억제).
+ * @param revision (선택) buildFashionNegativePrompt와 동일한 이유로, revision을 따로
+ * 넘기면 누드 판별(wantsFullNude)만 base와 분리해서 정확히 계산한다.
+ */
+function amplifyClothingAndScene(descriptionOrBase: string, revision?: string): string {
+  const description = revision === undefined ? descriptionOrBase : `${descriptionOrBase} ${revision}`.trim()
   const extras: string[] = []
   // wantsFullNude — "바지를 벗기고 치마를 입혀라" 같은 옷 교체 요청까지 "no clothing, bare
   // skin" 태그를 강제로 붙이면 사용자가 명시한 착의 지시(치마)와 정반대로 충돌한다.
-  const nude = wantsFullNude(description)
+  const nude = wantsFullNude(revision ?? descriptionOrBase, revision === undefined ? '' : descriptionOrBase)
 
   // 누드/탈의는 의상 강제보다 우선 — "속옷제거"가 속옷 착용으로 오인되지 않게
   if (nude) {
@@ -1169,7 +1213,10 @@ export function buildRefinePrompt(input: {
   // genMode='fashion'이라도 실제 서술이 동물/사물 장면이면 "성인 여성 얼굴 유지" 문구를 쓰지 않는다
   // (관리자가 화보 탭에서 동물 그림을 만들었다가 나중에 그 그림을 수정하는 경우가 실제로 있다).
   const free = input.genMode === 'free' || describesAnimalSubject(`${base} ${revision}`)
-  const revisionAmplify = free ? '' : amplifyClothingAndScene(`${base} ${revision}`)
+  // base/revision을 따로 넘긴다 — amplifyClothingAndScene 내부의 누드 판별(wantsFullNude)만
+  // 분리해서 정확히 계산하고, 나머지(거울·배경·귀걸이 등) 판별은 그대로 base+revision
+  // 전체 컨텍스트를 본다(기존과 동일).
+  const revisionAmplify = free ? '' : amplifyClothingAndScene(base, revision)
   const freeEthnicity =
     free && mentionsHumanSubject(`${base} ${revision}`) ? defaultEthnicitySentence(`${base} ${revision}`) : ''
 
@@ -1189,9 +1236,10 @@ export function buildRefinePrompt(input: {
     return [
       'Edit the SAME scene. Keep original subjects (animals/objects) and setting.',
       `Apply exactly: ${revision}.`,
-      // wantsFullNude — "치마를 벗기고 바지를 입혀라" 같은 옷 교체 요청까지 "bare skin,
-      // remove garments" 지시를 넣으면 착의 지시와 정반대로 충돌한다.
-      wantsFullNude(revision)
+      // wantsFullNude(revision, base) — "치마를 벗기고 바지를 입혀라" 같은 옷 교체 요청까지
+      // "bare skin, remove garments" 지시를 넣으면 착의 지시와 정반대로 충돌한다. base를
+      // 같이 넘겨서 이전 라운드에 확립된 누드 상태는 계속 승계되게 한다.
+      wantsFullNude(revision, base)
         ? 'Adult nude/undress as requested: bare skin, remove garments — do not keep underwear or robes.'
         : 'CRITICAL: Do NOT invent a human woman, fashion model, bathrobe, or studio portrait.',
       freeEthnicity,
@@ -1211,7 +1259,7 @@ export function buildRefinePrompt(input: {
       // 예전엔 이 분기엔 없어서, 마스크한 부분에서 옷/속옷을 지워달라고 해도 모델이 학습
       // 편향으로 브라·팬티를 다시 그려 넣는 사고가 텍스트 수정 경로보다도 더 흔했다
       // (마스크 영역이 좁아 모델이 "뭔가로는 채워야 한다"고 판단하기 쉬움).
-      wantsFullNude(revision)
+      wantsFullNude(revision, base)
         ? 'Adult nude/undress as requested inside the mask: bare skin, remove the garment — do NOT redraw a bra, panties, lingerie, or any covering fabric in its place.'
         : '',
       'Do NOT invent a new person, new face, new body, or new scene outside the mask.',
@@ -1253,7 +1301,7 @@ export function buildRefinePrompt(input: {
   const applyPrefix = 'ONLY apply this change:'
   const bgAndPoseNote = 'Keep background and pose unchanged unless the change requires it.'
   const bathrobeNote = 'Do not add a bathrobe, kimono, or coat unless requested.'
-  const nudeOrLingerieNote = wantsFullNude(revision)
+  const nudeOrLingerieNote = wantsFullNude(revision, base)
     ? 'Nude/undress requested: bare skin, remove garments, no bra or panties left.'
     : 'If lingerie/underwear is requested, show it, never a robe.'
   const contextPrefix = 'Context (must still hold):'
