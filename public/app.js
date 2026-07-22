@@ -47,15 +47,6 @@ const moodField = document.getElementById('mood')
 const sizeField = document.getElementById('size')
 const precisionModeField = document.getElementById('precision-mode')
 const genModeHint = document.getElementById('gen-mode-hint')
-const faceReferencePanel = document.getElementById('face-reference-panel')
-const faceReferenceUploadButton = document.getElementById('face-reference-upload-button')
-const faceReferenceInput = document.getElementById('face-reference-input')
-const faceReferencePreviewWrap = document.getElementById('face-reference-preview-wrap')
-const faceReferencePreview = document.getElementById('face-reference-preview')
-const faceReferenceDeleteButton = document.getElementById('face-reference-delete-button')
-const faceReferenceStatus = document.getElementById('face-reference-status')
-const useFaceReferenceRow = document.getElementById('use-face-reference-row')
-const useFaceReferenceField = document.getElementById('use-face-reference')
 let scenePreviewTimer = null
 let scenePreviewSeq = 0
 
@@ -2600,7 +2591,6 @@ form.addEventListener('submit', async (event) => {
       size: sizeField.value,
       mode: getGenMode(),
       precision: Boolean(precisionModeField?.checked),
-      useFaceReference: Boolean(useFaceReferenceField?.checked),
     })
 
     stopTimer()
@@ -2808,138 +2798,6 @@ loadImageInput?.addEventListener('change', () => {
   const file = loadImageInput.files?.[0]
   if (file) loadImageFromFile(file)
 })
-
-// 「내 얼굴 관리」 — InstantID(얼굴 임베딩) 경로용 얼굴 레퍼런스 사진 등록/삭제.
-// 관리자 · 화보 모드에서만 노출된다(syncGenModeUi에서 표시 여부 결정).
-let faceReferenceLoaded = false
-
-function setFaceReferenceStatus(message, isError) {
-  if (!faceReferenceStatus) return
-  faceReferenceStatus.hidden = !message
-  faceReferenceStatus.textContent = message || ''
-  faceReferenceStatus.classList.toggle('form__hint--error', Boolean(isError))
-}
-
-function renderFaceReferenceState(imageUrl) {
-  if (faceReferencePreview && faceReferencePreviewWrap) {
-    if (imageUrl) {
-      faceReferencePreview.src = imageUrl
-      faceReferencePreviewWrap.hidden = false
-    } else {
-      faceReferencePreview.removeAttribute('src')
-      faceReferencePreviewWrap.hidden = true
-    }
-  }
-  if (useFaceReferenceRow) {
-    useFaceReferenceRow.hidden = !imageUrl || Boolean(faceReferencePanel?.hidden)
-  }
-  if (!imageUrl && useFaceReferenceField) {
-    useFaceReferenceField.checked = false
-  }
-}
-
-async function loadFaceReferenceState() {
-  if (!isAdminUser() || !isLoggedIn()) return
-  faceReferenceLoaded = true
-  try {
-    const response = await fetch('/api/face-reference', { headers: authHeaders() })
-    const data = await response.json().catch(() => ({}))
-    if (data.ok) renderFaceReferenceState(data.imageUrl || null)
-  } catch {
-    /* 조용히 무시 — 못 채워도 생성 자체는 막지 않음 */
-  }
-}
-
-async function uploadFaceReferencePhoto(file) {
-  if (!file || !String(file.type || '').startsWith('image/')) {
-    setFaceReferenceStatus('이미지 파일만 등록할 수 있어요 (PNG/JPEG/WEBP).', true)
-    return
-  }
-  if (!isLoggedIn()) {
-    showPinGate('로그인이 필요해요.')
-    return
-  }
-
-  if (faceReferenceUploadButton) faceReferenceUploadButton.disabled = true
-  setFaceReferenceStatus('얼굴 사진을 등록하고 있어요…', false)
-  try {
-    const dataUrl = await prepareImageDataUrl(file)
-    const uploadRes = await fetch('/api/upload-image', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ dataUrl, purpose: 'face-reference' }),
-    })
-    const uploadData = await uploadRes.json().catch(() => ({}))
-    if (uploadRes.status === 401) {
-      clearAllAuth()
-      showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
-      return
-    }
-    if (!uploadData.ok || !uploadData.imageUrl) {
-      setFaceReferenceStatus(
-        `사진 업로드에 실패했어요: ${uploadData.message || uploadData.error || '알 수 없는 오류'}`,
-        true,
-      )
-      return
-    }
-
-    const saveRes = await fetch('/api/face-reference', {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ imageUrl: uploadData.imageUrl }),
-    })
-    const saveData = await saveRes.json().catch(() => ({}))
-    if (!saveData.ok) {
-      setFaceReferenceStatus(
-        `얼굴 사진 저장에 실패했어요: ${saveData.message || saveData.error || '알 수 없는 오류'}`,
-        true,
-      )
-      return
-    }
-
-    renderFaceReferenceState(saveData.imageUrl)
-    setFaceReferenceStatus('얼굴 사진을 등록했어요. 「내 얼굴로 생성」을 켜면 이 얼굴을 유지한 채 생성돼요.', false)
-  } catch (error) {
-    setFaceReferenceStatus(`등록하지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
-  } finally {
-    if (faceReferenceUploadButton) faceReferenceUploadButton.disabled = false
-    if (faceReferenceInput) faceReferenceInput.value = ''
-  }
-}
-
-async function deleteFaceReferencePhoto() {
-  if (!isLoggedIn()) return
-  if (faceReferenceDeleteButton) faceReferenceDeleteButton.disabled = true
-  setFaceReferenceStatus('삭제하고 있어요…', false)
-  try {
-    const response = await fetch('/api/face-reference', { method: 'DELETE', headers: authHeaders() })
-    const data = await response.json().catch(() => ({}))
-    if (!data.ok) {
-      setFaceReferenceStatus(`삭제에 실패했어요: ${data.message || data.error || '알 수 없는 오류'}`, true)
-      return
-    }
-    renderFaceReferenceState(null)
-    if (data.remoteRevoked) {
-      setFaceReferenceStatus('등록한 얼굴 사진을 삭제했어요. (저장소 파일 접근도 즉시 차단됨)', false)
-    } else {
-      setFaceReferenceStatus(
-        '앱에서는 삭제됐지만, 저장소 접근 차단은 실패했어요. 다시 눌러서 한 번 더 시도해 주세요.',
-        true,
-      )
-    }
-  } catch (error) {
-    setFaceReferenceStatus(`삭제하지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
-  } finally {
-    if (faceReferenceDeleteButton) faceReferenceDeleteButton.disabled = false
-  }
-}
-
-faceReferenceUploadButton?.addEventListener('click', () => faceReferenceInput?.click())
-faceReferenceInput?.addEventListener('change', () => {
-  const file = faceReferenceInput.files?.[0]
-  if (file) uploadFaceReferencePhoto(file)
-})
-faceReferenceDeleteButton?.addEventListener('click', () => deleteFaceReferencePhoto())
 
 // 화보/일러스트 스튜디오 화면에서 Ctrl+V로 사진을 붙여넣으면 바로 불러온다.
 // 클립보드에 이미지가 없으면(텍스트만 있으면) 아무것도 가로채지 않고 원래 붙여넣기 동작을 둔다.
@@ -3534,16 +3392,6 @@ function syncGenModeUi() {
   // 자유 모드 기본은 가로(장면), 관리자전용은 세로(전신)
   if (sizeField && !sizeField.dataset.userPicked) {
     sizeField.value = free ? 'landscape' : 'portrait'
-  }
-
-  // 「내 얼굴 관리」 — 관리자 · 화보 모드에서만 노출. InstantID로 얼굴을 유지한 채 생성한다.
-  const showFaceReference = admin && !free
-  if (faceReferencePanel) faceReferencePanel.hidden = !showFaceReference
-  if (useFaceReferenceRow) {
-    useFaceReferenceRow.hidden = !showFaceReference || !faceReferencePreview?.getAttribute('src')
-  }
-  if (showFaceReference && !faceReferenceLoaded) {
-    loadFaceReferenceState()
   }
 }
 sizeField?.addEventListener('change', () => {
