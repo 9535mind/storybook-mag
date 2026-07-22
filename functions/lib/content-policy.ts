@@ -342,11 +342,18 @@ export function mergeFreeRevisionDescription(base: string, revision: string): st
  * 프롬프트 텍스트로는 사실상 아무 시각 정보도 안 되는 표현은 빼고(화면비는 width/height로 이미 결정됨),
  * 같은 뜻을 반복하지 않는 짧은 태그로만 구성한다.
  */
+/**
+ * 태그체로 압축된 구도 힌트. "face-only crop 금지" 같은 부정 지시는 이미
+ * DEFAULT_NEGATIVE_PROMPT(negative prompt)에 같은 내용이 들어 있어서 여기 긍정 프롬프트에
+ * 중복으로 넣지 않는다 — 어차피 CLIP은 "Do NOT ~" 부정을 잘 못 알아듣고, negative prompt
+ * 슬롯이 그 역할을 전담하도록 이미 설계돼 있다(위 buildFashionMagazinePrompt 주석 참고).
+ * 중복을 빼는 것만으로 케이스별 5~6단어를 아꼈다.
+ */
 function resolveFramingHint(size: string | undefined): string {
-  if (size === 'landscape') return 'full outfit visible head to mid-thigh, environment visible in background'
-  if (size === 'square') return 'waist-up or three-quarter body shot, dress and pose clearly visible, not a face-only crop'
-  if (size === 'story') return 'full body head to toe, feet visible, entire outfit readable, not a face-only crop'
-  return 'full body shot, head to toe, feet visible, entire outfit from neckline to hem visible'
+  if (size === 'landscape') return 'full outfit, head to mid-thigh, background visible'
+  if (size === 'square') return 'waist-up or three-quarter shot, outfit and pose visible'
+  if (size === 'story') return 'full body, head to toe, feet visible, outfit readable'
+  return 'full body, head to toe, feet visible, entire outfit visible'
 }
 
 /** 한국어 의상/장소 키워드를 영어 강제 지시로 보강 (모델이 정장·스튜디오로 이탈하는 경우 억제). */
@@ -587,10 +594,10 @@ export function defaultEthnicityTag(text: string): string {
   if (ETHNICITY_MENTIONED_PATTERN.test(text)) return ''
   const hasMale = MALE_SUBJECT_PATTERN.test(text)
   const hasFemale = FEMALE_SUBJECT_PATTERN.test(text)
-  if (hasMale && !hasFemale) return 'Korean man, handsome attractive Korean face'
-  if (hasMale && hasFemale) return 'Korean man and Korean woman, attractive Korean faces'
+  if (hasMale && !hasFemale) return 'Korean man, attractive face'
+  if (hasMale && hasFemale) return 'Korean man and Korean woman, attractive faces'
   // 명시가 없으면 화보 기본 대상(여성)으로 간주
-  return 'Korean woman, pretty attractive Korean face'
+  return 'Korean woman, attractive face'
 }
 
 const GENERIC_PERSON_PATTERN =
@@ -624,17 +631,18 @@ export function defaultEthnicitySentence(text: string): string {
 // 않아, 실제 결과물 차이가 크게 나는 조명·필름 질감 축으로 바꿨다. 화보/자유 일러스트 양쪽
 // 모드가 공유하는 단일 소스. 이전 값(editorial/glamour/chic/romantic)은 과거에 저장된 갤러리
 // 항목을 다시 수정할 때 깨지지 않도록 하위 호환 별칭으로 남겨둔다.
+// 태그체로 압축(관사/중복 형용사 제거) — SDXL_TAG_SYSTEM(translate.ts)이 사용자 description에
+// 적용하는 것과 같은 원칙: 문장이 아니라 쉼표 구분 태그로, 의미가 살아남는 한 단어를 최대한 뺀다.
 export const MOOD_LOOK_TAGS: Record<string, string> = {
-  clean: 'clean modern digital photography, crisp sharp detail, neutral commercial color grade',
-  vintage: 'vintage 35mm film photography, visible film grain, warm faded analog color grade',
-  cinematic:
-    'cinematic anamorphic photography, dramatic wide framing, moody teal-and-orange color grade',
-  pastel: 'soft pastel photography, dreamy diffused light, gentle high-key pastel color palette',
+  clean: 'clean digital photography, crisp detail, neutral color grade',
+  vintage: 'vintage 35mm film photography, film grain, warm analog grade',
+  cinematic: 'cinematic anamorphic photography, dramatic framing, teal-orange grade',
+  pastel: 'soft pastel photography, dreamy light, high-key pastel palette',
   // 하위 호환 별칭
-  editorial: 'clean modern digital photography, crisp sharp detail, neutral commercial color grade',
-  glamour: 'cinematic anamorphic photography, dramatic wide framing, moody teal-and-orange color grade',
-  chic: 'clean modern digital photography, crisp sharp detail, neutral commercial color grade',
-  romantic: 'soft pastel photography, dreamy diffused light, gentle high-key pastel color palette',
+  editorial: 'clean digital photography, crisp detail, neutral color grade',
+  glamour: 'cinematic anamorphic photography, dramatic framing, teal-orange grade',
+  chic: 'clean digital photography, crisp detail, neutral color grade',
+  romantic: 'soft pastel photography, dreamy light, high-key pastel palette',
 }
 
 export function resolveMoodTag(mood: string | undefined): string {
@@ -701,10 +709,10 @@ function buildFashionPromptSuffixParts(input: {
   const ethnicitySource = polishKoreanPromptText(input.rawDescription)
   const nude = wantsNudeOrUndress(ethnicitySource)
   const ethnicityTag = defaultEthnicityTag(ethnicitySource)
-  const nudeFlag = nude ? 'adult nude, bare skin visible' : ''
+  const nudeFlag = nude ? 'adult nude, bare skin' : ''
   const moodTag = resolveMoodTag(input.mood)
   const framing = resolveFramingHint(input.size)
-  const qualitySuffix = 'photorealistic, natural skin texture, sharp focus, 8k'
+  const qualitySuffix = 'photorealistic, natural skin, sharp focus, 8k'
   const rawAmplify = amplifyClothingAndScene(ethnicitySource).replace(/^,\s*/, '')
 
   const fixedWords =
