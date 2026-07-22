@@ -761,7 +761,12 @@ function buildFashionPromptSuffixParts(input: {
   const ethnicitySource = polishKoreanPromptText(input.rawDescription)
   const nude = wantsNudeOrUndress(ethnicitySource)
   const ethnicityTag = defaultEthnicityTag(ethnicitySource)
-  const nudeFlag = nude ? 'adult nude, bare skin' : ''
+  // 누드 요청 시 "no bra, no panties"까지 양성(positive) 프롬프트에 직접 못박아 둔다.
+  // 예전엔 negative prompt(lingerie, underwear, bra, panties)에만 의존했는데, Lightning
+  // 계열(스텝 8·CFG 2~4로 낮음)은 negative 프롬프트 순응도가 약해서, 학습 데이터 편향으로
+  // 속옷을 입혀버리는 사고가 실측으로 반복 확인됐다 — 보통 더 잘 지켜지는 양성 프롬프트에도
+  // 같은 지시를 중복으로 넣어 이탈 확률을 낮춘다.
+  const nudeFlag = nude ? 'adult nude, bare skin, no bra, no panties' : ''
   const moodTag = resolveMoodTag(input.mood)
   const framing = resolveFramingHint(input.size)
   const qualitySuffix = 'photorealistic, natural skin, sharp focus, 8k'
@@ -939,6 +944,13 @@ export function buildRefinePrompt(input: {
       'Local edit of an existing photo. ONLY change the masked white areas.',
       `Local change: ${revision}.${revisionAmplify}`,
       'Follow the revision exactly, including adult / nude / erotic changes when requested.',
+      // 영역 지정(인페인트) 수정에도 텍스트 수정과 동일하게 "속옷 재등장 금지"를 명시한다 —
+      // 예전엔 이 분기엔 없어서, 마스크한 부분에서 옷/속옷을 지워달라고 해도 모델이 학습
+      // 편향으로 브라·팬티를 다시 그려 넣는 사고가 텍스트 수정 경로보다도 더 흔했다
+      // (마스크 영역이 좁아 모델이 "뭔가로는 채워야 한다"고 판단하기 쉬움).
+      wantsNudeOrUndress(revision)
+        ? 'Adult nude/undress as requested inside the mask: bare skin, remove the garment — do NOT redraw a bra, panties, lingerie, or any covering fabric in its place.'
+        : '',
       'Do NOT invent a new person, new face, new body, or new scene outside the mask.',
       'Preserve exact face identity, skin tone, hair, eye shape, and unmasked pixels — same woman.',
       base ? `Context: ${base}.` : '',
