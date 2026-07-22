@@ -115,7 +115,12 @@ export function wantsNudeOrUndress(text: string): boolean {
       `속옷${KO_PARTICLE_GAP}제거`, '속옷제거', `속옷${KO_PARTICLE_GAP}벗`,
       '탈의', `옷${KO_PARTICLE_GAP}벗`, `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`,
       `언더웨어${KO_PARTICLE_GAP}제거`,
-      'undress', 'disrobe', 'strip(?:ping|ped)?',
+      // "strip(?:ping|ped)?"에 단어 경계(\b)가 없어서 "striped"(줄무늬 패턴 — 탈의와 무관한
+      // 흔한 의상 묘사 단어)의 앞부분 "strip"만 부분일치로 걸려 오발동하는 사고가 실측으로
+      // 확인됐다("striped dress" 같은 영어 압축 프롬프트가 이전 라운드 baseDescription으로
+      // 재사용될 때 특히 위험). \b를 앞뒤로 둬서 "strip"/"stripping"/"stripped"(동사, 겹자음
+      // pp)만 매칭되고 "striped"(명사 stripe+d, 단자음 p)는 매칭되지 않게 한다.
+      'undress', 'disrobe', '\\bstrip(?:ping|ped)?\\b',
       'remove\\s*(?:her\\s*)?(?:clothes|clothing|underwear|lingerie)',
       'fully\\s*nude', 'bare\\s*(?:skin|body)', '완전\\s*노출', '전라',
     ].join('|'),
@@ -145,7 +150,8 @@ export function wantsUndressAction(text: string): boolean {
       '탈의', '벗는', '벗어', '벗기', '벗겨', '벗김', '벗을', '벗었',
       `속옷${KO_PARTICLE_GAP}제거`, '속옷제거', `언더웨어${KO_PARTICLE_GAP}제거`,
       `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`, `옷${KO_PARTICLE_GAP}벗`,
-      'undress', 'disrobe', 'strip(?:ping|ped)?', 'take\\s*off',
+      // wantsNudeOrUndress와 동일한 이유로 \b 필요("striped" 오발동 방지).
+      'undress', 'disrobe', '\\bstrip(?:ping|ped)?\\b', 'take\\s*off',
       'removes?\\s*(?:her\\s*)?(?:clothes|clothing|underwear|lingerie|robe|dress)',
     ].join('|'),
     'i',
@@ -243,7 +249,9 @@ export function buildFashionNegativePrompt(description: string): string {
     // 넣으면 amplifyClothingAndScene이 넣는 "도시 배경·거리 조명" 양성 지시와 충돌해서 창밖
     // 야경 자체가 억제되는 사고가 있었다. 도시/야경 요청이 함께 있으면 그 두 항목만 뺀다
     // (벽 색이 회색/베이지로 새는 건 여전히 막되, 창 너머 어두운 야경은 허용).
-    const wantsCityOrNight = /도시|시티|어반|거리|야경|urban|city|street/i.test(description)
+    // "city"/"urban"이 경계 없으면 "electricity"("city" 포함), "suburban"("urban" 포함)
+    // 같은 흔한 단어에도 오발동한다 — \b로 좁힌다.
+    const wantsCityOrNight = /도시|시티|어반|거리|야경|\burban\b|\bcity\b|\bstreet\b/i.test(description)
     const whiteBgExtras = wantsCityOrNight
       ? 'grey background, gray background, beige background, tan background, brown background, off-white background, cream background'
       : 'grey background, gray background, beige background, tan background, brown background, dark background, colored background, off-white background, cream background'
@@ -319,8 +327,15 @@ export function isAdditiveRefineRevision(revision: string): boolean {
   )
 }
 
+// 영단어(frog/cat/dog/lion/bear/bird 등)는 \b로 단어 경계를 반드시 둬야 한다 — 예전엔
+// 경계 없이 그냥 부분일치라서 "delicate"("cat" 포함), "million/billion/pavilion"("lion"
+// 포함), "forbear"("bear" 포함) 같은 흔한 단어에도 오발동해서, 화보 수정 문구에 "delicate"
+// (레이스/장신구 묘사에 자주 쓰임) 한 단어만 있어도 화보 모드 전체가 "동물/일러스트" 자유
+// 모드로 잘못 전환되는 심각한 사고가 실측으로 확인됐다(정체성 잠금·인종 기본값·란제리
+// 안전 문구가 전부 빠지고 "여성 모델을 만들지 말라"는 정반대 지시가 들어감). 복수형(s)만
+// 허용하고, 그 외에는 정확히 그 단어여야 매칭되게 좁힌다.
 const ANIMAL_SUBJECT_PATTERN =
-  /토끼|개구리|여우|사자|호랑이|고양이|강아지|원숭|당나귀|곰|늑대|동물|frog|rabbit|fox|lion|tiger|cat|dog|monkey|bear|bird|horse|animal/i
+  /토끼|개구리|여우|사자|호랑이|고양이|강아지|원숭|당나귀|곰|늑대|동물|\b(?:frog|rabbit|fox|lion|tiger|cat|dog|monkey|bear|bird|horse|animal)s?\b/i
 
 // "말"(말horse)과 "새"(bird)는 JS 정규식의 \b가 한글을 \w로 취급하지 않아 "말\b"/"새\b"가
 // 한글 문장에서는 절대 매칭되지 않는 죽은 패턴이었다(실측으로 확인 — "말의 머리 위에" 같은
@@ -424,7 +439,9 @@ function amplifyClothingAndScene(description: string): string {
     // 오발동해서, 수정 요청과 무관하게 의상 재질이 니트 → 광택 실크로 통째로 바뀌는 사고가
     // 실측으로 확인됐다. 재질(실크/슬립)을 실제로 언급했을 때만 재질을 강제한다.
     const wantsSilkOrSlip = /실크|슬립|slip|silk/i.test(description)
-    const wantsDressGarment = /드레스|dress/i.test(description)
+    // "dress"에 경계가 없으면 "address"("dress" 포함)에도 오발동한다("she addresses the
+    // camera" 같은 번역문에서 실제 확인) — \b로 좁힌다(dressed/dressing 등 파생형은 유지).
+    const wantsDressGarment = /드레스|\bdress/i.test(description)
     // 아래 태그들은 "NOT 업무복/가운" 같은 부정 문구를 길게 반복해 왔는데, 그 내용은 이미
     // DEFAULT_NEGATIVE_PROMPT(business suit/blazer/bathrobe 등)에 포함돼 있다 — positive
     // 프롬프트 쪽 예산이 다중 키워드 상황에서 특히 귀해서, 중복되는 부정 문구를 걷어내고
@@ -451,7 +468,7 @@ function amplifyClothingAndScene(description: string): string {
   if (/거울|mirror/i.test(description)) {
     extras.push('posed in front of a mirror, mirror visible in frame')
   }
-  const wantsCityOrNightHere = /도시|시티|어반|거리|야경|urban|city|street/i.test(description)
+  const wantsCityOrNightHere = /도시|시티|어반|거리|야경|\burban\b|\bcity\b|\bstreet\b/i.test(description)
   const wantsNightHere = /야경|밤\s*풍경|저녁\s*풍경|night\s*view|night\s*skyline|nighttime/i.test(description)
   // "야경"(밤의 도시 풍경)은 그냥 "도시/거리" 태그만으로는 낮인지 밤인지 애매해서, 실측으로
   // 밝은 낮 시간 창문으로 나오는 경우가 반복 확인됐다("street lights"만 있으면 낮에도
@@ -1035,18 +1052,52 @@ export function buildRefinePrompt(input: {
     !revisionTargetsSkinTone && 'same skin tone',
   ].filter((v): v is string => Boolean(v))
 
+  // 이 문장형 프롬프트는 그대로 SDXL/Juggernaut(CLIP ~77토큰≈65~70단어) img2img 엔진에
+  // 들어가는데, 예전엔 단어 예산 제한이 전혀 없었다 — 실측으로 재보니 고정 지시문만 합쳐도
+  // 100단어를 넘어서, "원본 참고문(Original brief)"이나 "배경 유지"/"란제리 안전문구" 같은
+  // 뒤쪽 문장이 CLIP 인코더에 의해 조용히 잘려나가고 있었다(수정을 반복할수록 base가
+  // 길어져 더 심해짐 — "수정할수록 얼굴/의상이 이상하게 무너진다"는 반복 신고의 핵심
+  // 원인 중 하나). 고정 문구를 최대한 짧게 줄이고, revision은 절대 자르지 않은 채
+  // amplify/base(원본 참고문 — 어차피 img2img는 원본 이미지 픽셀을 직접 보므로 텍스트
+  // 손실의 피해가 상대적으로 적다)에 남는 예산을 나눠서 CLIP 한도 안에서 핵심 안전
+  // 지시(배경 유지·가운 방지·란제리)가 항상 살아남게 한다.
+  const imgEditPrefix = 'Image-to-image edit of the SAME photo.'
+  const identityLockSentence = `IDENTITY LOCK: same face, ${identityLockAttributes.join(', ')}.`
+  const applyPrefix = 'ONLY apply this change:'
+  const bgAndPoseNote = 'Keep background and pose unchanged unless the change requires it.'
+  const bathrobeNote = 'Do not add a bathrobe, kimono, or coat unless requested.'
+  const nudeOrLingerieNote = wantsNudeOrUndress(revision)
+    ? 'Nude/undress requested: bare skin, remove garments, no bra or panties left.'
+    : 'If lingerie/underwear is requested, show it, never a robe.'
+  const contextPrefix = 'Context (must still hold):'
+  const photoNote = 'Photorealistic, same lighting.'
+
+  // 모든 "고정 문구"(래퍼 텍스트 포함 — 예전엔 "Image-to-image edit..."/"Context (must still
+  // hold):" 같은 래퍼 자체의 단어 수를 빼먹어서 실측 결과가 예산보다 늘 10단어쯽 더 길었다)를
+  // 먼저 합산하고, revision(절대 안 자름)을 뺀 나머지만 amplify/base에 나눠준다.
+  const fixedWords =
+    countWords(imgEditPrefix) +
+    countWords(identityLockSentence) +
+    countWords(applyPrefix) +
+    countWords(bgAndPoseNote) +
+    countWords(bathrobeNote) +
+    countWords(nudeOrLingerieNote) +
+    countWords(contextPrefix) +
+    countWords(photoNote)
+  const remainingForAmplifyAndBase = Math.max(0, SDXL_WORKING_BUDGET_WORDS - fixedWords - countWords(revision))
+  const amplifyBudget = Math.min(countWords(revisionAmplify), Math.ceil(remainingForAmplifyAndBase * 0.6), 15)
+  const cappedAmplify = capWordsSimple(revisionAmplify.replace(/^,\s*/, ''), amplifyBudget)
+  const baseBudget = Math.max(0, remainingForAmplifyAndBase - countWords(cappedAmplify))
+  const cappedBase = capWordsSimple(base, baseBudget)
+
   return [
-    `Image-to-image edit of the SAME photograph. IDENTITY LOCK: keep the exact same adult woman face, ${identityLockAttributes.join(', ')}.`,
-    `ONLY apply this change: ${revision}.${revisionAmplify}`,
-    'Do not replace the subject with a different person. Do not age-shift or beauty-filter into a new face.',
-    'If the revision only changes color or a garment detail, keep framing and pose identical.',
-    'Do not change background unless the revision asks for background.',
-    'Do NOT invent a bathrobe, kimono wrap, white dress shirt, or coat unless the revision asks for that garment.',
-    wantsNudeOrUndress(revision)
-      ? 'If nude / undress / underwear removal is requested, show bare adult skin — remove garments; do NOT keep lingerie, bra, panties, or a robe.'
-      : 'If lingerie or underwear is requested, show lingerie/underwear — never a robe.',
-    base ? `Original brief for continuity (must still hold): ${base}.` : '',
-    'Photorealistic, same lighting.',
+    `${imgEditPrefix} ${identityLockSentence}`,
+    `${applyPrefix} ${revision}.${cappedAmplify ? ` ${cappedAmplify}.` : ''}`,
+    bgAndPoseNote,
+    bathrobeNote,
+    nudeOrLingerieNote,
+    cappedBase ? `${contextPrefix} ${cappedBase}.` : '',
+    photoNote,
   ]
     .filter(Boolean)
     .join(' ')
