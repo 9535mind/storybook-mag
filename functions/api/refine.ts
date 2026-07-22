@@ -282,7 +282,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // 화보 모드 · 큰 수정 → 화보 T2I 재생성
   // ═══════════════════════════════════════════════════════════
   const structural = mode === 'text' && isStructuralRefineRevision(revision)
-  if (structural && genMode === 'fashion' && env.REPLICATE_API_TOKEN?.trim()) {
+  // isStructuralRefineRevision은 "누드/나체/nude"도 구조적 큰 수정으로 분류하는데, 바로 아래
+  // T2I 재생성 분기는 원본 이미지를 전혀 입력으로 쓰지 않는 순수 텍스트→이미지 생성이라
+  // (얼굴은 "Korean woman, attractive face" 같은 일반 인종 태그로만 지정됨) 매번 완전히
+  // 다른 사람 얼굴이 나온다 — 실측으로 "수정(누드 요청)할 때마다 얼굴이 달라진다"는 신고가
+  // 반복 확인됐다. 누드/탈의 요청은 원본 이미지를 실제로 입력으로 쓰는 img2img 경로(아래
+  // 511행~, 정밀모델·strength 0.6)로 보내서 얼굴을 최대한 보존한 채 옷을 벗기게 한다 —
+  // 이 경로는 T2I 재생성보다 옷을 완전히 제거하는 성공률은 다소 낮을 수 있지만, "다른 사람"
+  // 이 되어버리는 것보다는 원본 인물을 지키는 쪽이 사용자에게 훨씬 중요하다.
+  const nudeRevision = wantsNudeOrUndress(`${baseDescription} ${revision}`)
+  if (structural && !nudeRevision && genMode === 'fashion' && env.REPLICATE_API_TOKEN?.trim()) {
     const merged = [baseDescription, revision].filter(Boolean).join('. ')
     // SDXL/Juggernaut CLIP 인코더의 ~70단어 예산에 맞춰 번역+압축 — generate.ts의 화보 경로와 동일.
     // revision을 따로 넘겨서, 예산 안에서 수정 지시가 조용히 잘려나가지 않게 한다. 예산 자체도
@@ -298,25 +307,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       rawDescription: merged,
     })
     const negativePrompt = buildFashionNegativePrompt(merged)
-    // 누드/탈의 수정 요청은 기본 Lightning 엔진이 옷을 입혀버리는 편향이 실측으로 확인됐다 —
-    // generate.ts와 동일하게 자동으로 정밀 모드(느린 일반 SDXL, 스텝↑·CFG↑)로 전환한다.
-    const autoPrecisionForNude = wantsNudeOrUndress(merged)
+    // 이 블록은 위에서 nudeRevision을 걸러냈으므로(285행 주석) 누드/탈의 케이스는 절대
+    // 여기 도달하지 않는다 — "전신으로/거울 앞에서" 같은 순수 프레이밍·구도 변경만 처리한다.
     try {
       const dims = resolveReplicateImageSize(size)
       const { imageUrl: nextUrl } = await generateReplicateImage({
         apiToken: env.REPLICATE_API_TOKEN,
-        modelOwner: autoPrecisionForNude
-          ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
-          : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-        modelName: autoPrecisionForNude
-          ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
-          : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-        modelVersion: autoPrecisionForNude ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
+        modelOwner: env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
+        modelName: env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
+        modelVersion: env.REPLICATE_MODEL_VERSION,
         prompt,
         negativePrompt,
         disableSafetyChecker: true,
-        numInferenceSteps: autoPrecisionForNude ? 30 : 14,
-        guidanceScale: autoPrecisionForNude ? 7.5 : 4.2,
+        numInferenceSteps: 14,
+        guidanceScale: 4.2,
         ...dims,
       })
       return jsonResponse(
@@ -328,11 +332,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           genMode,
           structuralRegen: true,
           engine: 'replicate',
-          engineLabel: autoPrecisionForNude
-            ? 'Replicate · 장면 재생성 · 정밀모드(30스텝, 누드 요청 자동 전환)'
-            : 'Replicate · 장면 재생성 (전신·의상 큰 수정)',
+          engineLabel: 'Replicate · 장면 재생성 (전신·구도 큰 수정)',
           message:
-            '전신·속옷처럼 큰 수정은 원본 유지 img2img 대신 장면 재생성으로 처리했어요.',
+            '전신·구도처럼 큰 수정은 원본 유지 img2img 대신 장면 재생성으로 처리했어요.',
         },
         200,
       )
@@ -501,17 +503,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // ── 화보 모드 전용: 작은 텍스트 수정만 얼굴 유지 img2img
   // (자유 모드는 위에서 이미 return — 여기 도달하지 않음)
   //
-  // 이 시점에 structural===true라면, 위 "화보 T2I 재생성" 시도가 이미 실패해서 여기로
-  // 떨어진 것이다(성공했으면 이미 return됨). 그런데 이 img2img 경로는 원래 "작은 텍스트
-  // 수정"용으로 튜닝된 낮은 strength(0.32)라, 전신·란제리·누드 같은 큰 구조 변경 요청을
-  // 대신 처리하면 거의 반영이 안 된다 — 게다가 정밀모드 전환도 이 경로엔 없어서, 누드
-  // 요청이 기본 Lightning 엔진(옷을 입혀버리는 편향 실측 확인됨)으로 조용히 처리돼 왔다.
-  // region 폴백(위 428~450행)과 동일하게 정밀모드/강도를 올리고, fallbackUsed로 정직하게
-  // "보조 경로로 대체됐다"는 사실을 알린다.
+  // 이 시점에 structural===true(누드 제외)라면, 위 "화보 T2I 재생성" 시도가 이미 실패해서
+  // 여기로 떨어진 것이다(성공했으면 이미 return됨). structural===true이면서 nudeRevision도
+  // true인 경우는 위에서 T2I 재생성을 의도적으로 건너뛴 것이다(얼굴 보존을 위해 — 위 285행
+  // 주석 참고) — "실패해서 대체됐다"가 아니라 "원래 이 경로가 정답"인 케이스이므로 메시지를
+  // 다르게 표시한다. 이 img2img 경로는 원래 "작은 텍스트 수정"용으로 튜닝된 낮은
+  // strength(0.32)라, 전신·란제리·누드 같은 큰 구조 변경 요청을 대신 처리하면 거의 반영이
+  // 안 된다 — 정밀모드 전환·strength 상향으로 대응한다.
   if (env.REPLICATE_API_TOKEN?.trim()) {
     try {
       const dims = resolveReplicateImageSize(size)
-      const structuralFallbackNude = structural && wantsNudeOrUndress(`${baseDescription} ${revision}`)
+      const structuralFallbackNude = structural && nudeRevision
       const strength = structural ? (structuralFallbackNude ? 0.6 : 0.5) : additive ? 0.5 : 0.28
       const { imageUrl: nextUrl } = await refineReplicateImageToImage({
         apiToken: env.REPLICATE_API_TOKEN,
@@ -541,15 +543,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           genMode,
           structuralRegen: false,
           engine: 'replicate',
-          engineLabel: structural
-            ? `Replicate · Img2Img (장면 재생성 실패 · 보조 경로${structuralFallbackNude ? ' · 정밀모드' : ''})`
-            : additive
-              ? 'Replicate · Img2Img (요소 추가 · strength↑)'
-              : 'Replicate · Img2Img (얼굴 유지 수정)',
-          fallbackUsed: structural || undefined,
-          message: structural
-            ? '장면을 통째로 다시 그리는 재생성이 실패해서, 원본을 더 보존하는 보조 방식으로 대체했어요. 큰 변경이 기대만큼 반영되지 않았을 수 있어요 — 필요하면 다시 수정하기를 눌러 재시도해 주세요.'
-            : undefined,
+          engineLabel: structuralFallbackNude
+            ? 'Replicate · Img2Img (누드 요청 · 얼굴 보존 · 정밀모드)'
+            : structural
+              ? 'Replicate · Img2Img (장면 재생성 실패 · 보조 경로)'
+              : additive
+                ? 'Replicate · Img2Img (요소 추가 · strength↑)'
+                : 'Replicate · Img2Img (얼굴 유지 수정)',
+          fallbackUsed: structural && !structuralFallbackNude ? true : undefined,
+          message: structuralFallbackNude
+            ? '원본 인물의 얼굴을 보존하기 위해 장면 재생성 대신 img2img로 처리했어요. 누드가 충분히 반영되지 않았으면 다시 수정하기를 한 번 더 눌러 주세요.'
+            : structural
+              ? '장면을 통째로 다시 그리는 재생성이 실패해서, 원본을 더 보존하는 보조 방식으로 대체했어요. 큰 변경이 기대만큼 반영되지 않았을 수 있어요 — 필요하면 다시 수정하기를 눌러 재시도해 주세요.'
+              : undefined,
           attempts: attempts.length ? attempts : undefined,
         },
         200,
