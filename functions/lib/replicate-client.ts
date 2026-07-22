@@ -298,6 +298,12 @@ export async function refineReplicateImageToImage(options: {
 
   const strength = options.strength ?? 0.42
   const safety = options.disableSafetyChecker !== false
+  const numInferenceSteps = options.numInferenceSteps ?? 8
+  const guidanceScale = options.guidanceScale ?? 2.2
+  // 2·3차(스키마 거부 대비 축소) 시도에서도 num_inference_steps/guidance_scale/negative_prompt는
+  // 계속 유지한다 — 예전엔 1차에만 있고 2·3차엔 빠져서, 정밀모드(스텝↑·CFG↑)로 전환했다고
+  // 표시해놓고 1차가 실패하면 조용히 기본 스텝/CFG로 되돌아가는 불일치가 있었다. width/height/
+  // number_of_images처럼 모델별로 스키마가 갈리는 필드만 단계적으로 줄인다.
   const attempts: Array<Record<string, unknown>> = [
     {
       prompt: options.prompt,
@@ -307,23 +313,27 @@ export async function refineReplicateImageToImage(options: {
       prompt_strength: strength,
       width: options.width,
       height: options.height,
-      num_inference_steps: options.numInferenceSteps ?? 8,
-      guidance_scale: options.guidanceScale ?? 2.2,
+      num_inference_steps: numInferenceSteps,
+      guidance_scale: guidanceScale,
       number_of_images: 1,
       disable_safety_checker: safety,
     },
     {
       prompt: options.prompt,
+      negative_prompt: options.negativePrompt,
       image: options.imageUrl,
       strength,
-      width: options.width,
-      height: options.height,
+      num_inference_steps: numInferenceSteps,
+      guidance_scale: guidanceScale,
       disable_safety_checker: safety,
     },
     {
       prompt: options.prompt,
+      negative_prompt: options.negativePrompt,
       init_image: options.imageUrl,
       prompt_strength: strength,
+      num_inference_steps: numInferenceSteps,
+      guidance_scale: guidanceScale,
       disable_safety_checker: safety,
     },
   ]
@@ -397,6 +407,13 @@ export function resolveWanI2vDuration(durationSec?: number): {
   return { num_frames: 121, frames_per_second: 8, approxSec: 15 }
 }
 
+/** ReplicateVideoAspect(portrait/landscape/square) → Wan2.2 aspect_ratio 파라미터.
+ * Wan은 16:9/9:16 두 값만 받는다(정사각형 옵션이 없음) — "쇼츠"(세로 영상)가 주 용도라
+ * square/story 등 애매한 값은 세로(9:16)로 매핑한다. */
+function wanAspectRatio(aspect?: ReplicateVideoAspect): '16:9' | '9:16' {
+  return aspect === 'landscape' ? '16:9' : '9:16'
+}
+
 function buildWanVideoInput(options: {
   imageUrl: string
   prompt: string
@@ -410,6 +427,9 @@ function buildWanVideoInput(options: {
     prompt: options.prompt,
     num_frames,
     frames_per_second,
+    // aspect_ratio를 안 넘기면 모델 기본값(16:9 가로)이 강제로 적용된다 — 세로(9:16)로 만든
+    // 원본 이미지로 "쇼츠"(세로 영상)를 요청해도 항상 가로로 나오던 죽은 코드였다.
+    aspect_ratio: wanAspectRatio(options.aspect),
     // go_fast(distilled fast path)는 속도는 빠르지만 프롬프트 순응도가 떨어진다.
     // 사용자가 구체적인 모션을 요청했을 때는 꺼서(느려지지만) 요청한 동작을 더 잘 따르게 한다.
     go_fast: options.goFast !== false,
@@ -417,12 +437,17 @@ function buildWanVideoInput(options: {
     // 성인 화보 모션이 안전필터에 걸려 빈 실패로 떨어지는 경우 완화
     disable_safety_checker: true,
   }
-  // fullInput이 스키마 문제로 거부될 때만 쓰는 최소 재시도 입력이지만, go_fast를 빼먹으면
-  // 모델 기본값(대개 true, 순응도 낮은 고속 경로)으로 되돌아가서 모션 힌트가 있어도 잘 안
-  // 반영되는 사고가 있었다 — go_fast만은 최소 입력에도 반드시 유지한다.
+  // fullInput이 스키마 문제로 거부될 때만 쓰는 최소 재시도 입력(다른 I2V 모델로 교체됐을 때의
+  // 안전판이라 Wan 전용 필드는 최소화한다) — 그래도 사용자가 실제로 고른 옵션이 조용히
+  // 무시되는 걸 막기 위해 go_fast·num_frames·frames_per_second·aspect_ratio는 반드시 남긴다.
+  // 예전엔 go_fast만 남기고 나머지(특히 duration을 결정하는 num_frames/frames_per_second)는
+  // 빠뜨려서, 재시도가 발생하면 사용자가 고른 영상 길이가 조용히 무시되는 버그가 있었다.
   const minimalInput: Record<string, unknown> = {
     image: options.imageUrl,
     prompt: options.prompt,
+    num_frames,
+    frames_per_second,
+    aspect_ratio: wanAspectRatio(options.aspect),
     go_fast: options.goFast !== false,
   }
   return { fullInput, minimalInput, approxSec }

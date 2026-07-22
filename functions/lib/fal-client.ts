@@ -280,12 +280,16 @@ export async function refineFalInpaint(options: {
   imageUrl: string
   maskUrl: string
   prompt: string
+  /** Flux inpaint도 negative API 없음 — bakeConstraintsForFlux로 프롬프트에 흡수해서라도
+   * 최소한의 억제 신호를 준다. 안 넘기면 예전처럼 순수 긍정 프롬프트만 사용. */
+  negativePrompt?: string
 }): Promise<{ imageUrl: string }> {
   let maskUrl = options.maskUrl
   if (maskUrl.startsWith('data:')) {
     const ext = maskUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
     maskUrl = await uploadDataUrlToFal(options.falKey, maskUrl, `mask-${Date.now()}.${ext}`)
   }
+  const prompt = bakeConstraintsForFlux(options.prompt, options.negativePrompt)
 
   // 빠른 lora inpaint 우선 (fill은 성인 화보에서 검은 화면을 자주 냄)
   const models = ['fal-ai/flux-lora/inpainting', 'fal-ai/flux-general/inpainting'] as const
@@ -296,7 +300,7 @@ export async function refineFalInpaint(options: {
         options.falKey,
         model,
         {
-          prompt: options.prompt,
+          prompt,
           image_url: options.imageUrl,
           mask_url: maskUrl,
           strength: 0.85,

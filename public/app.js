@@ -1332,7 +1332,10 @@ function renderGalleryInto(items, gridEl, emptyEl, currentMode) {
       const menuOptions = [{ value: '', label: '작업 선택…' }]
       menuOptions.push({
         value: 'shorts',
-        label: item.videoUrl ? 'YouTube 올리기' : '쇼츠 비디오 만들기',
+        // "YouTube 올리기"라고만 쓰면 클릭 즉시 실제로 업로드되는 것처럼 보이지만, 실제로는
+        // 결과 패널을 열어줄 뿐이다(실제 준비는 그 안의 "한 번에 준비" 버튼을 눌러야 함) —
+        // 오해를 줄이기 위해 "준비"를 붙인다.
+        label: item.videoUrl ? 'YouTube 올리기 준비' : '쇼츠 비디오 만들기',
       })
       if (isAdminUser()) {
         menuOptions.push({
@@ -1392,6 +1395,13 @@ function renderGalleryInto(items, gridEl, emptyEl, currentMode) {
             animatePanel.scrollIntoView({ behavior: 'smooth', block: 'start' })
             motionField?.focus()
             setAnimateStatus('모션 힌트를 확인하거나 입력한 뒤 「쇼츠 비디오 만들기」를 눌러 주세요.', false)
+          } else {
+            // "YouTube 올리기 준비"를 눌러도 자동으로 업로드되지 않는다 — YouTube Data API
+            // 연동이 없어서, 실제로는 이 패널에서 "한 번에 준비" 버튼을 직접 눌러야
+            // 영상 다운로드 + 제목·설명 복사 + 업로드 창 열기가 진행된다. 패널로 스크롤하고
+            // 그 사실을 명확히 안내한다.
+            document.getElementById('youtube-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            setYoutubeStatus('아래 「한 번에 준비」를 누르면 영상 받기·제목·설명 복사·YouTube 열기가 순서대로 진행돼요.', false)
           }
         }
       })
@@ -1628,8 +1638,10 @@ function guideContextBlob() {
 
 function onGuideFieldsChanged() {
   syncGuideDetailVisibility()
-  // 가이드가 바뀌면 컨셉 설명에 즉시·강제 반영
-  syncDescriptionFromGuide(true)
+  // 가이드가 바뀌면 컨셉 설명에 반영하되, 사용자가 직접 쓴/AI가 채운 설명이 있으면
+  // (guideDescLocked) 덮어쓰지 않는다. 예전엔 여기서 무조건 force=true를 써서, 드롭다운
+  // 하나만 바꿔도 애써 쓴 설명이 가이드 문장으로 통째로 교체되는 버그가 있었다.
+  syncDescriptionFromGuide(false)
   scheduleScenePreview()
 }
 
@@ -1972,6 +1984,20 @@ async function pollAnimateUntilDone(predictionId, durationSec, speedLabel, onTic
  * 백엔드 /api/animate 호출 후, 필요 시 /api/animate-status 폴링.
  * (Cloudflare 30초 한도 — 서버에서 길게 기다리지 않음)
  */
+// 한국어는 명사(속옷/옷/가운)와 동사(제거/벗) 사이에 조사(을/를 등)가 붙는 게 자연스러운
+// 말투다("속옷을 벗겨줘") — 서버쪽 wantsUndressAction과 동일한 조사 허용 로직을 클라이언트
+// 상태 문구 표시용으로도 맞춰둔다(그냥 \s*만 쓰면 조사 붙은 문장을 놓쳐서 상태 문구가
+// "탈의·누드 모션" 안내를 못 보여줌).
+function wantsUndressActionClient(text) {
+  const t = (text || '').trim()
+  if (!t) return false
+  const gap = '(?:을|를|이|가|은|는|도)?\\s*'
+  return new RegExp(
+    `누드|나체|nude|naked|탈의|벗기|벗겨|벗어|벗는|속옷${gap}제거|옷${gap}벗|가운${gap}벗|undress|strip`,
+    'i',
+  ).test(t)
+}
+
 async function requestAnimate() {
   if (!currentResult.imageUrl) return
 
@@ -1995,16 +2021,22 @@ async function requestAnimate() {
     setSelectedVideoDuration(durationSec)
   }
   const speedKey = getSelectedVideoSpeed()
-  const speedHint = VIDEO_MOTION_HINTS[speedKey] || ''
+  // 사용자가 모션 힌트에 직접 반대되는 속도를 써놓고(예: "느리게 걷는다") 속도 버튼도
+  // 따로 선택했으면(예: 빠르게), 자동으로 붙는 속도 힌트가 사용자 문구와 모순돼 영상
+  // 모델에 비일관적인 지시가 전달될 수 있다 — 이때는 사용자가 직접 쓴 텍스트를 우선하고
+  // 자동 속도 힌트는 붙이지 않는다.
+  const speedConflict =
+    (speedKey === 'slow' && /빠르게|빨리|급하게|격렬하게|재빠르게|fast|quick(?:ly)?|rapid(?:ly)?/i.test(motionBase)) ||
+    (speedKey === 'fast' && /느리게|느린|천천히|slow(?:ly)?/i.test(motionBase))
+  const speedHint = speedConflict ? '' : VIDEO_MOTION_HINTS[speedKey] || ''
   const motion = [motionBase, speedHint].filter(Boolean).join('. ')
   const speedLabel = speedKey === 'slow' ? '느리게' : speedKey === 'fast' ? '빠르게' : '보통'
-  const undressMotion =
-    /누드|나체|nude|naked|속옷\s*제거|속옷제거|탈의|벗기|옷\s*벗|가운\s*벗|undress|strip/i.test(
-      motionBase,
-    )
+  const undressMotion = wantsUndressActionClient(motionBase)
   // 실제로 어떤 모션 문구가 이번 요청에 반영됐는지 눈으로 바로 확인할 수 있게 상태 문구에
   // 노출한다 — 이전 요청 값이 그대로 남아 쓰이는지 헷갈릴 때 즉시 알아챌 수 있다.
-  const motionPreview = motionBase ? ` (모션: "${motionBase.slice(0, 60)}${motionBase.length > 60 ? '…' : ''}")` : ' (모션 힌트 없음 · 기본 동작)'
+  const motionPreview = motionBase
+    ? ` (모션: "${motionBase.slice(0, 60)}${motionBase.length > 60 ? '…' : ''}"${speedConflict ? ` · 속도 버튼(${speedLabel})은 문구와 반대돼 자동 속도 힌트를 붙이지 않았어요` : ''})`
+    : ' (모션 힌트 없음 · 기본 동작)'
   const stopTimer = startProgressTimer(
     setAnimateStatus,
     undressMotion
@@ -3056,6 +3088,11 @@ reviseApplyButton.addEventListener('click', async () => {
           ' 확정하려면 수용하기를 누르세요.',
         false,
       )
+    } else if (data.fallbackUsed && data.message) {
+      // 구조적 재생성이 실패해서 보조 경로로 대체된 경우처럼, 서버가 구체적인 사유를
+      // 알려줄 땐 그 문구를 그대로 보여준다 — 뭉뚱그린 "보조 경로" 문구로 가려지면
+      // 사용자가 큰 수정 요청이 실제로는 거의 반영 안 됐다는 걸 알 방법이 없다.
+      setReviseStatus(`${data.message} 더 고치려면 수정하기, 확정하려면 수용하기를 누르세요.`, false)
     } else {
       setReviseStatus(
         data.fallbackUsed
@@ -3209,7 +3246,20 @@ sizeField?.addEventListener('change', () => {
   if (sizeField) sizeField.dataset.userPicked = '1'
 })
 document.querySelectorAll('input[name="gen-mode"]').forEach((input) => {
-  input.addEventListener('change', syncGenModeUi)
+  input.addEventListener('change', () => {
+    // 화보↔자유 모드를 전환해도 이전 모드용으로 쓴 캐릭터/컨셉 설명이 그대로 남아있으면
+    // 새 모드의 장면 컴파일러(전혀 다른 파이프라인)에 그대로 흘러들어가 엉뚱한 결과가
+    // 나올 수 있다 — 모드가 바뀌면 설명·가이드 필드를 비워 혼선을 막는다.
+    const hadText = Boolean((descriptionField?.value || '').trim()) || Boolean(composeGuideSentence())
+    if (hadText) {
+      resetGuideFields()
+      guideDescLocked = false
+      if (descriptionField) descriptionField.value = ''
+      if (scenePreviewEl) scenePreviewEl.hidden = true
+      setFormStatus('모드를 전환해서 이전 캐릭터/컨셉 설명을 비웠어요. 새로 입력해 주세요.', false)
+    }
+    syncGenModeUi()
+  })
 })
 document.querySelectorAll('[data-app-area]').forEach((btn) => {
   btn.addEventListener('click', () => {

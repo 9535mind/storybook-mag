@@ -151,22 +151,34 @@ export type SdxlTagPromptResult = { text: string; engine: 'claude' | 'fallback' 
  * 화보(fashion) 모드 이미지 생성용 — 번역 + "77토큰 예산" 압축을 한 번에 처리한다.
  * Claude가 실패/미설정이면 기존 번역 경로로 영어를 확보한 뒤, 최소한의 안전판으로 단어 수만 잘라
  * (문장 형태라 태그만큼 정보 밀도는 낮지만) 예산을 넘는 부분이 통째로 낭비되는 것만은 막는다.
+ *
+ * @param revision 수정 요청(리바이즈) 지시문이 있으면 여기로 따로 넘긴다. 원본 설명 뒤에 그냥
+ * 이어붙여서 함께 압축하면, 우선순위 목록(1~10)에 "수정 지시"가 없어서 55단어 예산에서
+ * 조용히 누락될 위험이 있었다(특히 Claude 미설정 시 단순 절삭 폴백은 항상 "뒤에서부터" 잘려서
+ * 문장 끝에 붙는 수정 지시가 가장 먼저 날아갔다). 넘기면 Claude에게 "반드시 반영" 지시를
+ * 추가하고, 폴백 경로에서는 수정 지시를 절삭 대상에서 제외하고 항상 남긴다.
  */
 export async function compileSdxlTagPrompt(
   text: string,
   env: TranslateEnv,
   // 70 전체 예산 중 나머지는 buildFashionMagazinePrompt가 뒤에 붙이는 무드/구도/품질 태그용으로 남겨둔다.
   maxWords = 55,
+  revision?: string,
 ): Promise<SdxlTagPromptResult> {
   const trimmed = (text || '').trim()
-  if (!trimmed) return { text: '', engine: 'fallback' }
+  const revisionTrimmed = (revision || '').trim()
+  if (!trimmed && !revisionTrimmed) return { text: '', engine: 'fallback' }
 
   if ((env.ANTHROPIC_API_KEY || '').trim()) {
     try {
+      const system = revisionTrimmed
+        ? `${SDXL_TAG_SYSTEM} CRITICAL: the user is also requesting this specific change — it MUST appear as its own tag(s) in your output no matter what, even if you have to drop lower-priority details from the list above to fit the budget: "${revisionTrimmed}".`
+        : SDXL_TAG_SYSTEM
+      const user = revisionTrimmed ? `${trimmed}\n\nRequested change (must be reflected): ${revisionTrimmed}` : trimmed
       const { text: out } = await runClaudeText({
         env,
-        system: SDXL_TAG_SYSTEM,
-        user: trimmed,
+        system,
+        user,
         maxTokens: 400,
       })
       const cleaned = capWords(out.trim().replace(/\s*\n+\s*/g, ', '), maxWords)
@@ -174,6 +186,21 @@ export async function compileSdxlTagPrompt(
     } catch (err) {
       console.error('[translate] SDXL 태그 압축 실패, 번역 후 단순 절삭으로 폴백:', errMessage(err))
     }
+  }
+
+  if (revisionTrimmed) {
+    const [{ text: baseTranslated }, { text: revisionTranslated }] = await Promise.all([
+      trimmed ? translateDescriptionForImagePrompt(trimmed, env) : Promise.resolve({ text: '' }),
+      translateDescriptionForImagePrompt(revisionTrimmed, env),
+    ])
+    // 수정 지시 쪽에 예산의 최소 40%(최대 20단어)를 먼저 확보해 절삭 대상에서 뺀 뒤,
+    // 남는 예산만 원본 설명에 배정한다.
+    const revisionBudget = Math.min(20, Math.ceil(maxWords * 0.4))
+    const cappedRevision = capWords(revisionTranslated, revisionBudget)
+    const revisionWordCount = cappedRevision ? cappedRevision.split(/\s+/).filter(Boolean).length : 0
+    const baseBudget = Math.max(maxWords - revisionWordCount, Math.min(10, maxWords))
+    const cappedBase = capWords(baseTranslated, baseBudget)
+    return { text: [cappedBase, cappedRevision].filter(Boolean).join(', '), engine: 'fallback' }
   }
 
   const { text: translated } = await translateDescriptionForImagePrompt(trimmed, env)

@@ -100,12 +100,28 @@ export function evaluateTaleScenePolicy(promptText: string): ContentPolicyVerdic
   return { allowed: true, blockedReason: null, matchedSignals: [] }
 }
 
+// 한국어는 명사와 동사 사이에 조사(을/를/이/가/은/는/도)가 붙는 게 훨씬 자연스러운 말투다
+// ("속옷을 제거해줘", "옷을 벗겨줘") — 기존엔 \s*(공백만 허용)라 조사가 끼면 매칭에서
+// 빠져서, 정밀모드 전환·negative prompt 조정이 통째로 안 걸리는 버그가 있었다. 조사를
+// 선택적으로 허용하는 조각을 명사+동사 패턴 사이에 넣어 고친다.
+const KO_PARTICLE_GAP = '(?:을|를|이|가|은|는|도)?\\s*'
+
 /** 누드·탈의·속옷제거 의도 (성인 허용 — 순화하지 않음) */
 export function wantsNudeOrUndress(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
-  return /누드|나체|nude|naked|속옷\s*제거|속옷제거|속옷\s*벗|탈의|옷\s*벗|가운\s*벗|로브\s*벗|언더웨어\s*제거|undress|disrobe|strip(?:ping|ped)?|remove\s*(?:her\s*)?(?:clothes|clothing|underwear|lingerie)|fully\s*nude|bare\s*(?:skin|body)|완전\s*노출|전라/i.test(
-    t,
+  const pattern = new RegExp(
+    [
+      '누드', '나체', 'nude', 'naked',
+      `속옷${KO_PARTICLE_GAP}제거`, '속옷제거', `속옷${KO_PARTICLE_GAP}벗`,
+      '탈의', `옷${KO_PARTICLE_GAP}벗`, `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`,
+      `언더웨어${KO_PARTICLE_GAP}제거`,
+      'undress', 'disrobe', 'strip(?:ping|ped)?',
+      'remove\\s*(?:her\\s*)?(?:clothes|clothing|underwear|lingerie)',
+      'fully\\s*nude', 'bare\\s*(?:skin|body)', '완전\\s*노출', '전라',
+    ].join('|'),
+    'i',
   )
+  return pattern.test(t)
 }
 
 /** 속옷/란제리 ‘착용’ 요청 — 제거·누드 요청이면 false */
@@ -122,9 +138,19 @@ export function wantsUnderwearLook(text: string): boolean {
  */
 export function wantsUndressAction(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
-  return /탈의|벗는|벗어|벗기|벗김|벗을|벗었|속옷\s*제거|속옷제거|언더웨어\s*제거|가운\s*벗|로브\s*벗|옷\s*벗|undress|disrobe|strip(?:ping|ped)?|take\s*off|removes?\s*(?:her\s*)?(?:clothes|clothing|underwear|lingerie|robe|dress)/i.test(
-    t,
+  const pattern = new RegExp(
+    [
+      // "벗겨"(사동형: 벗겨줘/벗겨주세요/벗겨봐)는 벗다의 흔한 캐주얼 요청 표현인데,
+      // 기존 목록(벗는/벗어/벗기/벗김/벗을/벗었)엔 없어서 빠지고 있었다.
+      '탈의', '벗는', '벗어', '벗기', '벗겨', '벗김', '벗을', '벗었',
+      `속옷${KO_PARTICLE_GAP}제거`, '속옷제거', `언더웨어${KO_PARTICLE_GAP}제거`,
+      `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`, `옷${KO_PARTICLE_GAP}벗`,
+      'undress', 'disrobe', 'strip(?:ping|ped)?', 'take\\s*off',
+      'removes?\\s*(?:her\\s*)?(?:clothes|clothing|underwear|lingerie|robe|dress)',
+    ].join('|'),
+    'i',
   )
+  return pattern.test(t)
 }
 
 /**
@@ -630,14 +656,21 @@ export function buildFashionMagazinePrompt(input: {
   description: string
   mood: string
   size?: string
+  /** 원본(압축·번역 전) 한글 설명. 인종·누드 판별은 이 원문 기준으로 해야 한다 —
+   * 55단어 태그 압축 과정에서 "일본인 여성" 같은 명시적 언급이 잘려나가면, 압축된
+   * 영어 텍스트만 보고 판별할 경우 사용자가 명시한 인종이 기본값(한국인)으로 뒤집히는
+   * 버그가 있었다. 넘겨주면 이 원문으로 판별하고, 안 넘기면(하위호환) 기존처럼
+   * description 자체로 판별한다. */
+  rawDescription?: string
 }): string {
   const moodTag = resolveMoodTag(input.mood)
 
   const description = polishKoreanPromptText(input.description)
+  const ethnicitySource = input.rawDescription ? polishKoreanPromptText(input.rawDescription) : description
   const framing = resolveFramingHint(input.size)
   const amplify = amplifyClothingAndScene(description) // 이미 ", " 접두로 시작
-  const nude = wantsNudeOrUndress(description)
-  const ethnicityTag = defaultEthnicityTag(description)
+  const nude = wantsNudeOrUndress(ethnicitySource)
+  const ethnicityTag = defaultEthnicityTag(ethnicitySource)
 
   const parts = [
     description,

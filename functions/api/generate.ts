@@ -88,7 +88,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     const mood = body.mood ?? 'clean'
     const size = body.size ?? 'square'
-    const mode = body.mode === 'free' ? 'free' : 'fashion'
+    // mode는 클라이언트가 보낸 값을 그대로 신뢰하면 안 된다 — UI(getGenMode)는 비관리자에게
+    // 항상 'free'를 강제하지만, 그건 클라이언트 쪽 UX 제약일 뿐 서버가 보장하는 게 아니다.
+    // /api/generate를 직접 호출하면 비관리자도 'fashion'(관리자 전용 화보/성인 파이프라인)에
+    // 접근할 수 있었다 — 여기서 서버 쪽으로도 확실히 막는다.
+    const requestedMode = body.mode === 'free' ? 'free' : 'fashion'
+    const mode = requestedMode === 'fashion' && !isAdminEmail(auth.user.email) ? 'free' : requestedMode
     // 정밀 모드: 생성 속도를 희생해서 스텝 수를 늘려 세부 표현 반영률을 높인다.
     // 누드/탈의 요청은 기본(Lightning) 엔진이 "안전한" 결과 쪽으로 쏠려 옷을 입혀버리는 경향이
     // 실측으로 확인됐다 — 스텝이 적은 증류 모델일수록 이 편향이 강했다. 그래서 누드 요청은
@@ -147,15 +152,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       sceneMeta = summarizePlan(compiled.plan)
     } else {
       // free는 위에서 scene-compiler만 사용. fashion만 화보 프롬프트.
-      prompt = buildFashionMagazinePrompt({ description: descriptionForPrompt, mood, size })
+      prompt = buildFashionMagazinePrompt({
+        description: descriptionForPrompt,
+        mood,
+        size,
+        rawDescription: description,
+      })
       negativePrompt = buildFashionNegativePrompt(description)
     }
 
     const attempts: EngineAttempt[] = []
+    // wantsNudeOrUndress로 조사(을/를 등) 붙은 자연스러운 한국어까지 포함해서 판별한다 —
+    // 예전엔 이 정규식이 \s*(공백만)라 "속옷을 제거해줘"처럼 흔한 말투를 놓쳐서, fal(엄격한
+    // 콘텐츠 검열)로 먼저 시도했다가 거부당하고서야 Replicate로 넘어가는 낭비가 있었다.
     const likelyAdult =
-      /누드|나체|nude|naked|속옷\s*제거|속옷제거|탈의|옷\s*벗|가운\s*벗|undress|strip|란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit|성기|자위|섹스|전라/i.test(
-        description,
-      )
+      wantsNudeOrUndress(description) ||
+      /란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit|성기|자위|섹스/i.test(description)
 
     const tryFal = async (asPrimary: boolean) => {
       if (!env.FAL_KEY?.trim()) {

@@ -284,8 +284,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (structural && genMode === 'fashion' && env.REPLICATE_API_TOKEN?.trim()) {
     const merged = [baseDescription, revision].filter(Boolean).join('. ')
     // SDXL/Juggernaut CLIP 인코더의 ~70단어 예산에 맞춰 번역+압축 — generate.ts의 화보 경로와 동일.
-    const { text: mergedForPrompt } = await compileSdxlTagPrompt(merged, env)
-    const prompt = buildFashionMagazinePrompt({ description: mergedForPrompt, mood, size })
+    // revision을 따로 넘겨서, 55단어 예산에서 수정 지시가 조용히 잘려나가지 않게 한다.
+    const { text: mergedForPrompt } = await compileSdxlTagPrompt(baseDescription, env, 55, revision)
+    // 인종·누드 판별은 압축 전 원문(merged) 기준 — 압축 과정에서 명시적 언급이 잘려나가면
+    // 기본값(한국인)이 사용자가 지정한 인종을 뒤집어버리는 버그가 있었다.
+    const prompt = buildFashionMagazinePrompt({
+      description: mergedForPrompt,
+      mood,
+      size,
+      rawDescription: merged,
+    })
     const negativePrompt = buildFashionNegativePrompt(merged)
     // 누드/탈의 수정 요청은 기본 Lightning 엔진이 옷을 입혀버리는 편향이 실측으로 확인됐다 —
     // generate.ts와 동일하게 자동으로 정밀 모드(느린 일반 SDXL, 스텝↑·CFG↑)로 전환한다.
@@ -391,6 +399,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         imageUrl,
         maskUrl: maskDataUrl,
         prompt,
+        negativePrompt,
       })
       return jsonResponse(
         {
@@ -488,20 +497,36 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   // ── 화보 모드 전용: 작은 텍스트 수정만 얼굴 유지 img2img
   // (자유 모드는 위에서 이미 return — 여기 도달하지 않음)
+  //
+  // 이 시점에 structural===true라면, 위 "화보 T2I 재생성" 시도가 이미 실패해서 여기로
+  // 떨어진 것이다(성공했으면 이미 return됨). 그런데 이 img2img 경로는 원래 "작은 텍스트
+  // 수정"용으로 튜닝된 낮은 strength(0.32)라, 전신·란제리·누드 같은 큰 구조 변경 요청을
+  // 대신 처리하면 거의 반영이 안 된다 — 게다가 정밀모드 전환도 이 경로엔 없어서, 누드
+  // 요청이 기본 Lightning 엔진(옷을 입혀버리는 편향 실측 확인됨)으로 조용히 처리돼 왔다.
+  // region 폴백(위 428~450행)과 동일하게 정밀모드/강도를 올리고, fallbackUsed로 정직하게
+  // "보조 경로로 대체됐다"는 사실을 알린다.
   if (env.REPLICATE_API_TOKEN?.trim()) {
     try {
       const dims = resolveReplicateImageSize(size)
+      const structuralFallbackNude = structural && wantsNudeOrUndress(`${baseDescription} ${revision}`)
+      const strength = structural ? (structuralFallbackNude ? 0.6 : 0.5) : additive ? 0.5 : 0.28
       const { imageUrl: nextUrl } = await refineReplicateImageToImage({
         apiToken: env.REPLICATE_API_TOKEN,
-        modelOwner: env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-        modelName: env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-        modelVersion: env.REPLICATE_MODEL_VERSION,
+        modelOwner: structuralFallbackNude
+          ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
+          : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
+        modelName: structuralFallbackNude
+          ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
+          : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
+        modelVersion: structuralFallbackNude ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
         imageUrl,
         prompt,
         negativePrompt,
         width: dims.width,
         height: dims.height,
-        strength: structural ? 0.32 : additive ? 0.5 : 0.28,
+        strength,
+        numInferenceSteps: structuralFallbackNude ? 30 : undefined,
+        guidanceScale: structuralFallbackNude ? 7.5 : undefined,
         disableSafetyChecker: true,
       })
       return jsonResponse(
@@ -513,9 +538,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           genMode,
           structuralRegen: false,
           engine: 'replicate',
-          engineLabel: additive
-            ? 'Replicate · Img2Img (요소 추가 · strength↑)'
-            : 'Replicate · Img2Img (얼굴 유지 수정)',
+          engineLabel: structural
+            ? `Replicate · Img2Img (장면 재생성 실패 · 보조 경로${structuralFallbackNude ? ' · 정밀모드' : ''})`
+            : additive
+              ? 'Replicate · Img2Img (요소 추가 · strength↑)'
+              : 'Replicate · Img2Img (얼굴 유지 수정)',
+          fallbackUsed: structural || undefined,
+          message: structural
+            ? '장면을 통째로 다시 그리는 재생성이 실패해서, 원본을 더 보존하는 보조 방식으로 대체했어요. 큰 변경이 기대만큼 반영되지 않았을 수 있어요 — 필요하면 다시 수정하기를 눌러 재시도해 주세요.'
+            : undefined,
           attempts: attempts.length ? attempts : undefined,
         },
         200,
