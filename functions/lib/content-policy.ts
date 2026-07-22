@@ -154,6 +154,29 @@ export function wantsUndressAction(text: string): boolean {
 }
 
 /**
+ * "착의 동작"(영상 중 옷을 입는 전환, 벗기의 반대) 감지.
+ * 예전엔 이 방향(옷을 입는 동작)에 대응하는 감지가 전혀 없었다 — 그래서 소스 이미지가
+ * 누드인데 모션 힌트로 "옷을 입는다/걸쳐 입는다"를 요청하면, undressAction=false에
+ * staysNude=true로 판정되어 buildAnimationPrompt가 오히려 "끝까지 누드 유지, 어떤 옷도
+ * 등장 금지"라는 정반대 지시를 강하게 박아넣는 사고가 있었다(요청한 동작과 반대로 동작).
+ */
+export function wantsDressAction(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  const pattern = new RegExp(
+    [
+      '입는', '입어', '입기', '입혀', '입힌다', '입힘', '입을', '입었',
+      `옷${KO_PARTICLE_GAP}입`, `드레스${KO_PARTICLE_GAP}입`, `가운${KO_PARTICLE_GAP}걸치`,
+      `로브${KO_PARTICLE_GAP}걸치`, '걸쳐\\s*입', '걸쳐\\s*걸치',
+      'get(?:s|ting)?\\s*dressed', 'dress(?:es|ing)?\\s*(?:her)?self',
+      'puts?\\s*on\\s*(?:her\\s*|a\\s*|the\\s*)?(?:clothes|clothing|dress|robe|lingerie|underwear|outfit)',
+      'wraps?\\s*(?:herself\\s*)?in\\s*(?:a\\s*|the\\s*)?(?:robe|dress|coat)',
+    ].join('|'),
+    'i',
+  )
+  return pattern.test(t)
+}
+
+/**
  * SDXL 계열 negative prompt.
  * 얼굴 클로즈업 / 캐주얼 티 / 비즈니스 정장으로 의상이 바뀌는 실패를 강하게 억제한다.
  * (누드 요청 시에는 buildFashionNegativePrompt가 outfit 강제 항목을 제거한다.)
@@ -273,7 +296,9 @@ export function isAdditiveRefineRevision(revision: string): boolean {
   // 키워드에 안 걸려서 낮은 strength로 처리되다가, 목걸이 같은 새 물체를 억지로 끼워
   // 넣으려는 시도 때문에 얼굴·의상까지 통째로 무너지는 "구도 붕괴" 사고가 확인됐다
   // (추가하려는 시도 자체는 반영됐지만 그 대가로 무관한 부분까지 크게 바뀜).
-  return /추가|넣어|넣기|넣다|덧붙|그려\s*넣|올려\s*줘|씌워|더해|채워|채우|착용|달아|달아줘|매줘|둘러|두르|걸어\s*줘|add\b|insert\b|put\b.*\bin\b/i.test(
+  // "옷을 입혀줘/입는 걸로"처럼 누드 상태에서 옷을 다시 입히는 요청도 같은 부류다(맨살에
+  // 없던 천 재질을 새로 그려 넣는 것) — 빠져 있으면 같은 구도 붕괴 위험이 있다.
+  return /추가|넣어|넣기|넣다|덧붙|그려\s*넣|올려\s*줘|씌워|더해|채워|채우|착용|달아|달아줘|매줘|둘러|두르|걸어\s*줘|입혀|입혀줘|입는|입을|입었|add\b|insert\b|put\b.*\bin\b/i.test(
     r,
   )
 }
@@ -993,7 +1018,11 @@ export function buildAnimationPrompt(input: { prompt?: string; motion?: string }
   // 남는 사고가 있었다. 소스가 아직 옷을 입은 상태인데 모션이 누드 관련 단어를 언급하면,
   // 그 자체로 "지금 상태(옷 입음) → 누드로 전환"을 뜻하므로 동작으로 취급한다.
   const undressAction = wantsUndressAction(motion) || (wantsNudeOrUndress(motion) && !sourceIsNude)
-  const staysNude = sourceIsNude && !undressAction
+  // 반대 방향("옷을 입는 동작")도 별도로 감지한다. 예전엔 이게 전혀 없어서, 누드 소스에
+  // "옷을 입혀줘/걸쳐 입는다" 같은 착의 모션을 요청해도 undressAction=false → staysNude=true로
+  // 떨어져 "끝까지 누드 유지, 어떤 옷도 등장 금지"라는 정반대 지시가 강제로 붙는 사고가 있었다.
+  const dressAction = !undressAction && wantsDressAction(motion)
+  const staysNude = sourceIsNude && !undressAction && !dressAction
 
   // 모션 지시는 맨 앞에 CRITICAL로 강조한다. 예전엔 긴 "원본 연속성" 문단(원본 이미지
   // 프롬프트 전체) 뒤에 짧게 붙어 있어서, Wan I2V가 앞부분의 장문 설명에 가중치를 두고
@@ -1017,6 +1046,12 @@ export function buildAnimationPrompt(input: { prompt?: string; motion?: string }
       'CRITICAL ADULT MOTION: garments / underwear / robe are removed during the clip; end state is adult nude with bare skin visible.',
       'Do NOT freeze the subject fully clothed. Do NOT keep bra, panties, lingerie, or bathrobe at the end.',
       'Smooth undressing action, fabric sliding off, skin revealed as requested.',
+    )
+  } else if (dressAction) {
+    parts.push(
+      'CRITICAL ADULT MOTION: the subject starts bare-skinned/nude and puts on or wraps herself in a garment (robe, dress, or clothing) during the clip; end state is dressed as requested.',
+      'Do NOT freeze the subject fully nude for the whole clip. Do NOT keep bare skin visible at the end if the motion asks her to get dressed.',
+      'Smooth dressing action, fabric sliding on and settling naturally onto the body.',
     )
   } else if (staysNude) {
     parts.push(
