@@ -10,6 +10,7 @@ import {
   isStructuralRefineRevision,
   mergeFreeRevisionDescription,
   polishKoreanPromptText,
+  resolveFashionDescriptionWordBudget,
   wantsNudeOrUndress,
 } from '../lib/content-policy'
 import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, refineFalImageToImage, refineFalInpaint, resolveFalImageSize } from '../lib/fal-client'
@@ -284,8 +285,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (structural && genMode === 'fashion' && env.REPLICATE_API_TOKEN?.trim()) {
     const merged = [baseDescription, revision].filter(Boolean).join('. ')
     // SDXL/Juggernaut CLIP 인코더의 ~70단어 예산에 맞춰 번역+압축 — generate.ts의 화보 경로와 동일.
-    // revision을 따로 넘겨서, 55단어 예산에서 수정 지시가 조용히 잘려나가지 않게 한다.
-    const { text: mergedForPrompt } = await compileSdxlTagPrompt(baseDescription, env, 55, revision)
+    // revision을 따로 넘겨서, 예산 안에서 수정 지시가 조용히 잘려나가지 않게 한다. 예산 자체도
+    // 55 고정이 아니라, 뒤에 붙을 인종/의상보강/무드/구도/품질 태그 길이에 맞춰 동적으로 정한다.
+    const descriptionBudget = resolveFashionDescriptionWordBudget({ mood, size, rawDescription: merged })
+    const { text: mergedForPrompt } = await compileSdxlTagPrompt(baseDescription, env, descriptionBudget, revision)
     // 인종·누드 판별은 압축 전 원문(merged) 기준 — 압축 과정에서 명시적 언급이 잘려나가면
     // 기본값(한국인)이 사용자가 지정한 인종을 뒤집어버리는 버그가 있었다.
     const prompt = buildFashionMagazinePrompt({

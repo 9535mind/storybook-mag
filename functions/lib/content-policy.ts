@@ -652,35 +652,122 @@ export function resolveMoodTag(mood: string | undefined): string {
  * 옮겼다 — negative prompt는 별도의 77토큰 예산이라 "공짜로" 더 쓸 수 있고, 애초에 모델이
  * "빼야 할 것"을 처리하도록 설계된 슬롯이라 부정 지시가 실제로 더 잘 먹힌다.
  */
+/** 단어 수 추정(SDXL ~77토큰 예산 근사용) — 공백 기준 분리. */
+function countWords(text: string): number {
+  return (text || '').trim().split(/\s+/).filter(Boolean).length
+}
+
+/** capWords(translate.ts)와 같은 단순 절삭 — content-policy.ts는 다른 모듈을 import하지 않는
+ * 독립 모듈로 유지하려고 로컬에 하나 더 둔다. */
+function capWordsSimple(text: string, maxWords: number): string {
+  if (maxWords <= 0) return ''
+  const words = (text || '').trim().split(/\s+/).filter(Boolean)
+  if (words.length <= maxWords) return text.trim()
+  return words.slice(0, maxWords).join(' ').replace(/[,;\s]+$/, '')
+}
+
+const SDXL_HARD_BUDGET_WORDS = 70
+// "단어 수"는 실제 토큰 수와 1:1이 아니다(쉼표·복수음절 단어가 토큰을 더 씀) — 그 오차를
+// 흡수할 안전 여유.
+const SDXL_TOKEN_SAFETY_MARGIN_WORDS = 5
+// 안전 여유를 뺀 실제 배분 대상 예산.
+const SDXL_WORKING_BUDGET_WORDS = SDXL_HARD_BUDGET_WORDS - SDXL_TOKEN_SAFETY_MARGIN_WORDS
+// description이 최소한 이만큼은 받도록 보장하는 하한. ethnicityTag/moodTag/framing/
+// qualitySuffix 같은 "고정" 태그만 해도 실측으로 33~45단어를 차지해서(무드/사이즈 조합에
+// 따라 다름), 이 하한을 여유 있게(예: 30) 잡으면 고정 태그+하한만으로 이미 65를 넘는
+// 조합이 나온다 — 그래서 20으로 보수적으로 잡는다.
+const SDXL_MIN_DESCRIPTION_WORDS = 20
+// suffix가 비어 있어도(=amplify가 짧을 때) description에 65를 통째로 주지 않는 상한.
+const SDXL_MAX_DESCRIPTION_WORDS = 60
+
+/**
+ * buildFashionMagazinePrompt가 압축된 description 뒤에 붙이는 고정/조건부 태그들을 계산한다.
+ * amplify(의상/장면 보강)도 압축 전 원문(rawDescription) 기준으로 판별한다 — 압축된 영어
+ * 태그만 보면 "실크", "거울", "비스듬" 같은 한글 키워드가 압축 과정에서 잘려나가 매칭이
+ * 빠질 수 있다(위 ethnicityTag/nude와 같은 이유).
+ *
+ * ethnicityTag/nudeFlag/moodTag/framing/qualitySuffix는 항상 그대로 붙는 "고정" 몫이고,
+ * amplify만 매칭되는 키워드 수에 따라 크게 늘어나는 유일한 가변 항목이다(키워드가 여러 개
+ * 겹치면 — 예: 란제리+거울+비스듬+흰배경+도시 — 그 자체로 100단어를 넘을 수 있다). 그래서
+ * 고정 몫을 먼저 계산하고, description의 최소 몫(SDXL_MIN_DESCRIPTION_WORDS)을 지킬 수
+ * 있는 만큼만 amplify에 남겨준다(넘치면 뒤쪽 — 상대적으로 덜 중요한 장식적 디테일 — 부터 자른다).
+ * 이렇게 하면 suffix 총합 + description 최소 몫이 항상 SDXL_WORKING_BUDGET_WORDS를 넘지 않는다.
+ */
+function buildFashionPromptSuffixParts(input: {
+  mood: string
+  size?: string
+  rawDescription: string
+}): { ethnicityTag: string; amplify: string; nudeFlag: string; moodTag: string; framing: string; qualitySuffix: string } {
+  const ethnicitySource = polishKoreanPromptText(input.rawDescription)
+  const nude = wantsNudeOrUndress(ethnicitySource)
+  const ethnicityTag = defaultEthnicityTag(ethnicitySource)
+  const nudeFlag = nude ? 'adult nude, bare skin visible' : ''
+  const moodTag = resolveMoodTag(input.mood)
+  const framing = resolveFramingHint(input.size)
+  const qualitySuffix = 'photorealistic, natural skin texture, sharp focus, 8k'
+  const rawAmplify = amplifyClothingAndScene(ethnicitySource).replace(/^,\s*/, '')
+
+  const fixedWords =
+    countWords(ethnicityTag) + countWords(nudeFlag) + countWords(moodTag) + countWords(framing) + countWords(qualitySuffix)
+  const amplifyBudget = Math.max(0, SDXL_WORKING_BUDGET_WORDS - fixedWords - SDXL_MIN_DESCRIPTION_WORDS)
+  const amplify = capWordsSimple(rawAmplify, amplifyBudget)
+
+  return { ethnicityTag, amplify, nudeFlag, moodTag, framing, qualitySuffix }
+}
+
+/**
+ * compileSdxlTagPrompt(translate.ts)에 넘길 description 압축 예산을 동적으로 계산한다.
+ * 예전엔 55로 고정했었는데, 화보 프롬프트가 압축된 description 뒤에 붙이는 인종/의상보강/
+ * 무드/구도/품질 태그(suffix)의 실제 길이는 상황마다 크게 다르다. 특별한 키워드가 없으면
+ * suffix가 짧아 description에 더 많은 예산을 줄 수 있고, 반대로 의상/장면 키워드가 여러 개
+ * 겹치면(예: 란제리+거울+비스듬+흰배경) suffix 하나만 30단어를 넘길 수도 있어 55 고정은
+ * 위험했다 — description이 55를 다 채우면, 뒤에 붙는 suffix가 모델의 CLIP 인코더에 의해
+ * "어디가 잘렸는지 알 수도, 통제할 수도 없이" 조용히 잘려나간다(우리 capWords가 우선순위
+ * 순서대로 자르는 것과 달리).
+ */
+export function resolveFashionDescriptionWordBudget(input: {
+  mood: string
+  size?: string
+  rawDescription: string
+}): number {
+  const suffixWords = estimateFashionSuffixWords(input)
+  const available = SDXL_WORKING_BUDGET_WORDS - suffixWords
+  return Math.max(SDXL_MIN_DESCRIPTION_WORDS, Math.min(SDXL_MAX_DESCRIPTION_WORDS, available))
+}
+
+/** buildFashionPromptSuffixParts가 계산하는 고정/조건부 태그들의 단어 수 총합. */
+export function estimateFashionSuffixWords(input: { mood: string; size?: string; rawDescription: string }): number {
+  const parts = buildFashionPromptSuffixParts(input)
+  return Object.values(parts).reduce((sum, p) => sum + countWords(p), 0)
+}
+
 export function buildFashionMagazinePrompt(input: {
   description: string
   mood: string
   size?: string
-  /** 원본(압축·번역 전) 한글 설명. 인종·누드 판별은 이 원문 기준으로 해야 한다 —
-   * 55단어 태그 압축 과정에서 "일본인 여성" 같은 명시적 언급이 잘려나가면, 압축된
-   * 영어 텍스트만 보고 판별할 경우 사용자가 명시한 인종이 기본값(한국인)으로 뒤집히는
-   * 버그가 있었다. 넘겨주면 이 원문으로 판별하고, 안 넘기면(하위호환) 기존처럼
-   * description 자체로 판별한다. */
+  /** 원본(압축·번역 전) 한글 설명. 인종·누드·의상보강 판별은 이 원문 기준으로 해야 한다 —
+   * 단어 압축 과정에서 "일본인 여성" 같은 명시적 언급이 잘려나가면, 압축된 영어 텍스트만
+   * 보고 판별할 경우 사용자가 명시한 인종이 기본값(한국인)으로 뒤집히는 버그가 있었다.
+   * 넘겨주면 이 원문으로 판별하고, 안 넘기면(하위호환) 기존처럼 description 자체로 판별한다. */
   rawDescription?: string
 }): string {
-  const moodTag = resolveMoodTag(input.mood)
-
   const description = polishKoreanPromptText(input.description)
   const ethnicitySource = input.rawDescription ? polishKoreanPromptText(input.rawDescription) : description
-  const framing = resolveFramingHint(input.size)
-  const amplify = amplifyClothingAndScene(description) // 이미 ", " 접두로 시작
-  const nude = wantsNudeOrUndress(ethnicitySource)
-  const ethnicityTag = defaultEthnicityTag(ethnicitySource)
+  const suffix = buildFashionPromptSuffixParts({
+    mood: input.mood,
+    size: input.size,
+    rawDescription: ethnicitySource,
+  })
 
   const parts = [
     description,
     // 짧은 태그라 앞쪽에 둬야 77토큰 예산에서 잘리지 않고 반영됨
-    ethnicityTag,
-    amplify.replace(/^,\s*/, ''),
-    nude ? 'adult nude, bare skin visible' : '',
-    moodTag,
-    framing,
-    'photorealistic, natural skin texture, sharp focus, 8k',
+    suffix.ethnicityTag,
+    suffix.amplify,
+    suffix.nudeFlag,
+    suffix.moodTag,
+    suffix.framing,
+    suffix.qualitySuffix,
   ].filter(Boolean)
   return parts.join(', ')
 }

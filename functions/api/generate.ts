@@ -4,6 +4,7 @@ import {
   buildFashionNegativePrompt,
   evaluateContentPolicy,
   polishKoreanPromptText,
+  resolveFashionDescriptionWordBudget,
   wantsNudeOrUndress,
 } from '../lib/content-policy'
 import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, resolveFalImageSize } from '../lib/fal-client'
@@ -119,13 +120,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // 정책 검사·likelyAdult 등 한글 키워드 매칭은 원문(description)으로 그대로 수행하고,
     // 실제 이미지 생성 프롬프트에 들어가는 부분만 번역본을 쓴다.
     // 화보(fashion) 모드는 SDXL/Juggernaut 엔진의 CLIP 인코더가 ~70단어를 넘으면 조용히 잘라버리므로,
-    // 단순 번역이 아니라 "쉼표 구분 태그 + 70단어 예산" 압축까지 함께 해서 그 좁은 예산 안에 최대한
-    // 많은 시각 정보가 실제로 모델에 도달하게 한다. 자유(동화) 모드는 별도 scene-compiler가 구조화
-    // 파싱을 하므로 기존 번역만 사용한다.
+    // 단순 번역이 아니라 "쉼표 구분 태그 + 동적 예산" 압축까지 함께 해서 그 좁은 예산 안에 최대한
+    // 많은 시각 정보가 실제로 모델에 도달하게 한다. 예산을 55로 고정하지 않고, 뒤에 붙을 인종/
+    // 의상보강/무드/구도/품질 태그의 실제 길이(resolveFashionDescriptionWordBudget)에 맞춰 정한다.
+    // 자유(동화) 모드는 별도 scene-compiler가 구조화 파싱을 하므로 기존 번역만 사용한다.
     const descriptionForPrompt =
       mode === 'free'
         ? (await translateDescriptionForImagePrompt(description, env)).text
-        : (await compileSdxlTagPrompt(description, env)).text
+        : (
+            await compileSdxlTagPrompt(
+              description,
+              env,
+              resolveFashionDescriptionWordBudget({ mood, size, rawDescription: description }),
+            )
+          ).text
 
     let prompt: string
     let negativePrompt: string
