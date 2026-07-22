@@ -1,8 +1,15 @@
-import { getUserBySession, jsonResponse, verifyAdminPin } from '../../lib/auth'
+import {
+  getUserBySession,
+  isAdminEmail,
+  isSoloAdminOnly,
+  jsonResponse,
+  verifyAdminPin,
+} from '../../lib/auth'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
+  SOLO_ADMIN_ONLY?: string
 }
 
 export const onRequestGet: PagesFunction<Env> = async (context) => {
@@ -15,7 +22,12 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
 
   if (token && env.DB) {
     const user = await getUserBySession(env.DB, token)
-    if (user) return jsonResponse({ ok: true, user }, 200)
+    if (user) {
+      if (isSoloAdminOnly(env) && !isAdminEmail(user.email)) {
+        return jsonResponse({ ok: false, error: 'solo_admin_only' }, 403)
+      }
+      return jsonResponse({ ok: true, user }, 200)
+    }
   }
 
   const pin = request.headers.get('x-admin-pin') ?? ''

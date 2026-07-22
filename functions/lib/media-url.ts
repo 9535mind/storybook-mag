@@ -8,6 +8,9 @@ const ALLOWED_HOST_SUFFIXES = [
   'replicate.com',
   'fal.media',
   'fal.ai',
+  // storymag-media R2 버킷의 공개 r2.dev 주소 (persist-media로 영구 저장한 이미지)
+  'r2.dev',
+  'r2.cloudflarestorage.com',
 ]
 
 /** Replicate/fal이 쓰는 알려진 S3 스타일 호스트만 (전체 amazonaws.com 금지) */

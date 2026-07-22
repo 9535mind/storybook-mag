@@ -10,3 +10,13 @@ binding = "AI"
 binding = "DB"
 database_name = "storymag-auth"
 database_id = "111ba775-0eed-42fc-94a3-1829049c4398"
+
+# 생성 이미지 영구 저장용 (fal/replicate CDN 링크는 시간이 지나면 만료됨).
+# 「수용하기」를 누르는 순간 여기로 복사해 갤러리가 영구히 살아있게 한다.
+[[r2_buckets]]
+binding = "MEDIA"
+bucket_name = "storymag-media"
+
+[vars]
+# storymag-media 버킷의 공개 r2.dev 주소 (wrangler r2 bucket dev-url enable로 발급됨)
+MEDIA_PUBLIC_BASE_URL = "https://pub-5106b478b9ec4750bfecd04f06a22722.r2.dev"

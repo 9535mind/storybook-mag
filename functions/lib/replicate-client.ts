@@ -82,16 +82,26 @@ async function createPrediction(
   version: string,
   input: Record<string, unknown>,
   timeoutMs: number = REPLICATE_TIMEOUT_MS,
+  options?: { waitSec?: number | null },
 ): Promise<ReplicatePredictionResponse> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${apiToken}`,
+    'Content-Type': 'application/json',
+  }
+  // waitSec === null → 즉시 반환(비동기). Cloudflare Pages 30초 한도용.
+  if (options?.waitSec !== null) {
+    const waitSec =
+      typeof options?.waitSec === 'number'
+        ? options.waitSec
+        : Math.min(55, Math.round(timeoutMs / 1000))
+    headers.Prefer = `wait=${Math.max(1, waitSec)}`
+  }
+
   const response = await fetchWithTimeout(
     'https://api.replicate.com/v1/predictions',
     {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-        Prefer: `wait=${Math.min(55, Math.round(timeoutMs / 1000))}`,
-      },
+      headers,
       body: JSON.stringify({ version, input }),
     },
     timeoutMs,
@@ -100,6 +110,22 @@ async function createPrediction(
   if (!response.ok) {
     throw new Error(extractReplicateError(payload))
   }
+  return payload
+}
+
+export async function fetchReplicatePrediction(
+  apiToken: string,
+  predictionId: string,
+): Promise<ReplicatePredictionResponse> {
+  const id = predictionId.trim()
+  if (!id) throw new Error('replicate_missing_prediction_id')
+  const response = await fetchWithTimeout(
+    `https://api.replicate.com/v1/predictions/${id}`,
+    { headers: { Authorization: `Bearer ${apiToken}` } },
+    20_000,
+  )
+  const payload = (await response.json().catch(() => ({}))) as ReplicatePredictionResponse
+  if (!response.ok) throw new Error(extractReplicateError(payload))
   return payload
 }
 
@@ -257,6 +283,10 @@ export async function refineReplicateImageToImage(options: {
   /** 0에 가까울수록 원본 유지, 1에 가까울수록 크게 변경 */
   strength?: number
   disableSafetyChecker?: boolean
+  /** 미지정 시 8 — Lightning 계열 기본값. 일반 SDXL(정밀모드) 등으로 모델을 바꿀 때는
+   * 반드시 이 값도 함께 올려야 한다(8스텝은 일반 SDXL에서 노이즈/해부구조 붕괴를 유발함). */
+  numInferenceSteps?: number
+  guidanceScale?: number
 }): Promise<{ imageUrl: string }> {
   if (!options.apiToken?.trim()) throw new Error('missing_replicate_token')
   if (!options.imageUrl?.trim()) throw new Error('missing_image_url')
@@ -277,8 +307,8 @@ export async function refineReplicateImageToImage(options: {
       prompt_strength: strength,
       width: options.width,
       height: options.height,
-      num_inference_steps: 8,
-      guidance_scale: 2.2,
+      num_inference_steps: options.numInferenceSteps ?? 8,
+      guidance_scale: options.guidanceScale ?? 2.2,
       number_of_images: 1,
       disable_safety_checker: safety,
     },
@@ -367,6 +397,248 @@ export function resolveWanI2vDuration(durationSec?: number): {
   return { num_frames: 121, frames_per_second: 8, approxSec: 15 }
 }
 
+function buildWanVideoInput(options: {
+  imageUrl: string
+  prompt: string
+  aspect?: ReplicateVideoAspect
+  durationSec?: number
+  goFast?: boolean
+}): { fullInput: Record<string, unknown>; minimalInput: Record<string, unknown>; approxSec: number } {
+  const { num_frames, frames_per_second, approxSec } = resolveWanI2vDuration(options.durationSec)
+  const fullInput: Record<string, unknown> = {
+    image: options.imageUrl,
+    prompt: options.prompt,
+    num_frames,
+    frames_per_second,
+    // go_fast(distilled fast path)는 속도는 빠르지만 프롬프트 순응도가 떨어진다.
+    // 사용자가 구체적인 모션을 요청했을 때는 꺼서(느려지지만) 요청한 동작을 더 잘 따르게 한다.
+    go_fast: options.goFast !== false,
+    resolution: '480p',
+    // 성인 화보 모션이 안전필터에 걸려 빈 실패로 떨어지는 경우 완화
+    disable_safety_checker: true,
+  }
+  // fullInput이 스키마 문제로 거부될 때만 쓰는 최소 재시도 입력이지만, go_fast를 빼먹으면
+  // 모델 기본값(대개 true, 순응도 낮은 고속 경로)으로 되돌아가서 모션 힌트가 있어도 잘 안
+  // 반영되는 사고가 있었다 — go_fast만은 최소 입력에도 반드시 유지한다.
+  const minimalInput: Record<string, unknown> = {
+    image: options.imageUrl,
+    prompt: options.prompt,
+    go_fast: options.goFast !== false,
+  }
+  return { fullInput, minimalInput, approxSec }
+}
+
+const MAX_VIDEO_SOURCE_BYTES = 12 * 1024 * 1024
+
+function parseImageDataUrl(dataUrl: string): {
+  contentType: string
+  bytes: ArrayBuffer
+  filename: string
+} {
+  const m = /^data:(image\/(?:png|jpeg|jpg|webp));base64,([A-Za-z0-9+/=\s]+)$/i.exec(
+    (dataUrl || '').trim(),
+  )
+  if (!m) throw new Error('invalid_image_data_url')
+  const contentType = m[1].toLowerCase().replace('image/jpg', 'image/jpeg')
+  const b64 = m[2].replace(/\s+/g, '')
+  // atob → binary string → ArrayBuffer (Workers 호환)
+  const bin = atob(b64)
+  if (bin.length > MAX_VIDEO_SOURCE_BYTES) throw new Error('source_image_too_large')
+  const bytes = new ArrayBuffer(bin.length)
+  const view = new Uint8Array(bytes)
+  for (let i = 0; i < bin.length; i += 1) view[i] = bin.charCodeAt(i)
+  const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
+  return { contentType, bytes, filename: `source.${ext}` }
+}
+
+/** Replicate Files API — 만료된 delivery URL 대신 신선한 입력 URL을 만든다. */
+export async function uploadBytesToReplicate(
+  apiToken: string,
+  bytes: ArrayBuffer,
+  contentType: string,
+  filename: string,
+): Promise<string> {
+  const form = new FormData()
+  form.append('content', new Blob([bytes], { type: contentType || 'application/octet-stream' }), filename)
+  const response = await fetchWithTimeout(
+    'https://api.replicate.com/v1/files',
+    {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiToken}` },
+      body: form,
+    },
+    45_000,
+  )
+  const payload = (await response.json().catch(() => ({}))) as {
+    urls?: { get?: string }
+    detail?: string
+    error?: unknown
+  }
+  if (!response.ok) {
+    throw new Error(
+      (typeof payload.detail === 'string' && payload.detail) ||
+        extractReplicateError(payload) ||
+        'replicate_file_upload_failed',
+    )
+  }
+  const getUrl = payload.urls?.get?.trim()
+  if (!getUrl) throw new Error('replicate_file_upload_missing_url')
+  return getUrl
+}
+
+/**
+ * 영상 입력 이미지를 Replicate에 재업로드한다.
+ * replicate.delivery 임시 URL은 금방 404가 나므로 필수.
+ */
+export async function resolveVideoSourceImageUrl(options: {
+  apiToken: string
+  imageUrl?: string
+  imageDataUrl?: string
+}): Promise<string> {
+  if (!options.apiToken?.trim()) throw new Error('missing_replicate_token')
+
+  if (options.imageDataUrl?.trim().startsWith('data:image/')) {
+    const parsed = parseImageDataUrl(options.imageDataUrl)
+    return uploadBytesToReplicate(
+      options.apiToken,
+      parsed.bytes,
+      parsed.contentType,
+      parsed.filename,
+    )
+  }
+
+  const url = (options.imageUrl || '').trim()
+  if (!url) throw new Error('missing_image_url')
+
+  let response: Response
+  try {
+    response = await fetchWithTimeout(url, { method: 'GET', redirect: 'follow' }, 25_000)
+  } catch {
+    throw new Error('source_image_fetch_failed')
+  }
+  if (response.status === 404 || response.status === 403 || response.status === 410) {
+    throw new Error('source_image_expired')
+  }
+  if (!response.ok) {
+    throw new Error(`source_image_fetch_failed_${response.status}`)
+  }
+
+  const buf = await response.arrayBuffer()
+  if (buf.byteLength < 64) throw new Error('source_image_empty')
+  if (buf.byteLength > MAX_VIDEO_SOURCE_BYTES) throw new Error('source_image_too_large')
+
+  const headerType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+  const contentType =
+    headerType.startsWith('image/') && !headerType.includes('svg')
+      ? headerType
+      : url.toLowerCase().includes('.png')
+        ? 'image/png'
+        : url.toLowerCase().includes('.webp')
+          ? 'image/webp'
+          : 'image/jpeg'
+  const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
+  return uploadBytesToReplicate(options.apiToken, buf, contentType, `source.${ext}`)
+}
+
+/**
+ * 비디오 생성 시작 — Cloudflare 30초 한도에 맞게 길게 기다리지 않는다.
+ * 완료되지 않으면 predictionId를 돌려 클라이언트가 폴링한다.
+ */
+export async function startReplicateVideo(options: {
+  apiToken: string
+  modelOwner: string
+  modelName: string
+  modelVersion?: string
+  imageUrl: string
+  prompt: string
+  aspect?: ReplicateVideoAspect
+  durationSec?: number
+  goFast?: boolean
+}): Promise<{
+  status: 'succeeded' | 'processing'
+  predictionId: string
+  videoUrl?: string
+  durationSec: number
+}> {
+  if (!options.apiToken?.trim()) throw new Error('missing_replicate_token')
+  if (!options.imageUrl?.trim()) throw new Error('missing_image_url')
+
+  const versionId =
+    options.modelVersion?.trim() ||
+    (await resolveLatestVersion(options.apiToken, options.modelOwner, options.modelName))
+
+  const { fullInput, minimalInput, approxSec } = buildWanVideoInput(options)
+
+  // Prefer: wait 없이 즉시 접수 — Cloudflare ~30초 한도/502 방지
+  let prediction: ReplicatePredictionResponse
+  let lastErr: Error | null = null
+  try {
+    prediction = await createPrediction(options.apiToken, versionId, fullInput, 18_000, {
+      waitSec: null,
+    })
+  } catch (firstErr) {
+    lastErr = firstErr instanceof Error ? firstErr : new Error('replicate_video_start_failed')
+    try {
+      prediction = await createPrediction(options.apiToken, versionId, minimalInput, 18_000, {
+        waitSec: null,
+      })
+      lastErr = null
+    } catch (secondErr) {
+      const msg =
+        (secondErr instanceof Error && secondErr.message) ||
+        lastErr?.message ||
+        'replicate_video_start_failed'
+      throw new Error(msg)
+    }
+  }
+
+  if (!prediction.id) throw new Error('replicate_missing_prediction_id')
+
+  if (prediction.status === 'failed' || prediction.status === 'canceled') {
+    throw new Error(extractReplicateError(prediction) || `replicate_${prediction.status}`)
+  }
+
+  if (prediction.status === 'succeeded') {
+    const videoUrl = extractVideoUrl(prediction.output)
+    if (!videoUrl) throw new Error('replicate_missing_video_url')
+    return { status: 'succeeded', predictionId: prediction.id, videoUrl, durationSec: approxSec }
+  }
+
+  return { status: 'processing', predictionId: prediction.id, durationSec: approxSec }
+}
+
+/** 폴링용 — 한 번만 조회 */
+export async function checkReplicateVideo(options: {
+  apiToken: string
+  predictionId: string
+  durationSec?: number
+}): Promise<{
+  status: 'succeeded' | 'processing' | 'failed'
+  videoUrl?: string
+  error?: string
+  durationSec: number
+}> {
+  const approxSec = resolveWanI2vDuration(options.durationSec).approxSec
+  const prediction = await fetchReplicatePrediction(options.apiToken, options.predictionId)
+
+  if (prediction.status === 'succeeded') {
+    const videoUrl = extractVideoUrl(prediction.output)
+    if (!videoUrl) {
+      return { status: 'failed', error: 'replicate_missing_video_url', durationSec: approxSec }
+    }
+    return { status: 'succeeded', videoUrl, durationSec: approxSec }
+  }
+  if (prediction.status === 'failed' || prediction.status === 'canceled') {
+    return {
+      status: 'failed',
+      error: extractReplicateError(prediction) || `replicate_${prediction.status}`,
+      durationSec: approxSec,
+    }
+  }
+  return { status: 'processing', durationSec: approxSec }
+}
+
+/** @deprecated 동기 대기 — Pages 한도에 걸릴 수 있음. start+check 사용 권장 */
 export async function generateReplicateVideo(options: {
   apiToken: string
   modelOwner: string
@@ -375,55 +647,20 @@ export async function generateReplicateVideo(options: {
   imageUrl: string
   prompt: string
   aspect?: ReplicateVideoAspect
-  /** 목표 길이(초). Wan2.2 계열은 frames/fps로 근사 (최대 약 15초). */
   durationSec?: number
 }): Promise<{ videoUrl: string; durationSec: number }> {
-  if (!options.apiToken?.trim()) {
-    throw new Error('missing_replicate_token')
+  const started = await startReplicateVideo(options)
+  if (started.status === 'succeeded' && started.videoUrl) {
+    return { videoUrl: started.videoUrl, durationSec: started.durationSec }
   }
-  if (!options.imageUrl?.trim()) {
-    throw new Error('missing_image_url')
-  }
-
   const startedAt = Date.now()
-  const versionId =
-    options.modelVersion?.trim() ||
-    (await resolveLatestVersion(options.apiToken, options.modelOwner, options.modelName))
-
-  const { num_frames, frames_per_second, approxSec } = resolveWanI2vDuration(options.durationSec)
-
-  const fullInput: Record<string, unknown> = {
-    image: options.imageUrl,
-    prompt: options.prompt,
-    num_frames,
-    frames_per_second,
-    go_fast: true,
-  }
-  // Wan2.2 schema: resolution enum is "480p" | "720p" (aspect follows source image).
-  if (options.aspect === 'portrait' || options.aspect === 'landscape' || options.aspect === 'square') {
-    fullInput.resolution = '480p'
-  }
-
-  let prediction: ReplicatePredictionResponse
-  try {
-    prediction = await createPrediction(options.apiToken, versionId, fullInput, REPLICATE_VIDEO_TIMEOUT_MS)
-  } catch {
-    // 모델 스키마가 다를 수 있음(추가 필드 거부) — 최소 입력으로 재시도.
-    const minimalInput: Record<string, unknown> = {
-      image: options.imageUrl,
-      prompt: options.prompt,
-    }
-    prediction = await createPrediction(options.apiToken, versionId, minimalInput, REPLICATE_VIDEO_TIMEOUT_MS)
-  }
-
-  if (prediction.status !== 'succeeded') {
-    if (!prediction.id) throw new Error('replicate_missing_prediction_id')
-    prediction = await pollPrediction(options.apiToken, prediction.id, startedAt, REPLICATE_VIDEO_TIMEOUT_MS)
-  }
-
+  const prediction = await pollPrediction(
+    options.apiToken,
+    started.predictionId,
+    startedAt,
+    REPLICATE_VIDEO_TIMEOUT_MS,
+  )
   const videoUrl = extractVideoUrl(prediction.output)
-  if (!videoUrl) {
-    throw new Error('replicate_missing_video_url')
-  }
-  return { videoUrl, durationSec: approxSec }
+  if (!videoUrl) throw new Error('replicate_missing_video_url')
+  return { videoUrl, durationSec: started.durationSec }
 }

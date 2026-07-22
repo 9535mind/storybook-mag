@@ -218,15 +218,21 @@ export async function generateFalImage(options: {
   )
 }
 
-/** data URI → fal 스토리지 https URL (inpaint 마스크용). */
-export async function uploadDataUrlToFal(falKey: string, dataUrl: string, fileName: string): Promise<string> {
+/** data URI → fal 스토리지 https URL (inpaint 마스크 / 레퍼런스 이미지 업로드 공용). */
+export async function uploadDataUrlToFal(
+  falKey: string,
+  dataUrl: string,
+  fileName: string,
+  options: { maxBytes?: number; tooLargeError?: string } = {},
+): Promise<string> {
   if (!dataUrl.startsWith('data:')) throw new Error('invalid_data_url')
 
   // fetch(data:)는 Worker에서 바이트 변환을 맡기므로 수동 atob 루프보다 CPU를 덜 쓴다.
   const blobResponse = await fetch(dataUrl)
   if (!blobResponse.ok) throw new Error('invalid_data_url')
   const blob = await blobResponse.blob()
-  if (blob.size > 1_200_000) throw new Error('mask_too_large')
+  const maxBytes = options.maxBytes ?? 1_200_000
+  if (blob.size > maxBytes) throw new Error(options.tooLargeError ?? 'mask_too_large')
 
   const form = new FormData()
   form.append('file', blob, fileName)
@@ -305,6 +311,32 @@ export async function refineFalInpaint(options: {
     }
   }
   throw new Error(errors.join(' / ') || 'fal_inpaint_failed')
+}
+
+/**
+ * 레퍼런스 이미지 여러 장 + 텍스트로 "같은 캐릭터/화풍의 새 장면"을 생성.
+ * (동화 삽화 이어그리기 — 완전히 새로운 장면을 그리되 참고 이미지의 캐릭터·스타일을 최대한 유지)
+ */
+export async function generateFalKontextMultiImage(options: {
+  falKey: string
+  imageUrls: string[]
+  prompt: string
+  aspectRatio?: string
+  timeoutMs?: number
+}): Promise<{ imageUrl: string }> {
+  return runFalQueue(
+    options.falKey,
+    'fal-ai/flux-pro/kontext/multi',
+    {
+      prompt: options.prompt,
+      image_urls: options.imageUrls,
+      num_images: 1,
+      output_format: 'png',
+      safety_tolerance: '5',
+      ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+    },
+    options.timeoutMs ?? FAL_WILDLIFE_TIMEOUT_MS,
+  )
 }
 
 export function resolveFalImageSize(size: string | undefined): FalImageSize {

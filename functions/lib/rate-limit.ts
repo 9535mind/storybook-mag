@@ -52,13 +52,19 @@ export async function enforceRateLimit(
     }
 
     if (row.count >= limit) {
-      const retryAfter = windowStart + windowSec - now
+      const retryAfter = Math.max(1, windowStart + windowSec - now)
+      const waitLabel =
+        retryAfter >= 3600
+          ? `약 ${Math.ceil(retryAfter / 3600)}시간`
+          : retryAfter >= 60
+            ? `약 ${Math.ceil(retryAfter / 60)}분`
+            : `약 ${retryAfter}초`
       return jsonResponse(
         {
           ok: false,
           error: 'rate_limited',
-          message: `요청이 너무 많아요. 약 ${Math.max(1, retryAfter)}초 뒤에 다시 시도해 주세요.`,
-          retryAfterSec: Math.max(1, retryAfter),
+          message: `요청이 너무 많아요. ${waitLabel} 뒤에 다시 시도해 주세요.`,
+          retryAfterSec: retryAfter,
           bucket,
         },
         429,
@@ -77,4 +83,16 @@ export async function enforceRateLimit(
 
 export function rateLimitIdentity(auth: { user: { id: string }; via: string }): string {
   return `${auth.via}:${auth.user.id}`
+}
+
+/**
+ * 로그인 전(pre-auth) 엔드포인트용 식별자. Cloudflare가 붙여주는 접속 IP를 우선 사용한다.
+ * (로그인/가입/PIN 엔드포인트는 세션이 없어 rateLimitIdentity를 쓸 수 없음)
+ */
+export function getClientIp(request: Request): string {
+  return (
+    request.headers.get('cf-connecting-ip')?.trim() ||
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    'unknown'
+  )
 }

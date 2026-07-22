@@ -1,23 +1,27 @@
-import { requireAuth } from '../lib/auth'
+import { isAdminEmail, requireAuth } from '../lib/auth'
 import { buildAnimationPrompt, evaluateContentPolicy } from '../lib/content-policy'
 import { mediaUrlError } from '../lib/media-url'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 import {
-  generateReplicateVideo,
   resolveReplicateVideoAspect,
+  resolveVideoSourceImageUrl,
   resolveWanI2vDuration,
+  startReplicateVideo,
 } from '../lib/replicate-client'
+import { translateDescriptionForImagePrompt } from '../lib/translate'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
-
-  // I2V(이미지→비디오) 엔진 — Replicate: 기본값 Wan2.2 I2V (wan-video/wan-2.2-i2v-fast)
   REPLICATE_API_TOKEN?: string
   REPLICATE_VIDEO_MODEL_OWNER?: string
   REPLICATE_VIDEO_MODEL_NAME?: string
-  /** 조회 생략용 버전 고정(선택) — 비워두면 latest_version을 자동 조회 */
   REPLICATE_VIDEO_MODEL_VERSION?: string
+  /** Workers AI — 한→영 모션 지시 번역 폴백 */
+  AI?: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> }
+  /** 한→영 번역 주 엔진(선택) — 없으면 Workers AI 폴백만 사용 */
+  ANTHROPIC_API_KEY?: string
+  ANTHROPIC_MODEL?: string
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -27,20 +31,55 @@ function jsonResponse(body: unknown, status: number): Response {
   })
 }
 
+// 관리자 확장 화보 설명(최대 2400자) + buildFashionMagazinePrompt 고정 문구를 더하면
+// 완성된 이미지 프롬프트가 3000자 근처까지 늘어날 수 있다. 예전엔 1200자로 하드 차단해서
+// "prompt_too_long"으로 쇼츠 생성이 막혔는데, 이제는 잘라내되 문장/단어 경계에서 끊어
+// 자연스럽게 이어지도록 한다(중간에 단어가 잘리는 것을 방지).
+const ANIMATE_PROMPT_MAX_CHARS = 3000
+
+function truncatePromptAtBoundary(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text
+  const slice = text.slice(0, maxLen)
+  const lastBreak = Math.max(
+    slice.lastIndexOf('. '),
+    slice.lastIndexOf('! '),
+    slice.lastIndexOf('? '),
+    slice.lastIndexOf(', '),
+    slice.lastIndexOf(' '),
+  )
+  const cut = lastBreak > maxLen * 0.6 ? lastBreak : maxLen
+  return slice.slice(0, cut).trim()
+}
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context
 
   const auth = await requireAuth(request, env)
   if (auth instanceof Response) return auth
 
-  const limited = await enforceRateLimit(env, 'animate', rateLimitIdentity(auth), 10, 3600)
+  // 디버깅·재시도가 잦은 쇼츠: admin은 넉넉히, 일반은 시간당 20회
+  const animateLimit = isAdminEmail(auth.user.email) ? 80 : 20
+  const limited = await enforceRateLimit(
+    env,
+    'animate',
+    rateLimitIdentity(auth),
+    animateLimit,
+    3600,
+  )
   if (limited) return limited
 
   if (!env.REPLICATE_API_TOKEN?.trim()) {
     return jsonResponse({ ok: false, error: 'replicate_token_not_configured' }, 500)
   }
 
-  let body: { imageUrl?: string; prompt?: string; motion?: string; size?: string; durationSec?: number }
+  let body: {
+    imageUrl?: string
+    imageDataUrl?: string
+    prompt?: string
+    motion?: string
+    size?: string
+    durationSec?: number
+  }
   try {
     body = await request.json()
   } catch {
@@ -48,22 +87,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const imageUrl = (body.imageUrl ?? '').trim()
-  const urlErr = mediaUrlError(imageUrl)
-  if (urlErr) {
-    return jsonResponse({ ok: false, error: urlErr }, 400)
+  const imageDataUrl = (body.imageDataUrl ?? '').trim()
+  const hasDataUrl = imageDataUrl.startsWith('data:image/')
+  if (!hasDataUrl) {
+    const urlErr = mediaUrlError(imageUrl)
+    if (urlErr) {
+      return jsonResponse({ ok: false, error: urlErr }, 400)
+    }
+  } else if (imageDataUrl.length > 18_000_000) {
+    return jsonResponse({ ok: false, error: 'source_image_too_large' }, 400)
   }
 
-  const originalPrompt = (body.prompt ?? '').trim()
-  if (originalPrompt.length > 1200) {
-    return jsonResponse({ ok: false, error: 'prompt_too_long' }, 400)
-  }
+  const originalPrompt = truncatePromptAtBoundary((body.prompt ?? '').trim(), ANIMATE_PROMPT_MAX_CHARS)
 
   const motion = (body.motion ?? '').trim()
   if (motion.length > 400) {
     return jsonResponse({ ok: false, error: 'motion_too_long' }, 400)
   }
 
-  // 원본 프롬프트 + 모션 설명 모두 콘텐츠 정책 검사
   const policyText = [originalPrompt, motion].filter(Boolean).join('\n')
   if (policyText) {
     const policyVerdict = evaluateContentPolicy(policyText)
@@ -80,46 +121,80 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
   }
 
-  const prompt = buildAnimationPrompt({ prompt: originalPrompt, motion })
-  // 환경변수 미지정 시 오픈소스 I2V 기본 스펙(Wan2.2)으로 자동 바인딩
+  // Wan I2V도 영어 위주 모델이라, 모션 힌트를 한글 그대로 넣으면 잘 안 따라간다 — 번역해서 넣는다.
+  const [{ text: promptForVideo }, { text: motionForVideo }] = await Promise.all([
+    translateDescriptionForImagePrompt(originalPrompt, env),
+    translateDescriptionForImagePrompt(motion, env),
+  ])
+  const prompt = buildAnimationPrompt({ prompt: promptForVideo, motion: motionForVideo })
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
+  const requested =
+    typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 8
+  const { approxSec } = resolveWanI2vDuration(requested)
 
   try {
-    const requested =
-      typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 8
-    const { approxSec } = resolveWanI2vDuration(requested)
+    // delivery URL은 금방 만료 → 항상 Files API로 재업로드한 뒤 I2V 시작
+    const freshImageUrl = await resolveVideoSourceImageUrl({
+      apiToken: env.REPLICATE_API_TOKEN,
+      imageUrl: hasDataUrl ? undefined : imageUrl,
+      imageDataUrl: hasDataUrl ? imageDataUrl : undefined,
+    })
 
-    const { videoUrl, durationSec } = await generateReplicateVideo({
+    const started = await startReplicateVideo({
       apiToken: env.REPLICATE_API_TOKEN,
       modelOwner,
       modelName,
       modelVersion: env.REPLICATE_VIDEO_MODEL_VERSION,
-      imageUrl,
+      imageUrl: freshImageUrl,
       prompt,
       aspect: resolveReplicateVideoAspect(body.size),
       durationSec: requested,
+      // 구체적인 모션 요청이 있으면 go_fast(빠른 대신 순응도 낮음)를 끄고
+      // 요청한 동작을 더 충실히 따르게 한다. 모션 힌트가 없으면 그대로 빠른 경로 사용.
+      goFast: !motion,
     })
 
+    if (started.status === 'succeeded' && started.videoUrl) {
+      return jsonResponse(
+        {
+          ok: true,
+          pending: false,
+          videoUrl: started.videoUrl,
+          prompt,
+          durationSec: started.durationSec || approxSec,
+          predictionId: started.predictionId,
+          engine: 'replicate',
+          engineLabel: `Replicate · ${modelOwner}/${modelName}`,
+        },
+        200,
+      )
+    }
+
+    // 항상 HTTP 200 — 일부 게이트웨이가 202를 502로 깨뜨리는 경우 방지
     return jsonResponse(
       {
         ok: true,
-        videoUrl,
+        pending: true,
+        predictionId: started.predictionId,
         prompt,
-        durationSec: durationSec || approxSec,
+        durationSec: started.durationSec || approxSec,
         engine: 'replicate',
         engineLabel: `Replicate · ${modelOwner}/${modelName}`,
+        message: '영상 생성을 시작했어요. 완료될 때까지 상태를 확인합니다.',
       },
       200,
     )
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown_error'
+    // 앱 오류도 200 + ok:false 로 내려 본문을 클라이언트가 확실히 읽게 함
     return jsonResponse(
       {
         ok: false,
         error: 'video_generation_failed',
-        message: error instanceof Error ? error.message : 'unknown_error',
+        message,
       },
-      502,
+      200,
     )
   }
 }

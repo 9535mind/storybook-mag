@@ -1,4 +1,5 @@
 import { jsonResponse, setAdminPinOverride, validateAdminPin, verifyAdminPin } from '../../lib/auth'
+import { enforceRateLimit, getClientIp } from '../../lib/rate-limit'
 
 interface Env {
   DB?: D1Database
@@ -8,6 +9,12 @@ interface Env {
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context
   if (!env.DB) return jsonResponse({ ok: false, error: 'auth_db_not_configured' }, 500)
+
+  // 현재 PIN 무차별 대입 방어 — IP당 시간당 5회 + 전체 합산 시간당 20회(분산 시도 대비)
+  const limitedByIp = await enforceRateLimit(env, 'auth-change-pin', getClientIp(request), 5, 3600)
+  if (limitedByIp) return limitedByIp
+  const limitedGlobal = await enforceRateLimit(env, 'auth-change-pin-global', 'global', 20, 3600)
+  if (limitedGlobal) return limitedGlobal
 
   let body: { currentPin?: string; newPin?: string; confirmPin?: string }
   try {

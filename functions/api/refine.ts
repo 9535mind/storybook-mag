@@ -1,12 +1,16 @@
-import { requireAuth } from '../lib/auth'
+import { isAdminEmail, requireAuth } from '../lib/auth'
 import {
   buildFashionMagazinePrompt,
   buildFashionNegativePrompt,
   buildRefinePrompt,
+  DEFAULT_NEGATIVE_PROMPT,
+  describesAnimalSubject,
   evaluateContentPolicy,
+  isAdditiveRefineRevision,
   isStructuralRefineRevision,
   mergeFreeRevisionDescription,
   polishKoreanPromptText,
+  wantsNudeOrUndress,
 } from '../lib/content-policy'
 import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, refineFalImageToImage, refineFalInpaint, resolveFalImageSize } from '../lib/fal-client'
 import { mediaUrlError } from '../lib/media-url'
@@ -21,15 +25,22 @@ import {
   isRealWildlifeScene,
   summarizePlan,
 } from '../lib/scene-compiler'
+import { compileSdxlTagPrompt, translateDescriptionForImagePrompt } from '../lib/translate'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
   AI?: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> }
+  /** 한→영 번역 주 엔진(선택) — 없으면 Workers AI 폴백만 사용 */
+  ANTHROPIC_API_KEY?: string
+  ANTHROPIC_MODEL?: string
   REPLICATE_API_TOKEN?: string
   REPLICATE_MODEL_OWNER?: string
   REPLICATE_MODEL_NAME?: string
   REPLICATE_MODEL_VERSION?: string
+  REPLICATE_PRECISION_MODEL_OWNER?: string
+  REPLICATE_PRECISION_MODEL_NAME?: string
+  REPLICATE_PRECISION_MODEL_VERSION?: string
   FAL_KEY?: string
   FAL_MODEL_ID?: string
 }
@@ -68,9 +79,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const mode = body.mode === 'region' ? 'region' : 'text'
-  // 제품 초점: 자유 일러스트. 텍스트 수정은 클라이언트가 fashion을내도 장면 재생성으로 강제.
-  // (옛 캐시 JS가 genMode=fashion을 보내 얼굴유지 img2img로 가던 사고 차단)
-  const genMode: 'free' | 'fashion' = 'free'
+  // 클라이언트가 보낸 genMode를 그대로 신뢰한다(generate.ts와 동일한 패턴).
+  // 예전엔 여기서 무조건 'free'로 강제해서, 화보(관리자) 모드에서 "귀걸이 추가" 같은
+  // 작은 텍스트 수정도 전부 자유 일러스트용 장면 재생성(LLM 기반 동물/사물 재해석)으로
+  // 흘러갔다. 그 결과 이미지가 전혀 "수정"되지 않고 완전히 다른 장면(심지어 사자 같은
+  // 동물)으로 재생성되는 사고가 났다. 화보 모드는 아래의 화보 전용 img2img/재생성 경로를
+  // 타야 하므로, genMode='fashion'이면 자유 장면 재생성 블록을 건너뛰게 한다.
+  const genMode: 'free' | 'fashion' = body.genMode === 'fashion' ? 'fashion' : 'free'
   const imageUrl = (body.imageUrl ?? '').trim()
   const baseDescription = polishKoreanPromptText(body.baseDescription ?? '')
   const revision = polishKoreanPromptText(body.revision ?? '')
@@ -79,8 +94,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const urlErr = mediaUrlError(imageUrl)
   if (urlErr) return jsonResponse({ ok: false, error: urlErr }, 400)
   if (!revision) return jsonResponse({ ok: false, error: 'revision_required' }, 400)
+  // 관리자는 그림 상세본(최대 3000자 미만)을 그대로 baseDescription으로 들고 올 수 있게 허용한다.
+  const maxDescriptionChars = isAdminEmail(auth.user.email) ? 3000 : 1200
   if (revision.length > 800) return jsonResponse({ ok: false, error: 'revision_too_long' }, 400)
-  if (baseDescription.length > 1200) return jsonResponse({ ok: false, error: 'description_too_long' }, 400)
+  if (baseDescription.length > maxDescriptionChars) {
+    return jsonResponse({ ok: false, error: 'description_too_long', maxLength: maxDescriptionChars }, 400)
+  }
 
   const policyVerdict = evaluateContentPolicy(`${baseDescription}\n${revision}`, { mode: genMode })
   if (!policyVerdict.allowed) {
@@ -96,17 +115,26 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const size = body.size ?? 'landscape'
-  const mood = body.mood ?? 'editorial'
+  const mood = body.mood ?? 'clean'
+  // genMode='fashion'이라도 실제 서술이 동물/사물 장면이면(관리자가 화보 탭에서 동물 그림을
+  // 만든 경우) "성인 여성 얼굴 유지" 문구를 쓰면 안 된다. 번역이 "말"을 애매하게 옮길 수도
+  // 있으니, 번역 전 원문 한국어 텍스트로 먼저 판별해서 아래 img2img 경로 전체에 재사용한다.
+  const animalSubject = describesAnimalSubject(`${baseDescription} ${revision}`)
 
   // ═══════════════════════════════════════════════════════════
-  // 텍스트 수정 = 항상 자유 장면 재생성 (얼굴 유지 화보 img2img 금지)
+  // 자유 모드 텍스트 수정 = 항상 자유 장면 재생성 (동물/사물 일러스트 전용 경로)
+  // 화보(fashion) 모드는 여기를 건너뛰고 아래 화보 전용 재생성/img2img 경로를 탄다.
   // ═══════════════════════════════════════════════════════════
-  if (mode === 'text') {
+  if (mode === 'text' && genMode === 'free') {
+    // 한글 병합 브리프(merged)는 그대로 두고, 실제 이미지 프롬프트 조립 직전에만 영어로
+    // 번역한다 — 그래야 씬 파서(Llama)와 최종 프롬프트 둘 다 영어 텍스트를 받게 된다.
     const merged = mergeFreeRevisionDescription(baseDescription, revision)
+    const { text: mergedForPrompt } = await translateDescriptionForImagePrompt(merged, env)
     try {
       const compiled = await compileResponsiveFreePrompt({
-        description: merged,
+        description: mergedForPrompt,
         size,
+        mood,
         ai: env.AI,
       })
       const prompt = compiled.prompt
@@ -255,20 +283,29 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const structural = mode === 'text' && isStructuralRefineRevision(revision)
   if (structural && genMode === 'fashion' && env.REPLICATE_API_TOKEN?.trim()) {
     const merged = [baseDescription, revision].filter(Boolean).join('. ')
-    const prompt = buildFashionMagazinePrompt({ description: merged, mood, size })
+    // SDXL/Juggernaut CLIP 인코더의 ~70단어 예산에 맞춰 번역+압축 — generate.ts의 화보 경로와 동일.
+    const { text: mergedForPrompt } = await compileSdxlTagPrompt(merged, env)
+    const prompt = buildFashionMagazinePrompt({ description: mergedForPrompt, mood, size })
     const negativePrompt = buildFashionNegativePrompt(merged)
+    // 누드/탈의 수정 요청은 기본 Lightning 엔진이 옷을 입혀버리는 편향이 실측으로 확인됐다 —
+    // generate.ts와 동일하게 자동으로 정밀 모드(느린 일반 SDXL, 스텝↑·CFG↑)로 전환한다.
+    const autoPrecisionForNude = wantsNudeOrUndress(merged)
     try {
       const dims = resolveReplicateImageSize(size)
       const { imageUrl: nextUrl } = await generateReplicateImage({
         apiToken: env.REPLICATE_API_TOKEN,
-        modelOwner: env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-        modelName: env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-        modelVersion: env.REPLICATE_MODEL_VERSION,
+        modelOwner: autoPrecisionForNude
+          ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
+          : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
+        modelName: autoPrecisionForNude
+          ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
+          : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
+        modelVersion: autoPrecisionForNude ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
         prompt,
         negativePrompt,
         disableSafetyChecker: true,
-        numInferenceSteps: 14,
-        guidanceScale: 4.2,
+        numInferenceSteps: autoPrecisionForNude ? 30 : 14,
+        guidanceScale: autoPrecisionForNude ? 7.5 : 4.2,
         ...dims,
       })
       return jsonResponse(
@@ -280,7 +317,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           genMode,
           structuralRegen: true,
           engine: 'replicate',
-          engineLabel: 'Replicate · 장면 재생성 (전신·의상 큰 수정)',
+          engineLabel: autoPrecisionForNude
+            ? 'Replicate · 장면 재생성 · 정밀모드(30스텝, 누드 요청 자동 전환)'
+            : 'Replicate · 장면 재생성 (전신·의상 큰 수정)',
           message:
             '전신·속옷처럼 큰 수정은 원본 유지 img2img 대신 장면 재생성으로 처리했어요.',
         },
@@ -294,11 +333,30 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
   }
 
-  const prompt = buildRefinePrompt({ baseDescription, revision, mode, genMode })
+  // img2img/inpaint 프롬프트는 "정확히 이 변경만 적용해줘"가 핵심이라 번역 품질이 특히 중요하다
+  // (예: "귀걸이 추가해줘"가 한글 그대로 들어가면 이미지 모델이 못 읽어서 수정이 안 먹힘).
+  const [{ text: baseDescriptionForPrompt }, { text: revisionForPrompt }] = await Promise.all([
+    translateDescriptionForImagePrompt(baseDescription, env),
+    translateDescriptionForImagePrompt(revision, env),
+  ])
+  const prompt = buildRefinePrompt({
+    baseDescription: baseDescriptionForPrompt,
+    revision: revisionForPrompt,
+    mode,
+    // 위에서 원문 한국어로 이미 판별한 animalSubject를 그대로 강제 반영한다(번역이 "말"을
+    // 애매하게 옮겨서 buildRefinePrompt 내부의 자체 재판별이 놓치는 경우를 방지).
+    genMode: genMode === 'fashion' && animalSubject ? 'free' : genMode,
+  })
+  // 예전엔 이 분기에 품질/해부구조 네거티브(DEFAULT_NEGATIVE_PROMPT) 없이 "사람으로 바뀌지 말 것"
+  // 문구만 있었다 — 아래에서 추가형 수정에 strength를 올리면 팔다리 개수가 틀어지는 등 해부구조
+  // 오류 위험이 커지므로, 기본 품질 네거티브를 반드시 함께 넣는다.
   const negativePrompt =
-    genMode === 'free'
-      ? 'human fashion model, woman portrait, bathrobe, studio mugshot, replaced animal with human'
+    genMode === 'free' || animalSubject
+      ? `${DEFAULT_NEGATIVE_PROMPT}, human fashion model, woman portrait, bathrobe, studio mugshot, replaced animal with human`
       : buildFashionNegativePrompt(`${baseDescription} ${revision}`)
+  // "추가해줘/넣어줘"처럼 원본에 없던 새 요소를 그리는 요청은 img2img strength를 더 줘야
+  // 실제로 반영된다(낮은 strength는 원본 보존이 강해서 새 물체 합성이 잘 안 됨 — 실측 확인).
+  const additive = mode === 'text' && !structural && isAdditiveRefineRevision(revision)
 
   // ── 영역 수정: inpaint 우선
   if (mode === 'region') {
@@ -355,28 +413,53 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       if (env.REPLICATE_API_TOKEN?.trim()) {
         try {
           const dims = resolveReplicateImageSize(size)
+          // 이 폴백은 실제 마스크를 전달하지 않고 이미지 전체를 다시 그린다. 그런데 위 `prompt`는
+          // mode:'region'용으로 지어져 "마스크된 영역만 바꾸고 나머지는 보존하라"는 지시를
+          // 포함한다 — 마스크가 없는 이 경로에서 그 지시를 그대로 쓰면, 전신 누드처럼 마스크
+          // 밖 전체에 영향을 주는 요청이 "보존하라"는 문구에 눌려 반영되지 않는 사고가 실측으로
+          // 확인됐다(바구니만 지워지고 인물은 그대로 옷을 입고 있는 등). 전체 이미지 수정이므로
+          // mode:'text' 프롬프트로 다시 만든다.
+          const wholeImagePrompt = buildRefinePrompt({
+            baseDescription: baseDescriptionForPrompt,
+            revision: revisionForPrompt,
+            mode: 'text',
+            genMode: genMode === 'fashion' && animalSubject ? 'free' : genMode,
+          })
+          // 누드/탈의 요청도 마찬가지로 기본 Lightning 엔진(8스텝)이 옷을 입혀버리는 편향이
+          // 실측으로 확인된 케이스다 — generate.ts / 위 구조적 재생성 분기와 동일하게
+          // 정밀 모델(스텝·CFG↑)로 자동 전환한다.
+          const nudeFallback = wantsNudeOrUndress(`${baseDescription} ${revision}`)
+          const fallbackStrength = nudeFallback ? 0.55 : 0.45
           const { imageUrl: nextUrl } = await refineReplicateImageToImage({
             apiToken: env.REPLICATE_API_TOKEN,
-            modelOwner: env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-            modelName: env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-            modelVersion: env.REPLICATE_MODEL_VERSION,
+            modelOwner: nudeFallback
+              ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
+              : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
+            modelName: nudeFallback
+              ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
+              : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
+            modelVersion: nudeFallback ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
             imageUrl,
-            prompt,
+            prompt: wholeImagePrompt,
             negativePrompt,
             width: dims.width,
             height: dims.height,
-            strength: 0.45,
+            strength: fallbackStrength,
+            numInferenceSteps: nudeFallback ? 30 : undefined,
+            guidanceScale: nudeFallback ? 7.5 : undefined,
             disableSafetyChecker: true,
           })
           return jsonResponse(
             {
               ok: true,
               imageUrl: nextUrl,
-              prompt,
+              prompt: wholeImagePrompt,
               mode: 'text',
               genMode,
               engine: 'replicate',
-              engineLabel: 'Replicate · Img2Img (영역 수정 폴백)',
+              engineLabel: nudeFallback
+                ? 'Replicate · Img2Img (영역 수정 폴백 · 정밀모드, 누드 요청 자동 전환)'
+                : 'Replicate · Img2Img (영역 수정 폴백)',
               fallbackUsed: true,
               attempts,
               regionCount: body.regionCount ?? 1,
@@ -418,7 +501,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         negativePrompt,
         width: dims.width,
         height: dims.height,
-        strength: structural ? 0.32 : 0.28,
+        strength: structural ? 0.32 : additive ? 0.5 : 0.28,
         disableSafetyChecker: true,
       })
       return jsonResponse(
@@ -430,7 +513,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           genMode,
           structuralRegen: false,
           engine: 'replicate',
-          engineLabel: 'Replicate · Img2Img (얼굴 유지 수정)',
+          engineLabel: additive
+            ? 'Replicate · Img2Img (요소 추가 · strength↑)'
+            : 'Replicate · Img2Img (얼굴 유지 수정)',
           attempts: attempts.length ? attempts : undefined,
         },
         200,
@@ -451,7 +536,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         falKey: env.FAL_KEY,
         imageUrl,
         prompt,
-        strength: 0.28,
+        strength: structural ? 0.32 : additive ? 0.5 : 0.28,
       })
       return jsonResponse(
         {

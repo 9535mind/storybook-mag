@@ -6,6 +6,12 @@ export type AuthUser = {
 type AuthEnv = {
   DB?: D1Database
   ADMIN_PIN?: string
+  /**
+   * 개인 사용 잠금. 기본 ON.
+   * 끄려면 SOLO_ADMIN_ONLY=0 (또는 false / off).
+   * 켜져 있으면 admin 계정만 로그인·API 사용 가능, 회원가입 불가.
+   */
+  SOLO_ADMIN_ONLY?: string
 }
 
 const SESSION_DAYS = 30
@@ -69,6 +75,21 @@ export async function verifyPassword(password: string, saltHex: string, hashHex:
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase()
+}
+
+/** admin / admin@… 만 관리자로 본다 (프론트 isAdminUser와 동일). */
+export function isAdminEmail(emailRaw: string): boolean {
+  const email = normalizeEmail(emailRaw)
+  if (!email) return false
+  if (email === 'admin' || email === 'admin@local') return true
+  return email.split('@')[0] === 'admin'
+}
+
+/** 기본 true — 안정화될 때까지 혼자 쓰기. SOLO_ADMIN_ONLY=0 이면 해제. */
+export function isSoloAdminOnly(env: AuthEnv): boolean {
+  const raw = (env.SOLO_ADMIN_ONLY ?? '1').trim().toLowerCase()
+  if (raw === '0' || raw === 'false' || raw === 'off' || raw === 'no') return false
+  return true
 }
 
 function isValidEmail(email: string): boolean {
@@ -177,6 +198,47 @@ export async function loginUser(
   return { user: { id: row.id, email: row.email }, token }
 }
 
+/**
+ * ADMIN_PIN으로 관리자 계정 비밀번호를 다시 설정한다.
+ * 이메일 복구 없이 분실 대비용 (개인 사용 / solo 모드).
+ */
+export async function resetAdminPasswordWithPin(
+  env: AuthEnv,
+  emailRaw: string,
+  newPassword: string,
+  adminPin: string,
+): Promise<{ ok: true; email: string } | { error: string; status: number }> {
+  if (!env.DB) return { error: 'auth_db_not_configured', status: 500 }
+  if (!(await verifyAdminPin(env, adminPin))) {
+    return { error: 'invalid_admin_pin', status: 401 }
+  }
+
+  const email = normalizeEmail(emailRaw)
+  if (!isValidEmail(email) || !isAdminEmail(email)) {
+    return { error: 'solo_admin_only', status: 403 }
+  }
+
+  const pwError = validatePassword(newPassword)
+  if (pwError) return { error: pwError, status: 400 }
+
+  const row = await env.DB
+    .prepare('SELECT id FROM users WHERE email = ? LIMIT 1')
+    .bind(email)
+    .first<{ id: string }>()
+  if (!row) return { error: 'user_not_found', status: 404 }
+
+  const { salt, hash } = await hashPassword(newPassword)
+  await env.DB
+    .prepare('UPDATE users SET password_salt = ?, password_hash = ? WHERE id = ?')
+    .bind(salt, hash, row.id)
+    .run()
+
+  // 기존 세션 무효화 — 새 비밀번호로 다시 로그인
+  await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(row.id).run()
+
+  return { ok: true, email }
+}
+
 const SETTINGS_PIN_SALT = 'admin_pin_salt'
 const SETTINGS_PIN_HASH = 'admin_pin_hash'
 
@@ -283,7 +345,12 @@ export async function requireAuth(
 
   if (sessionToken && env.DB) {
     const user = await getUserBySession(env.DB, sessionToken)
-    if (user) return { user, via: 'session' }
+    if (user) {
+      if (isSoloAdminOnly(env) && !isAdminEmail(user.email)) {
+        return jsonResponse({ ok: false, error: 'solo_admin_only' }, 403)
+      }
+      return { user, via: 'session' }
+    }
   }
 
   const pin = request.headers.get('x-admin-pin') ?? ''

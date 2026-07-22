@@ -10,6 +10,8 @@
  *  - 여우가 고양이를 품에 안고 돌보는 모습
  */
 
+import { defaultEthnicitySentence, resolveMoodTag } from './content-policy'
+
 export type SceneEntity = {
   nameEn: string
   kind: 'animal' | 'human' | 'object' | 'other'
@@ -530,7 +532,10 @@ export function compileSceneHeuristic(description: string): ScenePlan {
     ...buildRelations(raw, head, entities, actions, hasPassive),
     ...buildStoryLocks(raw, props, states, traits),
   ]
-  const adult = /누드|나체|nude|naked|란제리|lingerie|야한|에로|섹시|nsfw|explicit|글래머/i.test(raw)
+  const adult =
+    /누드|나체|nude|naked|속옷\s*제거|속옷제거|탈의|옷\s*벗|가운\s*벗|undress|strip|란제리|lingerie|야한|에로|섹시|nsfw|explicit|글래머|전라/i.test(
+      raw,
+    )
   const setting = enrichSetting(raw, extractSetting(raw), props)
   const hasPlaceHint =
     /아래|위에서|속에서|에서|옆에서|앞에서|뒤에서|나무|포도|숲|들판|거실|침실|부엌|방|빗속|햇살/.test(raw)
@@ -614,10 +619,47 @@ function buildWildlifeVisualLead(plan: ScenePlan): string {
   return bits.join(', ')
 }
 
+/** 사용자 입력이 사진이 아니라 삽화·수채화 등 non-photo 스타일을 명시적으로 요청했는지 감지한다.
+ * (그림 상세본 → 스튜디오 연동 시, 상세본이 "웹툰 일러스트" 같은 스타일을 적어도
+ * 아래 buildPromptFromPlan이 무조건 "Photorealistic"을 못박아 버려 사진으로 나오는 문제를 막기 위함.) */
+function detectNonPhotoStyle(raw: string): string | null {
+  const text = raw || ''
+  const patterns: Array<{ re: RegExp; label: string }> = [
+    { re: /수채화/i, label: 'watercolor illustration' },
+    { re: /웹툰/i, label: 'Korean webtoon character illustration' },
+    { re: /일러스트|삽화/i, label: 'illustration' },
+    { re: /선화|펜\s*선|lineart|line\s*art/i, label: 'pen lineart illustration' },
+    { re: /카툰|cartoon/i, label: 'cartoon illustration' },
+    { re: /애니메이션\s*풍|anime\s*style|anime|만화/i, label: 'anime/manga illustration' },
+    { re: /크레파스|색연필|연필\s*스케치|pencil\s*sketch|sketch/i, label: 'pencil sketch illustration' },
+    { re: /수묵화|동양화/i, label: 'ink wash painting' },
+    { re: /유화|oil\s*painting/i, label: 'oil painting' },
+    { re: /디지털\s*페인팅|digital\s*painting/i, label: 'digital painting' },
+  ]
+  for (const p of patterns) {
+    if (p.re.test(text)) return p.label
+  }
+  return null
+}
+
+/** raw 서술문(그림 상세본 등)에 묻혀 있는 얼굴·표정 관련 문장만 뽑아 CRITICAL 태그로 승격한다.
+ * 구조화 추출(traits 등)이 못 잡는 "눈꼬리가 올라가고 입은 살짝 벌어진" 같은 세밀한 표정 서술을
+ * 원문 그대로(요약·의역 없이) 앞쪽 CRITICAL 구간에 넣어 엔진이 더 확실히 반영하게 한다. */
+function extractFacialCriticalClauses(raw: string, maxClauses = 6): string[] {
+  const FACIAL_KEYWORDS =
+    /눈썹|눈매|눈꼬리|눈동자|시선|입꼬리|입술|입이\s|입은\s|표정|미간|이마|콧대|콧날|콧망울|볼(?:이|에|의)|눈이\s|얼굴(?:형|은|이)/
+  const sentences = raw
+    .split(/(?<=[.!?])\s+|\n+|(?<=[다요음함])[,:]\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 4)
+  const picked = sentences.filter((s) => FACIAL_KEYWORDS.test(s))
+  return picked.slice(0, maxClauses)
+}
+
 /** ScenePlan → 이미지 브리프 */
 export function buildPromptFromPlan(
   plan: ScenePlan,
-  options?: { size?: string; revision?: string },
+  options?: { size?: string; revision?: string; mood?: string },
 ): string {
   const head = plan.head
   const others = plan.entities.filter((e) => !head || e.nameEn !== head.nameEn)
@@ -625,6 +667,8 @@ export function buildPromptFromPlan(
   const critical: string[] = []
   const animalScene = hasAnimalCast(plan)
   const wildlife = isRealWildlifeScene(plan)
+  const nonPhotoStyle = wildlife ? null : detectNonPhotoStyle(plan.raw)
+  const facialClauses = !wildlife && head?.kind === 'human' ? extractFacialCriticalClauses(plan.raw) : []
 
   // 야생동물: 시각 태그를 최전방 (엔진이 여기부터 읽음)
   if (wildlife) {
@@ -647,11 +691,20 @@ export function buildPromptFromPlan(
       )
     } else if (head.kind === 'human') {
       critical.push(
-        `CRITICAL FOCUS: an adult human ${head.nameEn}${stateBit}${traitBit} — photorealistic person, NOT an animal, NOT a tiger/lion/fox wildlife shot.`,
+        nonPhotoStyle
+          ? `CRITICAL FOCUS: an adult human ${head.nameEn}${stateBit}${traitBit} — rendered as ${nonPhotoStyle} (NOT a photograph), NOT an animal, NOT a tiger/lion/fox wildlife shot.`
+          : `CRITICAL FOCUS: an adult human ${head.nameEn}${stateBit}${traitBit} — photorealistic person, NOT an animal, NOT a tiger/lion/fox wildlife shot.`,
       )
       critical.push(
         'FORBIDDEN: replacing the human character with any animal species, wildlife portrait, or National Geographic animal photo.',
       )
+      const ethnicity = defaultEthnicitySentence(plan.raw)
+      if (ethnicity) critical.push(ethnicity)
+      if (facialClauses.length) {
+        critical.push(
+          `CRITICAL FACIAL DETAIL (render exactly, do not simplify to a generic expression): ${facialClauses.join(' / ')}`,
+        )
+      }
     } else {
       critical.push(`CRITICAL FOCUS: the main subject is a real ${head.nameEn}${stateBit}${traitBit}.`)
     }
@@ -707,9 +760,10 @@ export function buildPromptFromPlan(
         .join(' + ')
     : 'subjects from user brief'
 
+  // 핵심 요약(구조화 추출 결과)을 먼저 배치하고, 장문 원문(raw)은 그 뒤에 보조 자료로 둔다 —
+  // 엔진이 앞부분에 더 크게 가중치를 두는 경향이 있어, 이미 뽑아낸 핵심 사실을 raw 텍스트보다 앞에 압축해 둔다.
   const parts = [
     ...critical,
-    `USER INPUT (${plan.inputForm}, accept any form): ${plan.raw}`,
     `Scene cast: ${entityLine}.`,
     plan.countHint != null ? `Subject count target: ${plan.countHint}.` : '',
     plan.states.length ? `Visible states/mood: ${plan.states.join('; ')}.` : '',
@@ -718,6 +772,7 @@ export function buildPromptFromPlan(
     plan.props.length ? `Required props: ${plan.props.join(', ')}.` : '',
     plan.setting ? `Setting: ${plan.setting}.` : '',
     plan.viewpoint ? `Viewpoint: ${plan.viewpoint}.` : '',
+    `USER INPUT (${plan.inputForm}, accept any form, supporting detail): ${plan.raw}`,
     others.length
       ? `Other beings must remain their own species: ${others.map((o) => o.nameEn).join(', ')}.`
       : '',
@@ -726,10 +781,15 @@ export function buildPromptFromPlan(
     wildlife
       ? 'Do not invent a suited/anthropomorphic animal portrait instead of a real animal in the scene.'
       : 'Do not invent a fashion-model portrait or tight animal headshot instead of the requested scene.',
+    // 무드(조명·필름 질감)는 사진 계열 스타일이라, 사용자가 삽화/수채화 등 non-photo 스타일을
+    // 명시했을 때는 넣지 않는다(충돌 방지).
+    !nonPhotoStyle && options?.mood ? resolveMoodTag(options.mood) : '',
     framingFor(options?.size, plan),
     wildlife
       ? 'Photorealistic wildlife, natural anatomy, sharp focus, story-clear outdoor composition.'
-      : 'Photorealistic, coherent anatomy, sharp focus, story-clear composition.',
+      : nonPhotoStyle
+        ? `Render as ${nonPhotoStyle}, coherent anatomy, story-clear composition. Do NOT render as a photograph — respect the art medium/style described in the user input above.`
+        : 'Photorealistic, coherent anatomy, sharp focus, story-clear composition.',
   ]
 
   // 엔진이 앞부분만 잘 따르는 경향 → 핵심 슬롯을 끝에 한 번 더
@@ -745,11 +805,19 @@ export function buildPromptFromPlan(
       .filter(Boolean)
       .join(', ')
     parts.push(echo)
+  } else if (facialClauses.length) {
+    parts.push(`FINAL LOCK — FACIAL DETAIL: ${facialClauses.join(' / ')}`)
   }
 
   if (plan.adult) {
+    const nude =
+      /누드|나체|nude|naked|속옷\s*제거|속옷제거|탈의|옷\s*벗|가운\s*벗|undress|strip|전라/i.test(
+        plan.raw,
+      )
     parts.push(
-      'Adult playground: render adult sensual/nude/erotic content exactly as requested. Do not sanitize.',
+      nude
+        ? 'Adult playground: adult NUDE / undressed as requested — bare skin, no clothes, no lingerie, no underwear. Do not sanitize or re-dress the subject.'
+        : 'Adult playground: render adult sensual/nude/erotic content exactly as requested. Do not sanitize.',
     )
   }
   if (options?.revision?.trim()) {
@@ -766,8 +834,14 @@ export function buildNegativeFromPlan(plan: ScenePlan): string {
     'ignored prompt, wrong species, missing subject, missing adjective state',
     'fashion model studio portrait',
     'extreme face close-up, clone faces',
+    // 한 장 안의 증명사진·패널 콜라주만 금지 (다중 동물 한 장면은 허용)
+    'contact sheet, triptych, multiple panels, split screen collage, passport photos, ID photo strip, duplicated identical portraits side by side',
     'underage human, loli, shota',
   ]
+
+  if (!isRealWildlifeScene(plan) && detectNonPhotoStyle(plan.raw)) {
+    base.push('photograph, photorealistic photo, DSLR photo, realistic skin texture photo')
+  }
 
   if (plan.head) {
     for (const e of plan.entities) {
@@ -853,6 +927,27 @@ export function buildNegativeFromPlan(plan: ScenePlan): string {
       'cartoon mascot person',
       'studio portrait lighting',
       'fashion magazine cover',
+    )
+  }
+
+  if (
+    plan.adult &&
+    /누드|나체|nude|naked|속옷\s*제거|속옷제거|탈의|옷\s*벗|가운\s*벗|undress|strip|전라/i.test(
+      plan.raw,
+    )
+  ) {
+    base.push(
+      'clothes',
+      'clothing',
+      'dressed',
+      'fully clothed',
+      'lingerie',
+      'underwear',
+      'bra',
+      'panties',
+      'bathrobe',
+      'robe',
+      'keeping clothes on',
     )
   }
 
@@ -974,6 +1069,7 @@ export async function compileResponsiveFreePrompt(input: {
   description: string
   size?: string
   revision?: string
+  mood?: string
   ai?: AiBinding
 }): Promise<{ prompt: string; negativePrompt: string; plan: ScenePlan }> {
   const heuristic = compileSceneHeuristic(input.description)
@@ -1024,7 +1120,7 @@ export async function compileResponsiveFreePrompt(input: {
   }
 
   return {
-    prompt: buildPromptFromPlan(plan, { size: input.size, revision: input.revision }),
+    prompt: buildPromptFromPlan(plan, { size: input.size, revision: input.revision, mood: input.mood }),
     negativePrompt: buildNegativeFromPlan(plan),
     plan,
   }

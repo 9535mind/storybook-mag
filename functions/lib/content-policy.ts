@@ -19,7 +19,14 @@ const MINOR_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
   {
     label: 'minor-reference',
     pattern:
-      /어린이|아이(?!콘)|초등학생|중학생|고등학생|미성년|아동(?!극)|십대|청소년|loli|shota|\bchild\b|\bminor\b|\bteen(?:ager)?\b|\bkid\b|\bschoolgirl\b|로리콘|쇼타|로리\b/i,
+      /어린이|초등학생|중학생|고등학생|미성년|아동(?!극)|십대|청소년|loli|shota|\bchild\b|\bminor\b|\bteen(?:ager)?\b|\bkid\b|\bschoolgirl\b|로리콘|쇼타|로리\b/i,
+  },
+  {
+    // "아이"는 그 자체로 독립된 낱말(어린이)일 때만 매칭한다 — 뒤에 조사/공백/문장부호/문장끝이 와야 함.
+    // "아이보리·아이라인·아이섀도·아이템·아이콘·아이디어" 같은 색상·뷰티·IT 합성어는 "아이" 뒤에 다른 한글 음절이
+    // 바로 붙어 있어 여기 해당하지 않으므로 오탐(false positive)이 아니다.
+    label: 'minor-reference-word',
+    pattern: /아이(?=가|는|를|의|와|랑|한테|에게|처럼|보다|보고|같이|만|까지|도|야|들|[\s,.!?)\]]|$)/,
   },
 ]
 
@@ -59,9 +66,71 @@ export function evaluateContentPolicy(
   return { allowed: true, blockedReason: null, matchedSignals: [] }
 }
 
+const ADULT_CONTENT_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
+  {
+    label: 'adult-content',
+    pattern:
+      /누드|나체|섹스|성기|자위|전라|속옷\s*제거|란제리|nsfw|nude|naked|porn|explicit|sexual/i,
+  },
+]
+
+/**
+ * 동화 삽화(캐릭터 일관성) 전용 정책 — 화보 스튜디오와 달리 "아이/어린이" 묘사는
+ * 이 기능의 정상적인 사용 목적(어린이 그림책)이므로 차단하지 않는다.
+ * 실존 인물·비동의 폭력·성적 콘텐츠만 차단한다.
+ */
+export function evaluateTaleScenePolicy(promptText: string): ContentPolicyVerdict {
+  const text = promptText ?? ''
+
+  const realPerson = matchAny(text, REAL_PERSON_PATTERNS)
+  if (realPerson.length > 0) {
+    return { allowed: false, blockedReason: 'blocked-real-person', matchedSignals: realPerson }
+  }
+
+  const nonConsensual = matchAny(text, NON_CONSENSUAL_PATTERNS)
+  if (nonConsensual.length > 0) {
+    return { allowed: false, blockedReason: 'blocked-non-consensual', matchedSignals: nonConsensual }
+  }
+
+  const adult = matchAny(text, ADULT_CONTENT_PATTERNS)
+  if (adult.length > 0) {
+    return { allowed: false, blockedReason: 'blocked-adult-content', matchedSignals: adult }
+  }
+
+  return { allowed: true, blockedReason: null, matchedSignals: [] }
+}
+
+/** 누드·탈의·속옷제거 의도 (성인 허용 — 순화하지 않음) */
+export function wantsNudeOrUndress(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  return /누드|나체|nude|naked|속옷\s*제거|속옷제거|속옷\s*벗|탈의|옷\s*벗|가운\s*벗|로브\s*벗|언더웨어\s*제거|undress|disrobe|strip(?:ping|ped)?|remove\s*(?:her\s*)?(?:clothes|clothing|underwear|lingerie)|fully\s*nude|bare\s*(?:skin|body)|완전\s*노출|전라/i.test(
+    t,
+  )
+}
+
+/** 속옷/란제리 ‘착용’ 요청 — 제거·누드 요청이면 false */
+export function wantsUnderwearLook(text: string): boolean {
+  if (wantsNudeOrUndress(text)) return false
+  return /속옷|underwear|란제리|lingerie|팬티|panties|브라(?!운)|브래지/i.test(text || '')
+}
+
+/**
+ * "탈의 동작"(영상 중 옷이 벗겨지는 전환)만 좁게 감지 — 누드/전라 같은 '상태' 단어는 제외한다.
+ * wantsNudeOrUndress는 상태+동작을 모두 잡아서, 이미 누드인 소스 이미지에 '포즈만' 요청해도
+ * true가 되어 "옷이 벗겨지는 동작" 프롬프트가 잘못 붙는 문제가 있었다. 모션 문구에 실제
+ * "벗다/제거/탈의" 같은 동작 동사가 있을 때만 true로 판단한다.
+ */
+export function wantsUndressAction(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  return /탈의|벗는|벗어|벗기|벗김|벗을|벗었|속옷\s*제거|속옷제거|언더웨어\s*제거|가운\s*벗|로브\s*벗|옷\s*벗|undress|disrobe|strip(?:ping|ped)?|take\s*off|removes?\s*(?:her\s*)?(?:clothes|clothing|underwear|lingerie|robe|dress)/i.test(
+    t,
+  )
+}
+
 /**
  * SDXL 계열 negative prompt.
  * 얼굴 클로즈업 / 캐주얼 티 / 비즈니스 정장으로 의상이 바뀌는 실패를 강하게 억제한다.
+ * (누드 요청 시에는 buildFashionNegativePrompt가 outfit 강제 항목을 제거한다.)
  */
 export const DEFAULT_NEGATIVE_PROMPT = [
   'worst quality, low quality, blurry, deformed, bad anatomy, extra limbs, extra fingers',
@@ -73,12 +142,36 @@ export const DEFAULT_NEGATIVE_PROMPT = [
   'missing outfit, outfit not visible, clothing ignored, wrong clothing, ignored prompt, prompt ignored',
   'empty grey studio backdrop only when urban setting was requested',
   'unrelated subject, different scene than requested',
+  // 증명사진·패널 콜라주만 금지 (한 장면 속 여러 인물/동물은 허용)
+  'contact sheet, triptych, multiple panels, split screen collage, passport photos, ID photo strip, duplicated identical portraits side by side',
 ].join(', ')
 
-/** 화보 네거티브 — 속옷·거울 등 요청 시 가운/셔츠 이탈 억제 */
+const OUTFIT_FORCE_NEGATIVE =
+  /missing outfit,\s*outfit not visible,\s*clothing ignored,\s*wrong clothing,\s*/i
+
+/**
+ * "힘차게 달린다/페달을 밟는다" 같은 동작 묘사를 감지하는 패턴.
+ * amplifyClothingAndScene(양성 태그)와 buildFashionNegativePrompt(음성 태그) 양쪽에서
+ * 같은 조건으로 참조해, 사용자가 매번 "몸을 앞으로 숙이고 근육에 힘이…" 식으로 직접
+ * 풀어쓰지 않아도 동작 단어만으로 역동적인 포즈가 자동으로 강제되게 한다.
+ */
+const DYNAMIC_ACTION_PATTERN =
+  /힘차게|힘있게|역동적|다이나믹|달린다|달리는|질주|전속력|스피드|속도감|뛰는|뛰어가|페달\s*을?\s*밟|바람에\s*날리|dynamic|running|sprinting|speeding|pedaling|galloping|mid-action|in\s*motion/i
+
+/** 화보 네거티브 — 속옷·누드·거울 요청에 맞춰 이탈 억제 */
 export function buildFashionNegativePrompt(description: string): string {
   const extras: string[] = []
-  if (/속옷|underwear|란제리|lingerie|브래지|팬티|panties/i.test(description)) {
+  let base = DEFAULT_NEGATIVE_PROMPT
+
+  if (wantsNudeOrUndress(description)) {
+    // "missing outfit"은 누드(=의상 없음)와 정면 충돌 → 제거
+    base = base.replace(OUTFIT_FORCE_NEGATIVE, '')
+    extras.push(
+      'clothes, clothing, dressed, wearing clothes, fully clothed',
+      'bathrobe, bath robe, kimono robe, wrap robe, dressing gown, coat, shirt, dress',
+      'lingerie, underwear, bra, panties, covering the body with fabric',
+    )
+  } else if (wantsUnderwearLook(description)) {
     extras.push(
       'bathrobe, bath robe, kimono robe, wrap robe, dressing gown, overcoat, trench coat',
       'white dress shirt, collared blouse, button-up shirt, sweater, cardigan, grey robe',
@@ -87,7 +180,23 @@ export function buildFashionNegativePrompt(description: string): string {
   if (/거울|mirror/i.test(description)) {
     extras.push('no mirror, missing mirror, plain seamless studio mugshot without mirror')
   }
-  return extras.length ? `${DEFAULT_NEGATIVE_PROMPT}, ${extras.join(', ')}` : DEFAULT_NEGATIVE_PROMPT
+  // 흰 배경을 요청했는데도 회색/베이지로 새는 사례가 실측으로 반복 확인됨 — 색상 이탈을 직접 억제.
+  if (/흰\s*배경|흰색\s*배경|백색\s*배경|white\s*background|클린\s*화이트/i.test(description)) {
+    extras.push('grey background, gray background, beige background, tan background, brown background, dark background, colored background, off-white background, cream background')
+  }
+  // "한쪽 귀만 보이고 반대쪽은 안 보임" 같은 좌우 비대칭 액세서리 묘사가 실측에서 양쪽 다 보이는
+  // 대칭형으로 뭉개지는 경우가 반복 확인됨 — 대칭 귀걸이를 직접 억제.
+  if (/귀[^.]{0,30}(가려|보이지\s*않|안\s*보임|관찰되지\s*않|없다|없음)/.test(description)) {
+    extras.push('matching earrings on both ears, symmetric pair of earrings, two identical earrings, earring visible on both sides')
+  }
+  // amplifyClothingAndScene의 역동적 포즈 태그와 짝을 맞춰, 같은 조건에서 정적 포즈로
+  // 새는 것을 직접 억제한다.
+  if (DYNAMIC_ACTION_PATTERN.test(description)) {
+    extras.push(
+      'static pose, standing still, calm posed portrait, looking back over the shoulder, relaxed stationary stance, studio glamour pose without motion, frozen with no motion blur',
+    )
+  }
+  return extras.length ? `${base}, ${extras.join(', ')}` : base
 }
 
 /** 생성·수정 공통: 흔한 한글 오타·커서 잔여 정리 */
@@ -125,16 +234,45 @@ export function isStructuralRefineRevision(revision: string): boolean {
   )
 }
 
+/** "귀걸이 추가해줘"/"나비 넣어줘"처럼 원본에 없던 새 물체·요소를 더하는 수정인지 판별한다.
+ * img2img는 strength(디노이징 강도)가 낮을수록 원본 구조를 강하게 보존하는데, 그 특성 때문에
+ * "존재하지 않던 새 물체를 그려 넣어라" 같은 요청은 색상/질감 변경보다 훨씬 더 많은 자유도가
+ * 필요하다 — 낮은 strength로는 모델이 새 물체를 안정적으로 합성하지 못하고 무시하거나(수정이
+ * "안 먹힘") 반대로 전체 구도가 무너지는 실측 사례가 확인됐다. 그래서 이런 요청만 따로 감지해
+ * strength를 한 단계 올려서(구조 변경 없이) 새 요소가 실제로 그려질 여지를 준다. */
+export function isAdditiveRefineRevision(revision: string): boolean {
+  const r = polishKoreanPromptText(revision)
+  return /추가|넣어|넣기|넣다|덧붙|그려\s*넣|올려\s*줘|씌워|더해|add\b|insert\b|put\b.*\bin\b/i.test(r)
+}
+
+const ANIMAL_SUBJECT_PATTERN =
+  /토끼|개구리|여우|사자|호랑이|고양이|강아지|원숭|당나귀|곰|늑대|동물|frog|rabbit|fox|lion|tiger|cat|dog|monkey|bear|bird|horse|animal/i
+
+// "말"(말horse)과 "새"(bird)는 JS 정규식의 \b가 한글을 \w로 취급하지 않아 "말\b"/"새\b"가
+// 한글 문장에서는 절대 매칭되지 않는 죽은 패턴이었다(실측으로 확인 — "말의 머리 위에" 같은
+// 문장에서 전혀 감지되지 않아 화보 모드 인물 고정 문구가 말 그림에 잘못 섞여 들어갔다).
+// "말"은 "정말/거짓말/참말"처럼 앞 글자에 붙는 복합어와 구분해야 하므로, 문장 시작/공백/구두점
+// 뒤에서 시작하고, 뒤에는 조사·공백·구두점·문장끝이 오는 경우만 "말(horse)"로 인정한다.
+const HORSE_WORD_PATTERN =
+  /(?:^|[\s"'“'(\[,.!?])말(?=이|가|은|는|을|를|의|과|와|도|만|처럼|같이|한테|에게|께|만큼|보다|들[이은을의]?|[\s"'”)\],.!?]|$)/
+const BIRD_WORD_PATTERN =
+  /(?:^|[\s"'“'(\[,.!?])새(?=가|는|를|의|와|랑|한테|에게|처럼|보다|같이|만|까지|도|들[이은을의]?|[\s"'”)\],.!?]|$)/
+
+/** 화보(fashion) 모드로 선택돼 있어도 실제 내용이 동물/사물 장면인지 판별한다.
+ * 관리자가 「관리자전용(화보)」 탭에서 동물 그림을 만든 경우, 이후 그 이미지를 텍스트로 수정할 때
+ * "같은 성인 여성 얼굴 유지" 같은 인물 전용 잠금 문구를 넣으면 img2img 모델이 동물을 여성 얼굴로
+ * 바꿔버리는 사고가 실측으로 확인됐다 — 그래서 genMode와 무관하게 실제 서술 내용으로 다시 판별한다. */
+export function describesAnimalSubject(text: string): boolean {
+  const t = polishKoreanPromptText(text)
+  return ANIMAL_SUBJECT_PATTERN.test(t) || HORSE_WORD_PATTERN.test(t) || BIRD_WORD_PATTERN.test(t)
+}
+
 /** 자유 모드: 동물·소품·구도 추가 등 장면 구성 변경 → 반드시 장면 재생성 */
 export function isFreeSceneRevision(revision: string, baseDescription = ''): boolean {
   const r = polishKoreanPromptText(`${baseDescription}\n${revision}`)
   if (!revision.trim()) return false
   // 동물·다중 주체·위치 관계·장면 동사
-  if (
-    /토끼|개구리|여우|사자|호랑이|고양이|강아지|원숭|당나귀|곰|늑대|새\b|말\b|동물|frog|rabbit|fox|lion|tiger|cat|dog|monkey|bear|bird|horse|animal/i.test(
-      r,
-    )
-  ) {
+  if (describesAnimalSubject(r)) {
     return true
   }
   if (/위에|아래|등에|등에\s*타|타고|안[자줘]|앉아|들고|함께|추가|넣어|장면|들판|가로질러|달린|뛰는|쫓/i.test(r)) {
@@ -173,44 +311,41 @@ export function mergeFreeRevisionDescription(base: string, revision: string): st
   ].join(' ')
 }
 
+/**
+ * CLIP 예산(~70단어) 안에서 최대한 비용 대비 효과를 내려고, 화면비 라벨("2:3 vertical" 등)처럼
+ * 프롬프트 텍스트로는 사실상 아무 시각 정보도 안 되는 표현은 빼고(화면비는 width/height로 이미 결정됨),
+ * 같은 뜻을 반복하지 않는 짧은 태그로만 구성한다.
+ */
 function resolveFramingHint(size: string | undefined): string {
-  if (size === 'landscape') {
-    return 'wide fashion editorial frame, full outfit visible from head to mid-thigh or full body, environment readable in background'
-  }
-  if (size === 'square') {
-    return 'medium-full fashion shot, waist-up or three-quarter body so dress and pose are clearly visible, not a face-only crop'
-  }
-  if (size === 'story') {
-    return [
-      '9:16 vertical Shorts frame',
-      'full body preferred, head to toe in frame, feet visible when possible',
-      'entire outfit readable, no face-only crop',
-    ].join(', ')
-  }
-  return [
-    '2:3 vertical fashion editorial',
-    'FULL BODY shot, head to toe, feet fully visible in frame',
-    'standing full figure, entire outfit from neckline to hem visible',
-    'do not crop head, feet, or dress hem',
-    'confident full-body pose',
-  ].join(', ')
+  if (size === 'landscape') return 'full outfit visible head to mid-thigh, environment visible in background'
+  if (size === 'square') return 'waist-up or three-quarter body shot, dress and pose clearly visible, not a face-only crop'
+  if (size === 'story') return 'full body head to toe, feet visible, entire outfit readable, not a face-only crop'
+  return 'full body shot, head to toe, feet visible, entire outfit from neckline to hem visible'
 }
 
 /** 한국어 의상/장소 키워드를 영어 강제 지시로 보강 (모델이 정장·스튜디오로 이탈하는 경우 억제). */
 function amplifyClothingAndScene(description: string): string {
   const extras: string[] = []
-  if (/실크|슬립|드레스|slip|silk|dress/i.test(description)) {
+  const nude = wantsNudeOrUndress(description)
+
+  // 누드/탈의는 의상 강제보다 우선 — "속옷제거"가 속옷 착용으로 오인되지 않게
+  if (nude) {
+    extras.push(
+      'adult nude, bare skin, no clothing, no lingerie, no underwear, no bra, no panties, no bathrobe, no robe',
+      'garments removed / undressed as requested — do NOT keep fabric covering the body',
+    )
+  } else if (/실크|슬립|드레스|slip|silk|dress/i.test(description)) {
     extras.push(
       'wearing a short silk slip dress (thin silky lingerie-style slip dress), glossy silk fabric clearly visible, NOT a business suit, NOT a blazer',
     )
   }
-  if (/란제리|레이스\s*브래지|lingerie|lace\s*bra|thong|탠가/i.test(description)) {
+  if (!nude && /란제리|레이스\s*브래지|lingerie|lace\s*bra|thong|탠가/i.test(description)) {
     extras.push(
       'wearing a delicate sand/beige lace lingerie set (wired lace bra and matching lace panties), sheer lace texture clearly visible, NOT a dress, NOT a blazer, NOT a sweater, NOT office wear',
     )
   }
-  // 속옷차림 — 가운/랩로브/셔츠로 치환되는 실패가 많음
-  if (/속옷|underwear|팬티|브라(?!운)|브래지/i.test(description)) {
+  // 속옷차림 — 가운/랩로브/셔츠로 치환되는 실패가 많음 (제거·누드 요청 제외)
+  if (wantsUnderwearLook(description)) {
     extras.push(
       'wearing only underwear / undergarments (bra and panties or equivalent lingerie), skin and undergarments clearly visible, NOT a bathrobe, NOT a kimono wrap robe, NOT a coat, NOT a white collared shirt',
     )
@@ -226,8 +361,13 @@ function amplifyClothingAndScene(description: string): string {
   if (/몸매|감상|admiring/i.test(description)) {
     extras.push('admiring her own figure, looking toward her body or mirror reflection')
   }
-  if (/흰\s*배경|흰색\s*배경|white\s*background|클린\s*화이트/i.test(description)) {
-    extras.push('clean pure white seamless studio background, NOT grey wall, NOT dark backdrop')
+  if (/흰\s*배경|흰색\s*배경|백색\s*배경|white\s*background|클린\s*화이트/i.test(description)) {
+    extras.push(
+      'pure bright white seamless studio background, evenly lit white backdrop, NOT grey, NOT beige, NOT tan, NOT off-white, NOT dark backdrop',
+    )
+  }
+  if (/귀[^.]{0,30}(가려|보이지\s*않|안\s*보임|관찰되지\s*않|없다|없음)/.test(description)) {
+    extras.push('asymmetric single earring, exactly one ear shows an earring, the other ear bare or hidden by hair, earrings NOT matching on both sides')
   }
   if (/시스루\s*뱅|앞머리|see-?through\s*bang/i.test(description)) {
     extras.push('delicate see-through bangs (sheer wispy bangs) across the forehead')
@@ -243,7 +383,19 @@ function amplifyClothingAndScene(description: string): string {
   if (/밝|투명|clear|bright/i.test(description)) {
     extras.push('bright clear luminous face, natural makeup')
   }
-  return extras.length ? ` Hard constraints: ${extras.join(' ')}.` : ''
+  // "힘차게 달린다/페달을 밟는다" 같은 동작 묘사를 줘도 모델이 정적인 화보 포즈(뒤돌아보는
+  // 시선, 발끝만 살짝 든 자세)로 뭉개는 경우가 실측으로 반복 확인됐다 — 매번 사용자가
+  // "몸을 앞으로 숙이고, 근육에 힘이 들어가고, 배경이 흐려지고…" 식으로 직접 풀어써야 하는
+  // 건 불편하므로, 동작 관련 단어를 감지하면 이 역동성 태그를 자동으로 붙인다.
+  if (DYNAMIC_ACTION_PATTERN.test(description)) {
+    extras.push(
+      'dynamic mid-action pose captured in motion, body leaning forward into the movement, muscles visibly engaged and tensed, motion blur in the background suggesting speed, hair and loose fabric blown backward by the wind, dramatic low action-photography angle',
+      'NOT a static standing pose, NOT a calm posed portrait, NOT looking back over the shoulder, NOT frozen mid-stride with no motion cues',
+    )
+  }
+  // 태그 스타일로 이어붙일 수 있게 쉼표로만 구분한다("Hard constraints:" 같은 지시문 단어는
+  // CLIP한테는 그냥 토큰 낭비라 뺀다 — CLIP은 문장을 "이해"하지 못하고 토큰 뭉치로만 본다).
+  return extras.length ? `, ${extras.join(', ')}` : ''
 }
 
 /** 한국어 동물명 → 영어 종 고정 (여우/개로 치환되는 실패 억제). */
@@ -335,16 +487,17 @@ function amplifyFreeScene(description: string): string {
   if (/지구|earth|globe/i.test(description)) {
     extras.push('planet Earth clearly visible as requested')
   }
-  if (/누드|나체|nude|naked/i.test(description)) {
+  if (wantsNudeOrUndress(description)) {
     if (/(뒷모습|후면|등\s*뒤|back\s*view|rear)/i.test(description)) {
-      extras.push('adult nude from the BACK, rear three-quarter view, bare skin as requested')
+      extras.push('adult nude from the BACK, rear three-quarter view, bare skin, no clothing')
     } else if (/(옆|비스듬|측면|side\s*view|profile)/i.test(description)) {
-      extras.push('adult nude in SIDE / three-quarter view standing at an angle, bare skin as requested')
+      extras.push('adult nude in SIDE / three-quarter view standing at an angle, bare skin, no clothing')
     } else {
-      extras.push('adult nude as requested, bare skin, follow the brief exactly')
+      extras.push(
+        'adult nude as requested: bare skin, no clothes, no lingerie, no underwear — do not keep garments',
+      )
     }
-  }
-  if (/란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit/i.test(description)) {
+  } else if (/란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit/i.test(description)) {
     extras.push('adult sensual / erotic content as requested — do not censor or clothe over the brief')
   }
   if (matchedSpecies.length > 0 || /동물|animal|wildlife/i.test(description)) {
@@ -391,41 +544,112 @@ export function buildFreePrompt(_input: {
   throw new Error('deprecated_use_compileResponsiveFreePrompt')
 }
 
+// 사용자 지시: 인종/국적을 특별히 언급하지 않으면, 등장인물(남녀 모두)의 기본 컨셉은
+// "예쁜/매력적인 한국인 얼굴"로 제시한다. 이미 다른 인종·국적을 명시했으면 그 지시를 존중해
+// 강제로 덮어쓰지 않는다.
+const ETHNICITY_MENTIONED_PATTERN =
+  /한국\s*인|한국\s*사람|korean\b|일본\s*인|japanese\b|중국\s*인|chinese\b|백인|caucasian|서양\s*(?:인|여성|남성|여자|남자)|western\b|흑인|african[- ]american|black\s*(?:man|woman)|히스패닉|hispanic|latina\b|latino\b|인도\s*인|indian\b|동남아|태국\s*인|베트남\s*인|필리핀\s*인|혼혈|mixed[- ]race|외국\s*인|foreigner|아랍|arab\b/i
+
+const MALE_SUBJECT_PATTERN =
+  /남성|남자|남편|오빠|아저씨|청년|소년|아빠|아버지|신사|\bman\b|\bmale\b|\bboy\b/i
+const FEMALE_SUBJECT_PATTERN =
+  /여성|여자|여인|아가씨|소녀|언니|누나|엄마|어머니|숙녀|\bwoman\b|\bfemale\b|\bgirl\b|\blady\b/i
+
+/** 화보(fashion) 프롬프트는 SDXL CLIP 인코더의 ~77토큰 예산 때문에 짧은 태그만 써야 한다
+ * (buildFashionMagazinePrompt 주석 참고) — 이땐 짧은 태그 버전을 쓴다. */
+export function defaultEthnicityTag(text: string): string {
+  if (ETHNICITY_MENTIONED_PATTERN.test(text)) return ''
+  const hasMale = MALE_SUBJECT_PATTERN.test(text)
+  const hasFemale = FEMALE_SUBJECT_PATTERN.test(text)
+  if (hasMale && !hasFemale) return 'Korean man, handsome attractive Korean face'
+  if (hasMale && hasFemale) return 'Korean man and Korean woman, attractive Korean faces'
+  // 명시가 없으면 화보 기본 대상(여성)으로 간주
+  return 'Korean woman, pretty attractive Korean face'
+}
+
+const GENERIC_PERSON_PATTERN =
+  /사람|인물|모델|캐릭터|아가씨|숙녀|신사|\bperson\b|\bcharacter\b|\bmodel\b/i
+
+/** free 모드 등 사람이 아닐 수도 있는 장면에서, 실제로 사람이 등장하는지 판별하는 가드. */
+export function mentionsHumanSubject(text: string): boolean {
+  return (
+    MALE_SUBJECT_PATTERN.test(text) ||
+    FEMALE_SUBJECT_PATTERN.test(text) ||
+    GENERIC_PERSON_PATTERN.test(text)
+  )
+}
+
+/** scene-compiler / img2img 리바이즈처럼 긴 CRITICAL 문장을 쓰는 경로용 — 문장형. */
+export function defaultEthnicitySentence(text: string): string {
+  if (ETHNICITY_MENTIONED_PATTERN.test(text)) return ''
+  const hasMale = MALE_SUBJECT_PATTERN.test(text)
+  const hasFemale = FEMALE_SUBJECT_PATTERN.test(text)
+  if (hasMale && !hasFemale) {
+    return 'Default ethnicity (user did not specify): the man is Korean, with a handsome, attractive Korean face.'
+  }
+  if (hasMale && hasFemale) {
+    return 'Default ethnicity (user did not specify): both the man and the woman are Korean, with attractive Korean faces.'
+  }
+  return 'Default ethnicity (user did not specify): the woman is Korean, with a pretty, attractive Korean face.'
+}
+
+// 무드 셀렉터: 필름·사진 질감(조명/컬러그레이딩) 축으로 재설계 — "패션 사진" 형용사만
+// 다르던 이전 방식(에디토리얼/글래머/시크/로맨틱)은 SDXL류 엔진에게 시각적으로 잘 구분되지
+// 않아, 실제 결과물 차이가 크게 나는 조명·필름 질감 축으로 바꿨다. 화보/자유 일러스트 양쪽
+// 모드가 공유하는 단일 소스. 이전 값(editorial/glamour/chic/romantic)은 과거에 저장된 갤러리
+// 항목을 다시 수정할 때 깨지지 않도록 하위 호환 별칭으로 남겨둔다.
+export const MOOD_LOOK_TAGS: Record<string, string> = {
+  clean: 'clean modern digital photography, crisp sharp detail, neutral commercial color grade',
+  vintage: 'vintage 35mm film photography, visible film grain, warm faded analog color grade',
+  cinematic:
+    'cinematic anamorphic photography, dramatic wide framing, moody teal-and-orange color grade',
+  pastel: 'soft pastel photography, dreamy diffused light, gentle high-key pastel color palette',
+  // 하위 호환 별칭
+  editorial: 'clean modern digital photography, crisp sharp detail, neutral commercial color grade',
+  glamour: 'cinematic anamorphic photography, dramatic wide framing, moody teal-and-orange color grade',
+  chic: 'clean modern digital photography, crisp sharp detail, neutral commercial color grade',
+  romantic: 'soft pastel photography, dreamy diffused light, gentle high-key pastel color palette',
+}
+
+export function resolveMoodTag(mood: string | undefined): string {
+  return MOOD_LOOK_TAGS[mood || ''] || MOOD_LOOK_TAGS.clean
+}
+
 /** 화보풍 프롬프트 — 표현력을 죽이는 순화는 하지 않는다. */
+/**
+ * SDXL/Juggernaut의 CLIP 텍스트 인코더는 ~77토큰(대략 영어 60~70단어)을 넘으면 뒷부분을 조용히
+ * 잘라서 버리고, "Do NOT ~" 같은 부정 지시문도 잘 못 알아듣는다(부정어를 무시하고 그 단어 자체에
+ * 끌리는 경향). 그래서 예전처럼 긴 지시문 문장을 여러 개 이어붙이는 건 (1) 대부분 예산 밖으로
+ * 잘려서 버려지고 (2) 설령 안 잘려도 "하지 마라" 부분이 잘 안 먹히는 이중 손해였다.
+ * 지금은: 실제 시각 정보(description, 이미 SDXL 태그 형태로 압축돼 들어옴)를 맨 앞에 두고,
+ * 뒤에는 짧은 태그만 붙인다. 금지 사항(옷 대체·순화 금지 등)은 여기서 빼고 negative prompt로
+ * 옮겼다 — negative prompt는 별도의 77토큰 예산이라 "공짜로" 더 쓸 수 있고, 애초에 모델이
+ * "빼야 할 것"을 처리하도록 설계된 슬롯이라 부정 지시가 실제로 더 잘 먹힌다.
+ */
 export function buildFashionMagazinePrompt(input: {
   description: string
   mood: string
   size?: string
-  revision?: string
 }): string {
-  const moodPhrase =
-    {
-      editorial: 'high-end fashion editorial photography for a premium magazine spread',
-      glamour: 'glamorous fashion photography, confident premium adult presence',
-      chic: 'chic modern urban fashion photography, city atmosphere, sleek styling',
-      romantic: 'romantic soft-lit fashion photography, elegant atmosphere',
-    }[input.mood] ?? 'high-end fashion editorial photography'
+  const moodTag = resolveMoodTag(input.mood)
 
   const description = polishKoreanPromptText(input.description)
   const framing = resolveFramingHint(input.size)
-  const amplify = amplifyClothingAndScene(description)
-  const revision = polishKoreanPromptText(input.revision ?? '')
+  const amplify = amplifyClothingAndScene(description) // 이미 ", " 접두로 시작
+  const nude = wantsNudeOrUndress(description)
+  const ethnicityTag = defaultEthnicityTag(description)
 
   const parts = [
-    `USER BRIEF (highest priority, obey every clause): ${description}.${amplify}`,
-    'Photorealistic adult fashion magazine editorial. Prompt adherence is mandatory.',
-    'Show the requested clothing, pose, viewpoint, body details, and setting exactly — face beauty is secondary to brief accuracy.',
-    'Do NOT replace the outfit with a grey dress, blazer, bathrobe, robe, white shirt, or unrelated clothes. Do NOT invent a different look.',
-    `${moodPhrase}. ${framing}.`,
-    'Outfit fabric and silhouette must be unmistakable in frame. If underwear, lingerie, a dress, or a specific garment is requested, that exact garment must be visible.',
-    'If a mirror is requested, include a mirror in the scene. If urban or city vibe is requested, include modern city or street context, not a plain grey studio backdrop.',
-    'Natural skin texture, sharp focus, professional fashion lighting, 8k quality.',
-    'Adult content allowed when requested — do not sanitize lingerie, underwear, glamour, or nude briefs.',
-  ]
-  if (revision) {
-    parts.push(`Revision request (must apply on the same subject): ${revision}`)
-  }
-  return parts.join(' ')
+    description,
+    // 짧은 태그라 앞쪽에 둬야 77토큰 예산에서 잘리지 않고 반영됨
+    ethnicityTag,
+    amplify.replace(/^,\s*/, ''),
+    nude ? 'adult nude, bare skin visible' : '',
+    moodTag,
+    framing,
+    'photorealistic, natural skin texture, sharp focus, 8k',
+  ].filter(Boolean)
+  return parts.join(', ')
 }
 
 /**
@@ -453,6 +677,8 @@ export const FREE_NEGATIVE_PROMPT = [
   'solo fashion model studio portrait when animals or action were requested',
   'calm ID photo pose when fighting or action was requested',
   'extreme face close-up, headshot only, duplicated stacked faces, clone faces',
+  // 증명사진·패널 콜라주만 금지 (한 장면 속 여러 동물/인물은 허용)
+  'contact sheet, triptych, multiple panels, split screen collage, passport photos, ID photo strip, duplicated identical portraits side by side',
   'fox, shiba inu, dog face when monkey was requested',
   'liger, lion-tiger hybrid, merged lion and tiger into one creature',
   'missing soccer ball when soccer was requested',
@@ -494,8 +720,12 @@ export function buildRefinePrompt(input: {
 }): string {
   const base = polishKoreanPromptText(input.baseDescription)
   const revision = polishKoreanPromptText(input.revision)
-  const free = input.genMode === 'free'
+  // genMode='fashion'이라도 실제 서술이 동물/사물 장면이면 "성인 여성 얼굴 유지" 문구를 쓰지 않는다
+  // (관리자가 화보 탭에서 동물 그림을 만들었다가 나중에 그 그림을 수정하는 경우가 실제로 있다).
+  const free = input.genMode === 'free' || describesAnimalSubject(`${base} ${revision}`)
   const revisionAmplify = free ? '' : amplifyClothingAndScene(`${base} ${revision}`)
+  const freeEthnicity =
+    free && mentionsHumanSubject(`${base} ${revision}`) ? defaultEthnicitySentence(`${base} ${revision}`) : ''
 
   if (free) {
     if (input.mode === 'region') {
@@ -503,6 +733,7 @@ export function buildRefinePrompt(input: {
         'Local edit of an existing illustration/photo. ONLY change the masked white areas.',
         `Local change: ${revision}.`,
         'Do NOT replace animals with a human fashion model. Preserve species, pose, and unmasked scene.',
+        freeEthnicity,
         base ? `Scene context: ${base}.` : '',
         'Photorealistic seamless inpaint, same lighting.',
       ]
@@ -512,7 +743,10 @@ export function buildRefinePrompt(input: {
     return [
       'Edit the SAME scene. Keep original subjects (animals/objects) and setting.',
       `Apply exactly: ${revision}.`,
-      'CRITICAL: Do NOT invent a human woman, fashion model, bathrobe, or studio portrait.',
+      wantsNudeOrUndress(revision)
+        ? 'Adult nude/undress as requested: bare skin, remove garments — do not keep underwear or robes.'
+        : 'CRITICAL: Do NOT invent a human woman, fashion model, bathrobe, or studio portrait.',
+      freeEthnicity,
       base ? `Original scene (must still hold): ${base}.` : '',
       'Photorealistic illustration fidelity to the brief.',
     ]
@@ -540,7 +774,9 @@ export function buildRefinePrompt(input: {
     'If the revision only changes color or a garment detail, keep framing and pose identical.',
     'Do not change background unless the revision asks for background.',
     'Do NOT invent a bathrobe, kimono wrap, white dress shirt, or coat unless the revision asks for that garment.',
-    'If lingerie or underwear is requested, show lingerie/underwear — never a robe.',
+    wantsNudeOrUndress(revision)
+      ? 'If nude / undress / underwear removal is requested, show bare adult skin — remove garments; do NOT keep lingerie, bra, panties, or a robe.'
+      : 'If lingerie or underwear is requested, show lingerie/underwear — never a robe.',
     base ? `Original brief for continuity (must still hold): ${base}.` : '',
     'Photorealistic, same lighting.',
   ]
@@ -548,22 +784,81 @@ export function buildRefinePrompt(input: {
     .join(' ')
 }
 
+// 화보 설명(원본 + 수정 라운드마다 누적되는 텍스트)은 최대 3000자까지 허용되지만, 영상
+// 모델에게는 "정체성/의상 참고용" 참고문일 뿐이다. 수정을 여러 번 거친 이미지일수록 이 텍스트가
+// 계속 길어지고, 그 안에 새 포즈·동작 서술이 섞여 있는 경우가 많아서(예: "자전거를 타고" 같은
+// 동작 문구) 실제로 요청한 모션 힌트와 은근히 경쟁하며 순응도를 떨어뜨리는 사고가 실측으로
+// 확인됐다("2차/3차 수정 이후 만든 쇼츠일수록 모션이 잘 안 먹힌다"). 참고문은 짧게 잘라서
+// 정체성·의상·배경 같은 핵심만 남기고, 뒤에 누적된 최근 수정 문구의 비중을 줄인다.
+const ANIMATION_CONTINUITY_MAX_CHARS = 260
+
+function truncateContinuityText(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text
+  const slice = text.slice(0, maxLen)
+  const lastBreak = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf(', '), slice.lastIndexOf(' '))
+  const cut = lastBreak > maxLen * 0.5 ? lastBreak : maxLen
+  return slice.slice(0, cut).trim()
+}
+
 /** 정지 이미지를 짧은 영상으로 바꿀 때 쓰는 I2V 모션 프롬프트. */
 export function buildAnimationPrompt(input: { prompt?: string; motion?: string }): string {
-  const original = (input.prompt ?? '').trim()
-  const motion = (input.motion ?? '').trim()
-  const parts = [
-    'Premium photorealistic adult short-form video.',
-    'Cinematic lighting, natural movement, subtle camera motion.',
-  ]
-  if (original) {
-    parts.push(`Subject continuity from source image: ${original}`)
-  }
+  const fullOriginal = polishKoreanPromptText(input.prompt ?? '')
+  // 참고문은 짧게 줄여서 모션 힌트와의 경쟁을 줄이지만, 누드/탈의 판별(sourceIsNude)은
+  // 원문 전체로 해야 한다 — 여러 번 수정을 거치며 누적된 텍스트는 "누드로 바꿔줘" 같은
+  // 문구가 뒤쪽(잘려 나가는 부분)에 있을 수 있어서, 잘린 텍스트만 보면 이미 누드인 원본을
+  // "옷을 입은 상태"로 잘못 판정해 되레 옷을 입혀버리는 사고가 날 수 있다.
+  const original = truncateContinuityText(fullOriginal, ANIMATION_CONTINUITY_MAX_CHARS)
+  const motion = polishKoreanPromptText(input.motion ?? '')
+  // 소스 이미지 자체가 이미 누드/전라인지(상태)와, 이번 모션이 "옷을 벗는 전환 동작"을
+  // 실제로 요청했는지(동작)를 분리해서 판단한다. 이 둘을 하나로 합쳐서 판단하면,
+  // 이미 누드인 이미지에 단순 포즈/움직임만 요청해도 "옷이 벗겨지는 동작" 문구가 붙어서
+  // 영상이 "옷을 입은 상태에서 시작 → 벗는" 서사를 만들어내고, 그 결과 원본엔 없던
+  // 옷/속옷/드레스가 프레임에 나타나는 부작용이 있었다.
+  const sourceIsNude = wantsNudeOrUndress(fullOriginal)
+  // wantsUndressAction은 "벗다/제거/undress/strip" 같은 동작 동사만 잡는다. 그런데 "누드인
+  // 상태로 만들어라/누드로 바꿔줘"처럼 동작 동사 없이 '상태'만 요청하는 경우가 실측으로 흔했고,
+  // 이때 undressAction이 false로 판정되어 "탈의 동작" 지시가 전혀 안 붙어서 옷이 그대로
+  // 남는 사고가 있었다. 소스가 아직 옷을 입은 상태인데 모션이 누드 관련 단어를 언급하면,
+  // 그 자체로 "지금 상태(옷 입음) → 누드로 전환"을 뜻하므로 동작으로 취급한다.
+  const undressAction = wantsUndressAction(motion) || (wantsNudeOrUndress(motion) && !sourceIsNude)
+  const staysNude = sourceIsNude && !undressAction
+
+  // 모션 지시는 맨 앞에 CRITICAL로 강조한다. 예전엔 긴 "원본 연속성" 문단(원본 이미지
+  // 프롬프트 전체) 뒤에 짧게 붙어 있어서, Wan I2V가 앞부분의 장문 설명에 가중치를 두고
+  // 사용자가 요청한 모션(예: 특정 동작·전환)을 잘 따라가지 않는 문제가 있었다.
+  const parts = ['Premium photorealistic adult short-form video.']
   if (motion) {
-    parts.push(`Motion direction: ${motion}`)
+    parts.push(
+      `CRITICAL MOTION — this is the main point of the clip, follow it exactly: ${motion}.`,
+    )
   } else {
     parts.push('Natural movement, soft hair and fabric motion, confident pose.')
   }
-  parts.push('Follow the source image mood exactly, including adult content when present.')
+  parts.push('Cinematic lighting, subtle camera motion.')
+  if (original) {
+    parts.push(
+      `Subject/appearance continuity from source image (identity/outfit reference only — the motion instruction above always takes priority): ${original}`,
+    )
+  }
+  if (undressAction) {
+    parts.push(
+      'CRITICAL ADULT MOTION: garments / underwear / robe are removed during the clip; end state is adult nude with bare skin visible.',
+      'Do NOT freeze the subject fully clothed. Do NOT keep bra, panties, lingerie, or bathrobe at the end.',
+      'Smooth undressing action, fabric sliding off, skin revealed as requested.',
+    )
+  } else if (staysNude) {
+    parts.push(
+      'CRITICAL: the subject is ALREADY fully nude / bare-skinned in the source image, starting from frame one.',
+      'She STAYS fully nude for the entire clip — do NOT add, invent, fade in, or generate ANY clothing, underwear, bra, panties, lingerie, robe, or dress at any point in the video.',
+      'No garments ever appear during the motion. Bare skin remains visible in every single frame, from start to finish.',
+    )
+  }
+  parts.push('Follow the source image identity, including adult content when requested — do not sanitize.')
+  // 맨 앞의 CRITICAL MOTION 하나만으로는, 그 뒤에 붙는 연속성/누드 관련 문단들이 길어질수록
+  // (특히 여러 차례 수정을 거친 이미지) 모션 순응도가 흐려지는 경우가 실측으로 확인됐다.
+  // 문장 끝에서 한 번 더 짧게 재강조해서 최근 지시 우선(recency) 효과도 함께 노린다.
+  if (motion) {
+    parts.push(`Reminder — the required motion for this clip is: ${motion}.`)
+  }
   return parts.join(' ')
 }

@@ -1,10 +1,12 @@
-import { createUser, jsonResponse } from '../../lib/auth'
+import { createUser, isSoloAdminOnly, jsonResponse } from '../../lib/auth'
+import { enforceRateLimit, getClientIp } from '../../lib/rate-limit'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
   /** 설정 시 이 코드와 일치해야 가입 가능. 없으면 ADMIN_PIN을 초대 코드로 사용. 둘 다 없으면 가입 비활성. */
   SIGNUP_INVITE_CODE?: string
+  SOLO_ADMIN_ONLY?: string
 }
 
 function inviteMatches(provided: string, env: Env): boolean {
@@ -21,6 +23,15 @@ function inviteMatches(provided: string, env: Env): boolean {
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context
   if (!env.DB) return jsonResponse({ ok: false, error: 'auth_db_not_configured' }, 500)
+
+  // 안정화 전까지 개인 사용 — 회원가입 완전 차단
+  if (isSoloAdminOnly(env)) {
+    return jsonResponse({ ok: false, error: 'signup_disabled' }, 403)
+  }
+
+  // 가입 폭주 / 초대코드 무차별 대입 방어 — IP당 시간당 5회
+  const limited = await enforceRateLimit(env, 'auth-signup', getClientIp(request), 5, 3600)
+  if (limited) return limited
 
   const inviteConfigured = Boolean((env.SIGNUP_INVITE_CODE || env.ADMIN_PIN || '').trim())
   if (!inviteConfigured) {

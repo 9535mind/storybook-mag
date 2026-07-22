@@ -1,9 +1,10 @@
-import { requireAuth } from '../lib/auth'
+import { isAdminEmail, requireAuth } from '../lib/auth'
 import {
   buildFashionMagazinePrompt,
   buildFashionNegativePrompt,
   evaluateContentPolicy,
   polishKoreanPromptText,
+  wantsNudeOrUndress,
 } from '../lib/content-policy'
 import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, resolveFalImageSize } from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
@@ -13,12 +14,16 @@ import {
   isRealWildlifeScene,
   summarizePlan,
 } from '../lib/scene-compiler'
+import { compileSdxlTagPrompt, translateDescriptionForImagePrompt } from '../lib/translate'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
-  /** Workers AI — 자유 모드 장면 이해 */
+  /** Workers AI — 자유 모드 장면 이해 + 한→영 번역 폴백 */
   AI?: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> }
+  /** 한→영 번역 주 엔진(선택) — 없으면 Workers AI 폴백만 사용 */
+  ANTHROPIC_API_KEY?: string
+  ANTHROPIC_MODEL?: string
 
   // 주 엔진 (primary) — Replicate: Juggernaut XL Lightning (저비용 + 유연)
   REPLICATE_API_TOKEN?: string
@@ -26,6 +31,12 @@ interface Env {
   REPLICATE_MODEL_NAME?: string
   /** 조회 생략용 버전 고정(선택) — 비워두면 latest_version을 자동 조회 */
   REPLICATE_MODEL_VERSION?: string
+
+  // 정밀 모드 전용 모델(선택) — Lightning 계열이 아닌, 많은 스텝에서 실제로 더 좋아지는 일반 SDXL.
+  // 비워두면 공개 기본 모델(stability-ai/sdxl)을 사용한다.
+  REPLICATE_PRECISION_MODEL_OWNER?: string
+  REPLICATE_PRECISION_MODEL_NAME?: string
+  REPLICATE_PRECISION_MODEL_VERSION?: string
 
   // 보조 엔진 (secondary / fallback) — fal.ai: Flux.2 Pro
   FAL_KEY?: string
@@ -55,7 +66,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const limited = await enforceRateLimit(env, 'generate', rateLimitIdentity(auth), 24, 3600)
     if (limited) return limited
 
-    let body: { description?: string; mood?: string; size?: string; mode?: string }
+    let body: { description?: string; mood?: string; size?: string; mode?: string; precision?: boolean }
     try {
       body = await request.json()
     } catch {
@@ -66,13 +77,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (!description) {
       return jsonResponse({ ok: false, error: 'description_required' }, 400)
     }
-    if (description.length > 1200) {
-      return jsonResponse({ ok: false, error: 'description_too_long' }, 400)
+    // 관리자는 그림 상세본(최대 3000자 미만)을 그대로 붙여 넣을 수 있게 더 긴 요청을 허용한다.
+    const maxDescriptionChars = isAdminEmail(auth.user.email) ? 3000 : 1200
+    if (description.length > maxDescriptionChars) {
+      return jsonResponse(
+        { ok: false, error: 'description_too_long', maxLength: maxDescriptionChars },
+        400,
+      )
     }
 
-    const mood = body.mood ?? 'editorial'
+    const mood = body.mood ?? 'clean'
     const size = body.size ?? 'square'
     const mode = body.mode === 'free' ? 'free' : 'fashion'
+    // 정밀 모드: 생성 속도를 희생해서 스텝 수를 늘려 세부 표현 반영률을 높인다.
+    // 누드/탈의 요청은 기본(Lightning) 엔진이 "안전한" 결과 쪽으로 쏠려 옷을 입혀버리는 경향이
+    // 실측으로 확인됐다 — 스텝이 적은 증류 모델일수록 이 편향이 강했다. 그래서 누드 요청은
+    // 사용자가 체크박스를 안 켜도 자동으로 정밀 모드(스텝 30, CFG 7.5)로 전환한다.
+    const autoPrecisionForNude = mode === 'fashion' && wantsNudeOrUndress(description)
+    const precision = Boolean(body.precision) || autoPrecisionForNude
 
     const policyVerdict = evaluateContentPolicy(description, { mode })
     if (!policyVerdict.allowed) {
@@ -87,6 +109,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       )
     }
 
+    // 이미지 모델은 영어 위주로 학습돼 있어, 한글 원문을 프롬프트에 그대로 넣으면 대부분
+    // 무시된다(길고 정교하게 써도 소용없어짐) — 프롬프트 조립 직전에 한 번 영어로 번역한다.
+    // 정책 검사·likelyAdult 등 한글 키워드 매칭은 원문(description)으로 그대로 수행하고,
+    // 실제 이미지 생성 프롬프트에 들어가는 부분만 번역본을 쓴다.
+    // 화보(fashion) 모드는 SDXL/Juggernaut 엔진의 CLIP 인코더가 ~70단어를 넘으면 조용히 잘라버리므로,
+    // 단순 번역이 아니라 "쉼표 구분 태그 + 70단어 예산" 압축까지 함께 해서 그 좁은 예산 안에 최대한
+    // 많은 시각 정보가 실제로 모델에 도달하게 한다. 자유(동화) 모드는 별도 scene-compiler가 구조화
+    // 파싱을 하므로 기존 번역만 사용한다.
+    const descriptionForPrompt =
+      mode === 'free'
+        ? (await translateDescriptionForImagePrompt(description, env)).text
+        : (await compileSdxlTagPrompt(description, env)).text
+
     let prompt: string
     let negativePrompt: string
     let sceneMeta: ReturnType<typeof summarizePlan> | null = null
@@ -95,8 +130,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     if (mode === 'free') {
       const compiled = await compileResponsiveFreePrompt({
-        description,
+        description: descriptionForPrompt,
         size,
+        mood,
         ai: env.AI,
       })
       prompt = compiled.prompt
@@ -111,13 +147,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       sceneMeta = summarizePlan(compiled.plan)
     } else {
       // free는 위에서 scene-compiler만 사용. fashion만 화보 프롬프트.
-      prompt = buildFashionMagazinePrompt({ description, mood, size })
+      prompt = buildFashionMagazinePrompt({ description: descriptionForPrompt, mood, size })
       negativePrompt = buildFashionNegativePrompt(description)
     }
 
     const attempts: EngineAttempt[] = []
     const likelyAdult =
-      /누드|나체|nude|naked|란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit|성기|자위|섹스/i.test(
+      /누드|나체|nude|naked|속옷\s*제거|속옷제거|탈의|옷\s*벗|가운\s*벗|undress|strip|란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit|성기|자위|섹스|전라/i.test(
         description,
       )
 
@@ -177,13 +213,27 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         const fashionSceneHeavy =
           mode === 'fashion' &&
           /속옷|거울|란제리|underwear|mirror|lingerie|몸매|비스듬/i.test(description)
-        const steps = mode === 'free' ? (wildlifeScene ? 18 : complexScene ? 14 : 12) : fashionSceneHeavy ? 14 : 10
-        const cfg = mode === 'free' ? (wildlifeScene ? 7.0 : complexScene ? 5.0 : 4.0) : fashionSceneHeavy ? 4.2 : 3.2
+        const baseSteps = mode === 'free' ? (wildlifeScene ? 18 : complexScene ? 14 : 12) : fashionSceneHeavy ? 14 : 10
+        const baseCfg = mode === 'free' ? (wildlifeScene ? 7.0 : complexScene ? 5.0 : 4.0) : fashionSceneHeavy ? 4.2 : 3.2
+
+        // 정밀 모드: Lightning 계열은 스텝을 늘려도 비례 개선이 안 되므로,
+        // 많은 스텝에서 실제로 좋아지는 일반 SDXL 모델로 바꿔서 돈다(속도는 느려짐).
+        const usePrecisionModel = precision
+        const modelOwner = usePrecisionModel
+          ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
+          : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based'
+        const modelName = usePrecisionModel
+          ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
+          : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning'
+        const modelVersion = usePrecisionModel ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION
+        const steps = usePrecisionModel ? 30 : baseSteps
+        const cfg = usePrecisionModel ? 7.5 : baseCfg
+
         const { imageUrl } = await generateReplicateImage({
           apiToken: env.REPLICATE_API_TOKEN,
-          modelOwner: env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-          modelName: env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-          modelVersion: env.REPLICATE_MODEL_VERSION,
+          modelOwner,
+          modelName,
+          modelVersion,
           prompt,
           negativePrompt,
           disableSafetyChecker: true,
@@ -199,8 +249,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             mode,
             scene: sceneMeta,
             engine: 'replicate',
-            engineLabel:
-              mode === 'free'
+            engineLabel: usePrecisionModel
+              ? `Replicate · ${modelOwner}/${modelName} · 정밀모드(${steps}스텝)`
+              : mode === 'free'
                 ? wildlifeScene
                   ? 'Replicate · Juggernaut XL Lightning (야생동물)'
                   : 'Replicate · Juggernaut XL Lightning (반응형 자유)'

@@ -1,5 +1,7 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
+/** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
+const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
 const GALLERY_STORAGE_KEY = 'fashionMagazineGallery'
 const LEGACY_PIN_STORAGE_KEY = 'fashionMagazineAdminPin'
 
@@ -13,9 +15,22 @@ const authTabSignup = document.getElementById('auth-tab-signup')
 const authInviteWrap = document.getElementById('auth-invite-wrap')
 const authInviteInput = document.getElementById('auth-invite')
 const authUserLabel = document.getElementById('auth-user-label')
+const authResetPin = document.getElementById('auth-reset-pin')
+const authResetPassword = document.getElementById('auth-reset-password')
+const authResetConfirm = document.getElementById('auth-reset-confirm')
+const authResetSubmit = document.getElementById('auth-reset-submit')
+const authResetStatus = document.getElementById('auth-reset-status')
 
 const app = document.getElementById('app')
 const logoutButton = document.getElementById('logout-button')
+const pinSettingsButton = document.getElementById('pin-settings-button')
+const pinChangeModal = document.getElementById('pin-change-modal')
+const pinSettingsCurrent = document.getElementById('pin-settings-current')
+const pinSettingsNew = document.getElementById('pin-settings-new')
+const pinSettingsConfirm = document.getElementById('pin-settings-confirm')
+const pinSettingsStatus = document.getElementById('pin-settings-status')
+const pinSettingsSubmit = document.getElementById('pin-settings-submit')
+const pinSettingsClose = document.getElementById('pin-settings-close')
 
 let authMode = 'login'
 
@@ -30,13 +45,143 @@ const guideDetail = document.getElementById('guide-detail')
 const scenePreviewEl = document.getElementById('scene-preview')
 const moodField = document.getElementById('mood')
 const sizeField = document.getElementById('size')
+const precisionModeField = document.getElementById('precision-mode')
 const genModeHint = document.getElementById('gen-mode-hint')
 let scenePreviewTimer = null
 let scenePreviewSeq = 0
 
+/** admin / admin@… 계정만 관리자. */
+function isAdminUserEmail(emailRaw) {
+  const email = String(emailRaw || '')
+    .trim()
+    .toLowerCase()
+  if (!email) return false
+  if (email === 'admin' || email === 'admin@local') return true
+  return email.split('@')[0] === 'admin'
+}
+
+function isAdminUser() {
+  return isAdminUserEmail(getStoredUserEmail())
+}
+
 function getGenMode() {
-  // 당분간 자유 일러스트에 집중 — 화보(관리자) 모드는 UI에서 숨김
-  return 'free'
+  // 일반 유저: 자유만. 관리자: 선택한 모드(자유 / 화보)
+  if (!isAdminUser()) return 'free'
+  const checked = document.querySelector('input[name="gen-mode"]:checked')
+  return checked?.value === 'fashion' ? 'fashion' : 'free'
+}
+
+const APP_AREA_KEY = 'storymagAppArea'
+const APP_AREAS = ['studio', 'admin', 'essay', 'tale', 'observe']
+const APP_AREA_META = {
+  studio: { title: null, subtitle: null },
+  admin: { title: null, subtitle: null },
+  essay: { title: '에세이 아키텍트', subtitle: '냉혹한 편집장 · 출간 수준 해체' },
+  tale: { title: 'AI 동화 편집', subtitle: '초등 눈높이 · 사건과 행동으로' },
+  observe: { title: '그림관찰과 표현', subtitle: '보이는 것을 정확하게' },
+}
+
+function getAppArea() {
+  const saved = localStorage.getItem(APP_AREA_KEY)
+  if (saved === 'admin' && !isAdminUser()) return 'studio'
+  return APP_AREAS.includes(saved) ? saved : 'studio'
+}
+
+function setAppArea(area) {
+  const next = APP_AREAS.includes(area) ? area : 'studio'
+  localStorage.setItem(APP_AREA_KEY, next)
+  syncAppAreaUi()
+}
+
+/** 일러스트/관리자전용은 같은 화보 스튜디오 폼을 쓰고, 에세이·동화·그림관찰은 별도 화면. */
+function syncAppAreaUi() {
+  const area = getAppArea()
+  const usesStudioForm = area === 'studio' || area === 'admin'
+  const appRoot = document.getElementById('app')
+
+  const studioArea = document.getElementById('studio-area')
+  const essayArea = document.getElementById('essay-area')
+  const taleArea = document.getElementById('tale-area')
+  const observeArea = document.getElementById('observe-area')
+  if (studioArea) studioArea.hidden = !usesStudioForm
+  if (essayArea) essayArea.hidden = area !== 'essay'
+  if (taleArea) taleArea.hidden = area !== 'tale'
+  if (observeArea) observeArea.hidden = area !== 'observe'
+  // 「내 갤러리」(자유)와 「관리자 전용 갤러리」(화보)는 서로 섞이지 않게 탭별로 완전히 분리해서 보여준다.
+  if (freeGallerySection) freeGallerySection.hidden = area !== 'studio'
+  if (adminGallerySection) adminGallerySection.hidden = area !== 'admin'
+
+  if (appRoot) {
+    appRoot.classList.toggle('app--essay', !usesStudioForm)
+    appRoot.classList.toggle('app--desk', !usesStudioForm)
+  }
+
+  document.querySelectorAll('[data-app-area]').forEach((btn) => {
+    const on = btn.getAttribute('data-app-area') === area
+    btn.classList.toggle('app__area-btn--active', on)
+    btn.setAttribute('aria-selected', on ? 'true' : 'false')
+  })
+
+  if (newShootHeaderButton) newShootHeaderButton.hidden = !usesStudioForm
+  const appHomeLink = document.getElementById('app-home-link')
+  if (appHomeLink) appHomeLink.hidden = area === 'studio'
+
+  const title = document.getElementById('app-title') || document.querySelector('.app__title')
+  const subtitle = document.getElementById('app-subtitle')
+  const meta = APP_AREA_META[area]
+  if (!usesStudioForm && meta) {
+    if (title) title.textContent = meta.title
+    if (subtitle) subtitle.textContent = meta.subtitle
+    if (area === 'essay' && window.StorymagEssay?.onShow) window.StorymagEssay.onShow()
+    if (area === 'tale' && window.StorymagTale?.onShow) window.StorymagTale.onShow()
+    if (area === 'observe' && window.StorymagObserve?.onShow) window.StorymagObserve.onShow()
+  } else {
+    // studio(자유) / admin(관리자전용) — 탭에 맞춰 내부 생성 모드를 강제한 뒤 동기화
+    const desiredMode = area === 'admin' ? 'fashion' : 'free'
+    const radio = document.querySelector(`input[name="gen-mode"][value="${desiredMode}"]`)
+    if (radio && !radio.checked) radio.checked = true
+    syncGenModeUi()
+    syncResultVisibilityForArea(desiredMode)
+  }
+  syncAdminModeVisibility()
+}
+
+/** 「일러스트」와 「관리자 페이지」는 생성 결과 미리보기(검토/수용 패널)도 서로 안 보이게 분리한다 —
+ *  안 그러면 관리자 페이지에서 만든 화보가 일러스트 탭으로 넘어와도 그대로 남아 보이는 문제가 있었다.
+ *  currentResult는 지우지 않으므로, 원래 탭으로 돌아가면 다시 그대로 보인다. */
+function syncResultVisibilityForArea(desiredMode) {
+  if (!resultSection || !currentResult.imageUrl) return
+  const resultMode = currentResult.genMode === 'fashion' ? 'fashion' : 'free'
+  resultSection.hidden = resultMode !== desiredMode
+}
+
+/** 관리자에게만 「관리자전용」 탭을 보이게 한다(탭 자체가 이제 모드 전환 = 페이지 이동). */
+function syncAdminModeVisibility() {
+  const adminTab = document.getElementById('app-area-admin')
+  // 개인 사용(solo): 로그인만 되면 관리자 — 라벨/기억된 아이디 둘 다 본다
+  const admin =
+    isAdminUser() ||
+    isAdminUserEmail(typeof getRememberedLoginId === 'function' ? getRememberedLoginId() : '') ||
+    isAdminUserEmail(authUserLabel?.textContent || '')
+  if (adminTab) adminTab.hidden = !admin
+  if (pinSettingsButton) pinSettingsButton.hidden = !admin
+  if (!admin) {
+    const freeRadio = document.querySelector('input[name="gen-mode"][value="free"]')
+    if (freeRadio) freeRadio.checked = true
+    if (getAppArea() === 'admin') setAppArea('studio')
+  }
+  // 관리자는 그림 상세본(최대 3000자 미만)을 그대로 옮겨 붙일 수 있게 3000자까지 허용한다.
+  // 실제 이미지 생성 모델에 넣기 직전에는 compileSdxlTagPrompt가 자동으로 ~70단어 태그로
+  // 한 번 더 압축하므로, 여기서는 원고 전체를 검증·수정할 수 있게 넉넉히 열어둔다.
+  const descriptionEl = document.getElementById('description')
+  if (descriptionEl) {
+    descriptionEl.maxLength = admin ? 3000 : 1200
+  }
+  const descriptionHintEl = document.getElementById('description-limit-hint')
+  if (descriptionHintEl) {
+    descriptionHintEl.textContent = ''
+    descriptionHintEl.hidden = true
+  }
 }
 const generateButton = document.getElementById('generate-button')
 const formStatus = document.getElementById('form-status')
@@ -46,6 +191,8 @@ const resultEngine = document.getElementById('result-engine')
 const resultImage = document.getElementById('result-image')
 const resultDownload = document.getElementById('result-download')
 const reviewBadge = document.getElementById('review-badge')
+const compareBadge = document.getElementById('compare-badge')
+const compareToggleButtons = document.querySelectorAll('.compare-toggle-btn')
 const reviewPanel = document.getElementById('review-panel')
 const revisePanel = document.getElementById('revise-panel')
 const acceptedActions = document.getElementById('accepted-actions')
@@ -53,7 +200,7 @@ const animatePanel = document.getElementById('animate-panel')
 const acceptButton = document.getElementById('accept-button')
 const reviseToggleButton = document.getElementById('revise-toggle-button')
 const reviseAgainButton = document.getElementById('revise-again-button')
-const rejectButton = document.getElementById('reject-button')
+const moveGalleryButton = document.getElementById('move-gallery-button')
 const reviseApplyButton = document.getElementById('revise-apply-button')
 const reviseCancelButton = document.getElementById('revise-cancel-button')
 const reviewActions = document.getElementById('review-actions')
@@ -66,6 +213,9 @@ const regionToolbar = document.getElementById('region-toolbar')
 const regionUndoButton = document.getElementById('region-undo-button')
 const regionClearButton = document.getElementById('region-clear-button')
 const regionList = document.getElementById('region-list')
+
+const loadImageButton = document.getElementById('load-image-button')
+const loadImageInput = document.getElementById('load-image-input')
 
 const motionField = document.getElementById('motion')
 const animateButton = document.getElementById('animate-button')
@@ -138,7 +288,17 @@ const galleryEmpty = document.getElementById('gallery-empty')
 const clearGalleryButton = document.getElementById('clear-gallery')
 const newShootHeaderButton = document.getElementById('new-shoot-header')
 const newShootGalleryButton = document.getElementById('new-shoot-gallery')
+const freeGallerySection = document.getElementById('free-gallery')
+const adminGallerySection = document.getElementById('admin-gallery')
+const adminGalleryGrid = document.getElementById('admin-gallery-grid')
+const adminGalleryEmpty = document.getElementById('admin-gallery-empty')
+const clearAdminGalleryButton = document.getElementById('clear-admin-gallery')
+const newShootAdminGalleryButton = document.getElementById('new-shoot-admin-gallery')
 const bgmSlotsEl = document.getElementById('bgm-slots')
+const bgmSlotsEmptyEl = document.getElementById('bgm-slots-empty')
+const bgmAddTagButton = document.getElementById('bgm-add-tag')
+const bgmSunoUrlInput = document.getElementById('bgm-suno-url')
+const bgmSunoImportButton = document.getElementById('bgm-suno-import-button')
 const bgmUploadInput = document.getElementById('bgm-upload')
 const bgmVolumeInput = document.getElementById('bgm-volume')
 const bgmVolumeLabel = document.getElementById('bgm-volume-label')
@@ -149,6 +309,8 @@ const bgmStatus = document.getElementById('bgm-status')
 /** 현재 결과 화면에 떠 있는 이미지/영상 상태 */
 const currentResult = {
   imageUrl: null,
+  /** replicate.delivery 만료 대비 — 서버가 읽어 둔 data URL */
+  imageDataUrl: null,
   videoUrl: null,
   originalVideoUrl: null,
   mixedVideoFilename: null,
@@ -162,12 +324,27 @@ const currentResult = {
   fallbackUsed: false,
   engine: '',
   previousImageUrl: '',
+  /** 이 이미지를 실제로 생성한 모드('free'|'fashion'). 탭을 나중에 옮겨도 「수정 적용」이
+   * 지금 켜져 있는 탭이 아니라 이 이미지가 실제로 만들어진 모드를 쓰도록 고정한다. */
+  genMode: 'free',
+  /** 지금까지 적용된 「수정」 횟수. 0이면 아직 수정 전(다음 클릭이 1차 수정). */
+  reviseRound: 0,
+}
+
+/** 「수정하기」 버튼 라벨을 "N차 수정"으로 갱신한다(다음 클릭이 몇 번째 수정인지 표시). */
+function updateReviseButtonLabel() {
+  const label = `${(currentResult.reviseRound || 0) + 1}차 수정`
+  if (reviseToggleButton) reviseToggleButton.textContent = label
+  if (reviseAgainButton) reviseAgainButton.textContent = label
 }
 
 const bgmState = {
   selectedSlotId: '',
   uploadFile: null,
 }
+
+/** 「이전과 비교」 토글 중인지 — true면 화면엔 수정 전(previousImageUrl)이 떠 있는 상태 */
+let comparingPrevious = false
 
 /** 확정된 수정 영역들 + 현재 드래그 중인 임시 사각형 */
 const regionState = {
@@ -182,7 +359,10 @@ function getSessionToken() {
 
 function setSessionToken(token, email) {
   localStorage.setItem(SESSION_STORAGE_KEY, token)
-  if (email) localStorage.setItem(USER_STORAGE_KEY, email)
+  if (email) {
+    localStorage.setItem(USER_STORAGE_KEY, email)
+    rememberLoginId(email)
+  }
 }
 
 function clearSessionToken() {
@@ -192,6 +372,25 @@ function clearSessionToken() {
 
 function getStoredUserEmail() {
   return localStorage.getItem(USER_STORAGE_KEY) || ''
+}
+
+function rememberLoginId(email) {
+  const id = String(email || '').trim()
+  if (!id) return
+  localStorage.setItem(REMEMBERED_LOGIN_KEY, id)
+}
+
+function getRememberedLoginId() {
+  return localStorage.getItem(REMEMBERED_LOGIN_KEY) || ''
+}
+
+/** 로그인 화면에 기억된 관리자 아이디를 채운다. */
+function fillRememberedLogin() {
+  if (!authEmailInput) return
+  const remembered = getRememberedLoginId()
+  if (remembered && !authEmailInput.value.trim()) {
+    authEmailInput.value = remembered
+  }
 }
 
 /** API 호출용 인증 헤더 (세션 토큰) */
@@ -214,6 +413,7 @@ function showApp() {
       authUserLabel.hidden = true
     }
   }
+  syncAppAreaUi()
 }
 
 function setAuthTab(mode) {
@@ -231,7 +431,7 @@ function setAuthTab(mode) {
   }
 }
 
-function authErrorMessage(code) {
+function authErrorMessage(code, data) {
   const map = {
     invalid_email: '이메일 형식을 확인해 주세요.',
     password_too_short: '비밀번호는 5자 이상이어야 해요.',
@@ -240,11 +440,36 @@ function authErrorMessage(code) {
     invalid_credentials: '이메일 또는 비밀번호가 올바르지 않아요.',
     unauthorized: '로그인이 필요해요.',
     auth_db_not_configured: '회원 DB가 아직 연결되지 않았어요.',
-    signup_disabled: '지금은 회원가입을 받지 않아요. 관리자에게 문의해 주세요.',
+    signup_disabled: '지금은 회원가입을 받지 않아요. 안정화될 때까지 개인 사용입니다.',
+    solo_admin_only: '지금은 관리자만 사용할 수 있어요. 안정화될 때까지 개인 사용입니다.',
     invalid_invite_code: '초대 코드가 올바르지 않아요.',
+    invalid_admin_pin: 'ADMIN_PIN이 올바르지 않아요.',
+    invalid_current_pin: '현재 PIN이 올바르지 않아요.',
+    pin_too_short: 'PIN은 4자 이상이어야 해요.',
+    pin_too_long: 'PIN이 너무 길어요.',
+    pin_confirm_mismatch: '새 PIN 확인이 일치하지 않아요.',
+    pin_unchanged: '이전 PIN과 같아요. 새 PIN을 입력해 주세요.',
+    password_confirm_mismatch: '새 비밀번호 확인이 일치하지 않아요.',
+    user_not_found: '해당 관리자 계정을 찾지 못했어요.',
     image_url_not_allowed: '허용되지 않은 이미지 주소예요. 앱에서 생성한 이미지만 사용할 수 있어요.',
   }
-  return map[code] || `오류: ${code || 'unknown'}`
+  if (code === 'rate_limited') {
+    const sec = Number(data?.retryAfterSec)
+    if (Number.isFinite(sec) && sec > 0) {
+      if (sec >= 3600) return `시도가 너무 많아요. 약 ${Math.ceil(sec / 3600)}시간 뒤에 다시 시도해 주세요.`
+      if (sec >= 60) return `시도가 너무 많아요. 약 ${Math.ceil(sec / 60)}분 뒤에 다시 시도해 주세요.`
+      return `시도가 너무 많아요. 약 ${Math.ceil(sec)}초 뒤에 다시 시도해 주세요.`
+    }
+    return data?.message || '시도가 너무 많아요. 잠시 후 다시 시도해 주세요.'
+  }
+  return map[code] || data?.message || `오류: ${code || 'unknown'}`
+}
+
+function setAuthResetStatus(message, isError) {
+  if (!authResetStatus) return
+  authResetStatus.hidden = !message
+  authResetStatus.textContent = message || ''
+  authResetStatus.style.color = isError ? '' : '#7dcea0'
 }
 
 function showPinGate(message) {
@@ -256,7 +481,13 @@ function showPinGate(message) {
   } else {
     pinError.hidden = true
   }
-  authEmailInput?.focus()
+  fillRememberedLogin()
+  // 아이디가 이미 있으면 비밀번호로 포커스
+  if (authEmailInput?.value.trim()) {
+    authPasswordInput?.focus()
+  } else {
+    authEmailInput?.focus()
+  }
 }
 
 function isLoggedIn() {
@@ -330,10 +561,31 @@ function setBgmStatus(message, isError) {
   bgmStatus.className = isError ? 'form__status form__status--error' : 'form__status'
 }
 
+/** 파일 선택창을 띄우고 선택된 파일을 반환한다 (취소 시 null). */
+function pickAudioFile() {
+  return new Promise((resolve) => {
+    const picker = document.createElement('input')
+    picker.type = 'file'
+    picker.accept = 'audio/*,.mp3,.wav,.m4a,.aac,.ogg'
+    picker.onchange = () => resolve(picker.files?.[0] || null)
+    picker.click()
+  })
+}
+
+/** 음원 저장 관련 오류를 사용자 메시지로 변환한다. */
+function bgmErrorMessage(error) {
+  const msg = error instanceof Error ? error.message : String(error)
+  if (msg === 'audio_too_large') return '음원은 20MB 이하만 가능해요.'
+  if (msg === 'empty_label') return '태그 이름을 입력해 주세요.'
+  return `저장 실패: ${msg}`
+}
+
 async function renderBgmSlots() {
   if (!bgmSlotsEl || typeof listBgmSlots !== 'function') return
   const slots = await listBgmSlots()
   bgmSlotsEl.innerHTML = ''
+  if (bgmSlotsEmptyEl) bgmSlotsEmptyEl.hidden = slots.length > 0
+
   slots.forEach((slot) => {
     const card = document.createElement('div')
     card.className =
@@ -346,7 +598,7 @@ async function renderBgmSlots() {
 
     const meta = document.createElement('div')
     meta.className = 'bgm-slot__meta'
-    meta.textContent = slot.hasAudio ? slot.fileName : '비어 있음 · Suno 음원 넣기'
+    meta.textContent = slot.hasAudio ? slot.fileName : '비어 있음'
 
     const actions = document.createElement('div')
     actions.className = 'bgm-slot__actions'
@@ -356,44 +608,51 @@ async function renderBgmSlots() {
     assignBtn.textContent = slot.hasAudio ? '교체' : '음원 넣기'
     assignBtn.addEventListener('click', async (event) => {
       event.stopPropagation()
-      const picker = document.createElement('input')
-      picker.type = 'file'
-      picker.accept = 'audio/*,.mp3,.wav,.m4a,.aac,.ogg'
-      picker.onchange = async () => {
-        const file = picker.files?.[0]
-        if (!file) return
-        try {
-          await saveBgmSlot(slot.id, file)
-          bgmState.selectedSlotId = slot.id
-          bgmState.uploadFile = null
-          if (bgmUploadInput) bgmUploadInput.value = ''
-          setBgmStatus(`「${slot.label}」 슬롯에 ${file.name}을(를) 넣었어요.`, false)
-          await renderBgmSlots()
-        } catch (error) {
-          const msg = error instanceof Error ? error.message : String(error)
-          setBgmStatus(
-            msg === 'audio_too_large' ? '음원은 20MB 이하만 가능해요.' : `저장 실패: ${msg}`,
-            true,
-          )
-        }
+      const file = await pickAudioFile()
+      if (!file) return
+      try {
+        await replaceBgmSlotAudio(slot.id, file)
+        bgmState.selectedSlotId = slot.id
+        bgmState.uploadFile = null
+        if (bgmUploadInput) bgmUploadInput.value = ''
+        setBgmStatus(`「${slot.label}」 태그에 ${file.name}을(를) 넣었어요.`, false)
+        await renderBgmSlots()
+      } catch (error) {
+        setBgmStatus(bgmErrorMessage(error), true)
       }
-      picker.click()
     })
 
-    const clearBtn = document.createElement('button')
-    clearBtn.type = 'button'
-    clearBtn.textContent = '비우기'
-    clearBtn.disabled = !slot.hasAudio
-    clearBtn.addEventListener('click', async (event) => {
+    const renameBtn = document.createElement('button')
+    renameBtn.type = 'button'
+    renameBtn.textContent = '이름변경'
+    renameBtn.addEventListener('click', async (event) => {
       event.stopPropagation()
-      await clearBgmSlot(slot.id)
+      const nextLabel = window.prompt('새 태그 이름을 입력하세요 (24자 이내)', slot.label)
+      if (nextLabel === null) return
+      try {
+        await renameBgmSlot(slot.id, nextLabel)
+        setBgmStatus(`태그 이름을 「${nextLabel.trim().slice(0, 24)}」로 바꿨어요.`, false)
+        await renderBgmSlots()
+      } catch (error) {
+        setBgmStatus(bgmErrorMessage(error), true)
+      }
+    })
+
+    const deleteBtn = document.createElement('button')
+    deleteBtn.type = 'button'
+    deleteBtn.textContent = '삭제'
+    deleteBtn.addEventListener('click', async (event) => {
+      event.stopPropagation()
+      if (!window.confirm(`「${slot.label}」 태그와 저장된 음원을 삭제할까요?`)) return
+      await deleteBgmSlot(slot.id)
       if (bgmState.selectedSlotId === slot.id) bgmState.selectedSlotId = ''
-      setBgmStatus(`「${slot.label}」 슬롯을 비웠어요.`, false)
+      setBgmStatus(`「${slot.label}」 태그를 삭제했어요.`, false)
       await renderBgmSlots()
     })
 
     actions.appendChild(assignBtn)
-    actions.appendChild(clearBtn)
+    actions.appendChild(renameBtn)
+    actions.appendChild(deleteBtn)
     card.appendChild(label)
     card.appendChild(meta)
     card.appendChild(actions)
@@ -413,6 +672,102 @@ async function renderBgmSlots() {
     bgmSlotsEl.appendChild(card)
   })
 }
+
+bgmAddTagButton?.addEventListener('click', async () => {
+  const label = window.prompt('새 태그 이름을 입력하세요 (예: 업비트, 감성 발라드 등, 24자 이내)')
+  if (label === null) return
+  if (!label.trim()) {
+    setBgmStatus('태그 이름을 입력해 주세요.', true)
+    return
+  }
+  const file = await pickAudioFile()
+  if (!file) return
+  try {
+    const newId = await addBgmSlot(label, file)
+    bgmState.selectedSlotId = newId
+    bgmState.uploadFile = null
+    if (bgmUploadInput) bgmUploadInput.value = ''
+    setBgmStatus(`「${label.trim().slice(0, 24)}」 태그를 만들고 음원을 저장했어요.`, false)
+    await renderBgmSlots()
+  } catch (error) {
+    setBgmStatus(bgmErrorMessage(error), true)
+  }
+})
+
+/** /api/bgm-from-url 응답 에러 코드를 사용자 메시지로 변환한다. */
+function bgmFromUrlErrorMessage(data) {
+  const code = data?.error || ''
+  if (code === 'unsupported_url') return data.message || 'suno.com 공유 링크만 지원해요 (예: https://suno.com/s/xxxx).'
+  if (code === 'suno_page_fetch_failed') return 'Suno 페이지를 불러오지 못했어요. 링크를 다시 확인해 주세요.'
+  if (code === 'suno_audio_not_found') {
+    return data.message || '이 링크에서 음원을 찾지 못했어요. 비공개 트랙일 수 있어요.'
+  }
+  if (code === 'suno_audio_not_allowed') return '허용되지 않은 음원 주소예요.'
+  if (code === 'suno_audio_fetch_failed') return '음원 파일을 받아오지 못했어요. 잠시 후 다시 시도해 주세요.'
+  if (code === 'suno_audio_too_large') return '음원이 20MB보다 커서 가져올 수 없어요.'
+  if (code === 'suno_audio_empty') return '받아온 음원 파일이 비어 있어요.'
+  if (code === 'url_required') return 'Suno 링크를 입력해 주세요.'
+  return `가져오기 실패: ${data.message || code || '알 수 없는 오류'}`
+}
+
+// suno.com 공유 링크를 붙여넣으면 서버가 대신 mp3를 찾아 받아온 뒤, 새 태그로 저장한다.
+bgmSunoImportButton?.addEventListener('click', async () => {
+  const url = (bgmSunoUrlInput?.value || '').trim()
+  if (!url) {
+    setBgmStatus('Suno 링크를 입력해 주세요.', true)
+    bgmSunoUrlInput?.focus()
+    return
+  }
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+
+  bgmSunoImportButton.disabled = true
+  const stopTimer = startProgressTimer(setBgmStatus, 'Suno 링크에서 음원을 가져오고 있어요…')
+  try {
+    const response = await fetch('/api/bgm-from-url', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ url }),
+    })
+    const data = await response.json().catch(() => ({}))
+    stopTimer()
+
+    if (response.status === 401) {
+      clearAllAuth()
+      showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return
+    }
+    if (response.status === 429) {
+      setBgmStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
+      return
+    }
+    if (!data.ok) {
+      setBgmStatus(bgmFromUrlErrorMessage(data), true)
+      return
+    }
+
+    const blob = await (await fetch(data.dataUrl)).blob()
+    const suggested = (data.title || '').trim().slice(0, 24) || '가져온 음원'
+    const label = window.prompt('태그 이름을 확인하세요 (24자 이내)', suggested)
+    if (label === null) return
+    const file = new File([blob], `${suggested}.mp3`, { type: 'audio/mpeg' })
+
+    const newId = await addBgmSlot(label, file)
+    bgmState.selectedSlotId = newId
+    bgmState.uploadFile = null
+    if (bgmUploadInput) bgmUploadInput.value = ''
+    if (bgmSunoUrlInput) bgmSunoUrlInput.value = ''
+    setBgmStatus(`「${label.trim().slice(0, 24)}」 태그로 Suno 음원을 가져왔어요.`, false)
+    await renderBgmSlots()
+  } catch (error) {
+    stopTimer()
+    setBgmStatus(bgmErrorMessage(error), true)
+  } finally {
+    bgmSunoImportButton.disabled = false
+  }
+})
 
 function showVideoResult(videoUrl, options) {
   const { prompt = currentResult.prompt, motion = '', youtubeDraft = null, asOriginal = true } =
@@ -729,7 +1084,30 @@ function enterAcceptedMode() {
   acceptedActions.hidden = false
   animatePanel.hidden = false
   setRegionDrawEnabled(false)
+  updateMoveGalleryButton()
 }
+
+/** 관리자에게만 「내 갤러리 ↔ 관리자 전용 갤러리」 사이에서 이 작품을 옮길 수 있는 버튼을 보여준다.
+ *  갤러리에 저장된(수용된) 작품에만 의미가 있으므로 itemId가 있을 때만 노출한다. */
+function updateMoveGalleryButton() {
+  if (!moveGalleryButton) return
+  if (!isAdminUser() || !currentResult.itemId) {
+    moveGalleryButton.hidden = true
+    return
+  }
+  const isFashion = currentResult.genMode === 'fashion'
+  moveGalleryButton.hidden = false
+  moveGalleryButton.textContent = isFashion ? '내 갤러리로 이동' : '관리자 갤러리로 이동'
+}
+
+moveGalleryButton?.addEventListener('click', () => {
+  const itemId = currentResult.itemId
+  if (!itemId) return
+  const nextMode = currentResult.genMode === 'fashion' ? 'free' : 'fashion'
+  moveGalleryItem(itemId, nextMode)
+  const label = nextMode === 'fashion' ? '관리자 전용 갤러리' : '내 갤러리'
+  setFormStatus(`${label}로 옮겼어요.`, false)
+})
 
 function openRevisePanel() {
   reviewPanel.hidden = false
@@ -743,6 +1121,74 @@ function closeRevisePanel() {
   setReviseStatus('', false)
 }
 
+/** 「이전과 비교」 버튼들의 활성/문구 상태를 갱신한다. */
+function updateCompareButtons() {
+  const hasPrevious =
+    Boolean(currentResult.previousImageUrl) &&
+    currentResult.previousImageUrl !== currentResult.imageUrl
+  compareToggleButtons.forEach((btn) => {
+    btn.disabled = !hasPrevious && !comparingPrevious
+    btn.textContent = comparingPrevious ? '현재 결과로 복귀' : '이전과 비교'
+    btn.classList.toggle('compare-toggle-btn--active', comparingPrevious)
+  })
+}
+
+/** 비교 중엔 지금 보이는 이미지가 수정 전이라 수정/수용을 잠깅다 — 헷갈리지 않게 먼저 복귀시켜야 함. */
+function setActionsLockedForCompare(locked) {
+  if (reviseToggleButton) reviseToggleButton.disabled = locked
+  if (reviseAgainButton) reviseAgainButton.disabled = locked
+  if (acceptButton) acceptButton.disabled = locked
+}
+
+/** 비교 미리보기를 끄고 현재(최신) 이미지로 화면을 되돌린다. */
+function exitComparePreview() {
+  if (!comparingPrevious) return
+  comparingPrevious = false
+  resultImage.src = currentResult.imageUrl
+  compareBadge.hidden = true
+  setActionsLockedForCompare(false)
+  updateCompareButtons()
+}
+
+/** 「이전과 비교」 버튼 클릭 — 현재 ↔ 수정 직전 이미지를 화면에서만 즉시 토글해서 보여준다(비파괴적). */
+function toggleComparePrevious() {
+  if (comparingPrevious) {
+    exitComparePreview()
+    return
+  }
+  if (!currentResult.previousImageUrl || currentResult.previousImageUrl === currentResult.imageUrl) {
+    setReviseStatus('비교할 이전 이미지가 없어요.', true)
+    return
+  }
+  comparingPrevious = true
+  resultImage.src = currentResult.previousImageUrl
+  compareBadge.hidden = false
+  compareBadge.textContent = '🔍 이전(수정 전) 이미지를 보고 있어요 · 다시 누르면 현재 결과로 돌아와요'
+  setActionsLockedForCompare(true)
+  updateCompareButtons()
+}
+
+compareToggleButtons.forEach((btn) => btn.addEventListener('click', toggleComparePrevious))
+
+/** 이미지 URL이 만료되기 전에 서버로 바이트를 읽어 메모리에 보관 */
+async function cacheImageForAnimate(imageUrl) {
+  if (!imageUrl || !isLoggedIn()) return
+  const token = imageUrl
+  try {
+    const response = await fetch('/api/media-bytes', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ imageUrl }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (data?.ok && data.dataUrl && currentResult.imageUrl === token) {
+      currentResult.imageDataUrl = data.dataUrl
+    }
+  } catch {
+    /* 캐시 실패해도 영상 요청 시 URL 재시도 */
+  }
+}
+
 function showResult(imageUrl, engineLabel, fallbackUsed, options) {
   const {
     size = 'portrait',
@@ -753,6 +1199,8 @@ function showResult(imageUrl, engineLabel, fallbackUsed, options) {
     accepted = false,
     mood = moodField.value,
     engine = '',
+    genMode = currentResult.genMode || getGenMode(),
+    reviseRound = currentResult.reviseRound || 0,
   } = options || {}
 
   resultImage.src = imageUrl
@@ -767,8 +1215,13 @@ function showResult(imageUrl, engineLabel, fallbackUsed, options) {
 
   if (currentResult.imageUrl && currentResult.imageUrl !== imageUrl) {
     currentResult.previousImageUrl = currentResult.imageUrl
+    // 이미지가 실제로 바뀌면(새 생성/수정/다른 갤러리 항목) 이전 이미지용 모션 힌트는
+    // 더 이상 유효하지 않다 — 지우지 않으면 "이전 요청과 무관하게 옛 모션이 그대로
+    // 적용되는" 문제가 생긴다.
+    if (motionField) motionField.value = ''
   }
   currentResult.imageUrl = imageUrl
+  currentResult.imageDataUrl = null
   currentResult.prompt = prompt || ''
   currentResult.size = size
   currentResult.itemId = itemId
@@ -776,8 +1229,18 @@ function showResult(imageUrl, engineLabel, fallbackUsed, options) {
   currentResult.engineLabel = engineLabel || ''
   currentResult.fallbackUsed = Boolean(fallbackUsed)
   currentResult.engine = engine || ''
+  currentResult.genMode = genMode === 'fashion' ? 'fashion' : 'free'
+  currentResult.reviseRound = reviseRound || 0
+  updateReviseButtonLabel()
   setAnimateStatus('', false)
   revisionText.value = ''
+  void cacheImageForAnimate(imageUrl)
+
+  // 새 결과가 들어오면 이전 비교 미리보기는 항상 해제하고 버튼 상태를 새로 계산한다.
+  comparingPrevious = false
+  compareBadge.hidden = true
+  setActionsLockedForCompare(false)
+  updateCompareButtons()
 
   if (videoUrl) {
     showVideoResult(videoUrl, { prompt, youtubeDraft })
@@ -795,10 +1258,37 @@ function showResult(imageUrl, engineLabel, fallbackUsed, options) {
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
+/** 화보(관리자 전용) 모드로 만든 이미지와 자유 일러스트 이미지를 물리적으로 분리해서 각자의
+ *  그리드에 렌더링한다 — 「내 갤러리」는 자유 이미지만, 「관리자 전용 갤러리」는 화보 이미지만 보여준다. */
 function renderGallery() {
   const items = readGallery()
-  galleryGrid.innerHTML = ''
-  galleryEmpty.hidden = items.length > 0
+  const freeItems = items.filter((item) => item.genMode !== 'fashion')
+  const adminItems = items.filter((item) => item.genMode === 'fashion')
+
+  renderGalleryInto(freeItems, galleryGrid, galleryEmpty, 'free')
+  if (adminGalleryGrid && adminGalleryEmpty) {
+    renderGalleryInto(adminItems, adminGalleryGrid, adminGalleryEmpty, 'fashion')
+  }
+}
+
+/** 저장된 항목의 genMode를 바꿔서 「내 갤러리」 ↔ 「관리자 전용 갤러리」 사이로 옮긴다. */
+function moveGalleryItem(itemId, nextMode) {
+  const items = readGallery()
+  const index = items.findIndex((entry) => entry.id === itemId)
+  if (index === -1) return
+  items[index] = { ...items[index], genMode: nextMode }
+  writeGallery(items)
+  renderGallery()
+  if (currentResult.itemId === itemId) {
+    currentResult.genMode = nextMode
+    updateMoveGalleryButton()
+    syncResultVisibilityForArea(getGenMode())
+  }
+}
+
+function renderGalleryInto(items, gridEl, emptyEl, currentMode) {
+  gridEl.innerHTML = ''
+  emptyEl.hidden = items.length > 0
 
   items
     .slice()
@@ -826,43 +1316,86 @@ function renderGallery() {
         cell.appendChild(videoTag)
       }
 
-      const deleteButton = document.createElement('button')
-      deleteButton.type = 'button'
-      deleteButton.className = 'gallery__item-delete'
-      deleteButton.textContent = '삭제'
-      deleteButton.addEventListener('click', (event) => {
-        event.stopPropagation()
-        const remaining = readGallery().filter((entry) => entry.id !== item.id)
-        writeGallery(remaining)
-        renderGallery()
-      })
-      cell.appendChild(deleteButton)
+      // 버튼이 여러 개 겹쳐 덕지덕지 붙어 보이던 문제 — 체크박스 하나로 감춰두고,
+      // 체크하면 드롭다운(select)으로 작업(쇼츠/이동/삭제)을 고르게 한다.
+      const menuToggleLabel = document.createElement('label')
+      menuToggleLabel.className = 'gallery__item-menu-toggle'
+      const menuCheckbox = document.createElement('input')
+      menuCheckbox.type = 'checkbox'
+      menuToggleLabel.appendChild(menuCheckbox)
+      menuToggleLabel.addEventListener('click', (event) => event.stopPropagation())
+      cell.appendChild(menuToggleLabel)
 
-      const shortsButton = document.createElement('button')
-      shortsButton.type = 'button'
-      shortsButton.className = 'gallery__item-shorts'
-      shortsButton.textContent = item.videoUrl ? 'YouTube 올리기' : '쇼츠 비디오 만들기'
-      shortsButton.addEventListener('click', (event) => {
-        event.stopPropagation()
-        const prompt = item.description || item.prompt || ''
-        showResult(item.imageUrl, item.engineLabel, item.fallbackUsed, {
-          size: item.size,
-          itemId: item.id,
-          videoUrl: item.videoUrl,
-          prompt,
-          youtubeDraft: item.youtubeDraft || null,
-          accepted: true,
-          mood: item.mood,
-          engine: item.engine,
+      const menuSelect = document.createElement('select')
+      menuSelect.className = 'gallery__item-menu'
+      menuSelect.hidden = true
+      const menuOptions = [{ value: '', label: '작업 선택…' }]
+      menuOptions.push({
+        value: 'shorts',
+        label: item.videoUrl ? 'YouTube 올리기' : '쇼츠 비디오 만들기',
+      })
+      if (isAdminUser()) {
+        menuOptions.push({
+          value: 'move',
+          label: currentMode === 'fashion' ? '내 갤러리로 이동' : '관리자 갤러리로 이동',
         })
-        if (!item.videoUrl) {
-          requestAnimate()
+      }
+      menuOptions.push({ value: 'delete', label: '삭제' })
+      menuOptions.forEach(({ value, label }) => {
+        const option = document.createElement('option')
+        option.value = value
+        option.textContent = label
+        menuSelect.appendChild(option)
+      })
+      menuSelect.addEventListener('click', (event) => event.stopPropagation())
+      menuCheckbox.addEventListener('click', (event) => event.stopPropagation())
+      menuCheckbox.addEventListener('change', () => {
+        menuSelect.hidden = !menuCheckbox.checked
+      })
+      menuSelect.addEventListener('change', () => {
+        const action = menuSelect.value
+        menuSelect.value = ''
+        menuCheckbox.checked = false
+        menuSelect.hidden = true
+        if (action === 'delete') {
+          const remaining = readGallery().filter((entry) => entry.id !== item.id)
+          writeGallery(remaining)
+          renderGallery()
+          return
+        }
+        if (action === 'move') {
+          moveGalleryItem(item.id, currentMode === 'fashion' ? 'free' : 'fashion')
+          return
+        }
+        if (action === 'shorts') {
+          const prompt = item.description || item.prompt || ''
+          showResult(item.imageUrl, item.engineLabel, item.fallbackUsed, {
+            size: item.size,
+            itemId: item.id,
+            videoUrl: item.videoUrl,
+            prompt,
+            youtubeDraft: item.youtubeDraft || null,
+            accepted: true,
+            mood: item.mood,
+            engine: item.engine,
+            genMode: item.genMode,
+            reviseRound: item.reviseRound || 0,
+          })
+          // 예전엔 여기서 곧바로 requestAnimate()를 호출해서, 모션 힌트를 확인/입력할
+          // 기회도 없이 (게다가 이전 이미지용으로 남아있던 모션 힌트 그대로) 영상 생성이
+          // 시작되는 문제가 있었다. 이제는 애니메이트 패널로 이동만 시키고, 사용자가
+          // 모션 힌트를 확인한 뒤 직접 「쇼츠 비디오 만들기」를 눌러야 생성이 시작된다.
+          if (!item.videoUrl) {
+            animatePanel.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            motionField?.focus()
+            setAnimateStatus('모션 힌트를 확인하거나 입력한 뒤 「쇼츠 비디오 만들기」를 눌러 주세요.', false)
+          }
         }
       })
-      cell.appendChild(shortsButton)
+      cell.appendChild(menuSelect)
 
       cell.addEventListener('click', (event) => {
-        if (event.target === deleteButton || event.target === shortsButton) return
+        if (event.target === menuToggleLabel || event.target === menuCheckbox || event.target === menuSelect) return
         showResult(item.imageUrl, item.engineLabel, item.fallbackUsed, {
           size: item.size,
           itemId: item.id,
@@ -872,10 +1405,12 @@ function renderGallery() {
           accepted: true,
           mood: item.mood,
           engine: item.engine,
+          genMode: item.genMode,
+          reviseRound: item.reviseRound || 0,
         })
       })
 
-      galleryGrid.appendChild(cell)
+      gridEl.appendChild(cell)
     })
 }
 
@@ -939,6 +1474,22 @@ function setGuideDropdownValue(selectId, text) {
   }
   syncGuideCustomVisibility(selectEl)
   selectEl.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
+/** 가이드(주부/술부/형용사/목적어/보어) + 캐릭터 설명 입력을 모두 비워서 새 장면을 시작할 수 있게 한다. */
+function resetGuideFields() {
+  if (guideWhoField) guideWhoField.value = ''
+  if (guideActionField) guideActionField.value = ''
+  GUIDE_DROPDOWN_IDS.forEach((id) => {
+    const selectEl = document.getElementById(id)
+    if (selectEl) selectEl.value = ''
+    const custom = guideCustomEl(id)
+    if (custom) {
+      custom.value = ''
+      custom.hidden = true
+    }
+  })
+  syncGuideDetailVisibility()
 }
 
 function syncGuideDetailVisibility() {
@@ -1336,10 +1887,87 @@ document.querySelectorAll('.ai-help-btn').forEach((btn) => {
   })
 })
 
+function animateErrorMessage(data, response) {
+  const code = data?.error || ''
+  const detail = String(data?.message || '').trim()
+  const map = {
+    replicate_token_not_configured: '영상 엔진 토큰이 설정되지 않았어요.',
+    image_url_required: '원본 이미지가 없어요.',
+    image_url_not_allowed:
+      '이 이미지 주소로는 영상을 만들 수 없어요. 앱에서 생성·수용한 이미지를 사용해 주세요.',
+    content_policy_blocked: '정책에 의해 차단된 표현이 포함되어 있어요.',
+    video_generation_failed: detail || 'Replicate 영상 생성이 실패했어요.',
+    video_status_failed: detail || '영상 상태 조회에 실패했어요.',
+    prediction_id_required: '영상 작업 ID가 없어요. 다시 시작해 주세요.',
+    missing_replicate_token: 'Replicate 토큰이 없어요.',
+    missing_image_url: '원본 이미지 URL이 없어요.',
+    source_image_expired:
+      '원본 이미지 링크가 만료됐어요. 이미지를 다시 생성한 뒤, 바로 쇼츠를 만들어 주세요.',
+    source_image_fetch_failed: '원본 이미지를 불러오지 못했어요. 이미지를 다시 생성해 주세요.',
+    source_image_too_large: '원본 이미지가 너무 커요. 다시 생성해 주세요.',
+    source_image_empty: '원본 이미지가 비어 있어요. 다시 생성해 주세요.',
+    invalid_image_data_url: '저장된 이미지 형식이 올바르지 않아요. 이미지를 다시 생성해 주세요.',
+    rate_limited: detail || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.',
+  }
+  if (code === 'rate_limited') {
+    const sec = Number(data?.retryAfterSec)
+    if (Number.isFinite(sec) && sec > 0) {
+      if (sec >= 3600) return `요청이 너무 많아요. 약 ${Math.ceil(sec / 3600)}시간 뒤에 다시 시도해 주세요.`
+      if (sec >= 60) return `요청이 너무 많아요. 약 ${Math.ceil(sec / 60)}분 뒤에 다시 시도해 주세요.`
+      return `요청이 너무 많아요. 약 ${Math.ceil(sec)}초 뒤에 다시 시도해 주세요.`
+    }
+    return map.rate_limited
+  }
+  if (map[code]) return map[code]
+  if (/404|Not Found|replicate\.delivery/i.test(detail)) {
+    return '원본 이미지 링크가 만료됐어요. 이미지를 다시 생성한 뒤, 바로 쇼츠를 만들어 주세요.'
+  }
+  if (detail) return detail
+  if (code) return code
+  if (response && response.status === 429) {
+    return detail || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.'
+  }
+  if (response && (response.status === 504 || response.status === 524 || response.status === 502)) {
+    return '서버/게이트웨이 오류예요. 새로고침 후 다시 시도해 주세요. (엔진 시작이 끊긴 경우일 수 있어요)'
+  }
+  if (response && !response.ok) return `요청 실패 (HTTP ${response.status})`
+  return '알 수 없는 오류'
+}
+
+async function pollAnimateUntilDone(predictionId, durationSec, speedLabel, onTick) {
+  const maxAttempts = 60 // ~3분 (3초 간격)
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 3000))
+    if (typeof onTick === 'function') onTick(attempt * 3)
+
+    const response = await fetch('/api/animate-status', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ predictionId, durationSec }),
+    })
+    const data = await response.json().catch(() => ({}))
+
+    if (response.status === 401) {
+      clearAllAuth()
+      showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return null
+    }
+    if (!data.ok && data.status === 'failed') {
+      throw new Error(animateErrorMessage(data, response))
+    }
+    if (!data.ok && !data.pending) {
+      throw new Error(animateErrorMessage(data, response))
+    }
+    if (data.ok && data.videoUrl && !data.pending) {
+      return data
+    }
+  }
+  throw new Error('영상 생성이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.')
+}
+
 /**
- * 백엔드 /api/animate 호출.
- * 이미지 원본 URL + 원본 프롬프트(description)를 전달하고,
- * 성공 시 갤러리(localStorage)의 해당 항목에 videoUrl을 매핑한다.
+ * 백엔드 /api/animate 호출 후, 필요 시 /api/animate-status 폴링.
+ * (Cloudflare 30초 한도 — 서버에서 길게 기다리지 않음)
  */
 async function requestAnimate() {
   if (!currentResult.imageUrl) return
@@ -1367,24 +1995,45 @@ async function requestAnimate() {
   const speedHint = VIDEO_MOTION_HINTS[speedKey] || ''
   const motion = [motionBase, speedHint].filter(Boolean).join('. ')
   const speedLabel = speedKey === 'slow' ? '느리게' : speedKey === 'fast' ? '빠르게' : '보통'
+  const undressMotion =
+    /누드|나체|nude|naked|속옷\s*제거|속옷제거|탈의|벗기|옷\s*벗|가운\s*벗|undress|strip/i.test(
+      motionBase,
+    )
+  // 실제로 어떤 모션 문구가 이번 요청에 반영됐는지 눈으로 바로 확인할 수 있게 상태 문구에
+  // 노출한다 — 이전 요청 값이 그대로 남아 쓰이는지 헷갈릴 때 즉시 알아챌 수 있다.
+  const motionPreview = motionBase ? ` (모션: "${motionBase.slice(0, 60)}${motionBase.length > 60 ? '…' : ''}")` : ' (모션 힌트 없음 · 기본 동작)'
   const stopTimer = startProgressTimer(
     setAnimateStatus,
-    `쇼츠 영상(약 ${durationSec}초 · ${speedLabel})을 만들고 있어요… 잠시만 기다려 주세요`,
+    undressMotion
+      ? `탈의·누드 모션으로 쇼츠(약 ${durationSec}초)를 시작해요…${motionPreview} (원본이 옷을 입은 상태면 엔진이 잘 안 벗기는 경우가 있어요)`
+      : `쇼츠 영상(약 ${durationSec}초 · ${speedLabel})을 시작하고 있어요…${motionPreview}`,
   )
 
   try {
+    // 캐시가 없으면 한 번 더 시도 (만료 전이면 성공)
+    if (!currentResult.imageDataUrl && currentResult.imageUrl) {
+      await cacheImageForAnimate(currentResult.imageUrl)
+    }
+
     const response = await fetch('/api/animate', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
         imageUrl: currentResult.imageUrl,
+        imageDataUrl: currentResult.imageDataUrl || undefined,
         prompt: currentResult.prompt,
         motion,
         size: currentResult.size,
         durationSec,
       }),
     })
-    const data = await response.json().catch(() => ({}))
+    const rawText = await response.text()
+    let data = {}
+    try {
+      data = rawText ? JSON.parse(rawText) : {}
+    } catch {
+      data = {}
+    }
 
     stopTimer()
 
@@ -1403,7 +2052,32 @@ async function requestAnimate() {
     }
 
     if (!data.ok) {
-      setAnimateStatus(`영상 생성에 실패했어요: ${data.message || data.error || '알 수 없는 오류'}`, true)
+      setAnimateStatus(`영상 생성에 실패했어요: ${animateErrorMessage(data, response)}`, true)
+      return
+    }
+
+    let finalData = data
+    if (data.pending && data.predictionId) {
+      setAnimateStatus(
+        `영상 렌더링 중(약 ${durationSec}초 · ${speedLabel})… 완료까지 1~2분 걸릴 수 있어요`,
+        false,
+      )
+      finalData = await pollAnimateUntilDone(
+        data.predictionId,
+        data.durationSec || durationSec,
+        speedLabel,
+        (elapsedSec) => {
+          setAnimateStatus(
+            `영상 렌더링 중… ${elapsedSec}초 경과 (약 ${durationSec}초 · ${speedLabel})`,
+            false,
+          )
+        },
+      )
+      if (!finalData) return
+    }
+
+    if (!finalData.videoUrl) {
+      setAnimateStatus('영상 생성에 실패했어요: 결과 주소가 비어 있어요.', true)
       return
     }
 
@@ -1411,17 +2085,20 @@ async function requestAnimate() {
       prompt: currentResult.prompt,
       motion: motionBase,
     })
-    showVideoResult(data.videoUrl, {
+    showVideoResult(finalData.videoUrl, {
       prompt: currentResult.prompt,
       motion: motionBase,
       youtubeDraft: draft,
     })
-    updateGalleryItemVideo(currentResult.itemId, data.videoUrl, draft)
-    const dur = data.durationSec || durationSec
+    updateGalleryItemVideo(currentResult.itemId, finalData.videoUrl, draft)
+    const dur = finalData.durationSec || durationSec
     setAnimateStatus(`쇼츠 영상 제작 완료(약 ${dur}초 · ${speedLabel})!`, false)
   } catch (error) {
     stopTimer()
-    setAnimateStatus(`네트워크 오류: ${error instanceof Error ? error.message : String(error)}`, true)
+    setAnimateStatus(
+      `영상 생성에 실패했어요: ${error instanceof Error ? error.message : String(error)}`,
+      true,
+    )
   } finally {
     stopTimer()
     animateButton.disabled = false
@@ -1481,38 +2158,46 @@ authSubmitButton?.addEventListener('click', async () => {
   const email = (authEmailInput?.value || '').trim()
   const password = authPasswordInput?.value || ''
   if (!email || !password) {
-    pinError.textContent = '이메일과 비밀번호를 입력해 주세요.'
+    pinError.textContent = '아이디와 비밀번호를 입력해 주세요.'
     pinError.hidden = false
     return
   }
 
-  const inviteCode = (authInviteInput?.value || '').trim()
-  if (authMode === 'signup' && !inviteCode) {
-    pinError.textContent = '회원가입에는 초대 코드가 필요해요.'
+  // 안정화 전까지 회원가입 UI·요청 차단
+  if (authMode === 'signup') {
+    pinError.textContent = authErrorMessage('signup_disabled')
+    pinError.hidden = false
+    setAuthTab('login')
+    return
+  }
+
+  if (!isAdminUserEmail(email)) {
+    pinError.textContent = authErrorMessage('solo_admin_only')
     pinError.hidden = false
     return
   }
 
   authSubmitButton.disabled = true
   pinError.hidden = true
-  const endpoint = authMode === 'signup' ? '/api/auth/signup' : '/api/auth/login'
+  const endpoint = '/api/auth/login'
 
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(
-        authMode === 'signup' ? { email, password, inviteCode } : { email, password },
-      ),
+      body: JSON.stringify({ email, password }),
     })
     const data = await response.json().catch(() => ({}))
     if (!response.ok || !data.ok || !data.token) {
-      pinError.textContent = authErrorMessage(data.error)
+      pinError.textContent = authErrorMessage(data.error, data)
       pinError.hidden = false
       return
     }
     clearAllAuth()
-    setSessionToken(data.token, data.user?.email || email)
+    const loginId = data.user?.email || email
+    setSessionToken(data.token, loginId)
+    rememberLoginId(loginId)
+    if (authEmailInput) authEmailInput.value = loginId
     if (authPasswordInput) authPasswordInput.value = ''
     if (authInviteInput) authInviteInput.value = ''
     showApp()
@@ -1526,6 +2211,63 @@ authSubmitButton?.addEventListener('click', async () => {
 
 authPasswordInput?.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') authSubmitButton?.click()
+})
+
+authResetSubmit?.addEventListener('click', async () => {
+  const email = (authEmailInput?.value || getRememberedLoginId() || '').trim() || 'admin'
+  const adminPin = (authResetPin?.value || '').trim()
+  const newPassword = authResetPassword?.value || ''
+  const confirmPassword = authResetConfirm?.value || ''
+
+  if (!adminPin || !newPassword || !confirmPassword) {
+    setAuthResetStatus('ADMIN_PIN과 새 비밀번호를 모두 입력해 주세요.', true)
+    return
+  }
+  if (newPassword !== confirmPassword) {
+    setAuthResetStatus(authErrorMessage('password_confirm_mismatch'), true)
+    return
+  }
+  if (!isAdminUserEmail(email)) {
+    if (authEmailInput) authEmailInput.value = 'admin'
+  }
+
+  authResetSubmit.disabled = true
+  setAuthResetStatus('비밀번호를 다시 만드는 중…', false)
+  try {
+    const response = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: (authEmailInput?.value || 'admin').trim(),
+        newPassword,
+        confirmPassword,
+        adminPin,
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || !data.ok) {
+      setAuthResetStatus(authErrorMessage(data.error, data), true)
+      return
+    }
+    rememberLoginId(data.email || email)
+    if (authEmailInput) authEmailInput.value = data.email || email
+    if (authPasswordInput) authPasswordInput.value = ''
+    if (authResetPin) authResetPin.value = ''
+    if (authResetPassword) authResetPassword.value = ''
+    if (authResetConfirm) authResetConfirm.value = ''
+    setAuthResetStatus(data.message || '비밀번호를 다시 설정했어요. 새 비밀번호로 로그인해 주세요.', false)
+    authPasswordInput?.focus()
+  } catch {
+    setAuthResetStatus('네트워크 오류가 났어요. 잠시 후 다시 시도해 주세요.', true)
+  } finally {
+    authResetSubmit.disabled = false
+  }
+})
+
+;[authResetPin, authResetPassword, authResetConfirm].forEach((input) => {
+  input?.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') authResetSubmit?.click()
+  })
 })
 
 logoutButton.addEventListener('click', async () => {
@@ -1544,11 +2286,84 @@ logoutButton.addEventListener('click', async () => {
   showPinGate()
 })
 
+/** PIN 변경 모달 상태 표시 */
+function setPinSettingsStatus(message, isError) {
+  if (!pinSettingsStatus) return
+  pinSettingsStatus.hidden = !message
+  pinSettingsStatus.textContent = message || ''
+  pinSettingsStatus.style.color = isError ? '' : '#7dcea0'
+}
+
+function openPinSettingsModal() {
+  if (!pinChangeModal) return
+  if (pinSettingsCurrent) pinSettingsCurrent.value = ''
+  if (pinSettingsNew) pinSettingsNew.value = ''
+  if (pinSettingsConfirm) pinSettingsConfirm.value = ''
+  setPinSettingsStatus('', false)
+  pinChangeModal.hidden = false
+  pinSettingsCurrent?.focus()
+}
+
+function closePinSettingsModal() {
+  if (pinChangeModal) pinChangeModal.hidden = true
+}
+
+pinSettingsButton?.addEventListener('click', openPinSettingsModal)
+pinSettingsClose?.addEventListener('click', closePinSettingsModal)
+pinChangeModal?.addEventListener('click', (event) => {
+  if (event.target === pinChangeModal) closePinSettingsModal()
+})
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && pinChangeModal && !pinChangeModal.hidden) closePinSettingsModal()
+})
+
+pinSettingsSubmit?.addEventListener('click', async () => {
+  const currentPin = (pinSettingsCurrent?.value || '').trim()
+  const newPin = (pinSettingsNew?.value || '').trim()
+  const confirmPin = (pinSettingsConfirm?.value || '').trim()
+
+  if (!currentPin || !newPin || !confirmPin) {
+    setPinSettingsStatus('현재 PIN과 새 PIN을 모두 입력해 주세요.', true)
+    return
+  }
+  if (newPin !== confirmPin) {
+    setPinSettingsStatus(authErrorMessage('pin_confirm_mismatch'), true)
+    return
+  }
+  if (newPin === currentPin) {
+    setPinSettingsStatus(authErrorMessage('pin_unchanged'), true)
+    return
+  }
+
+  pinSettingsSubmit.disabled = true
+  setPinSettingsStatus('PIN을 변경하는 중…', false)
+  try {
+    const response = await fetch('/api/auth/change-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPin, newPin, confirmPin }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || !data.ok) {
+      setPinSettingsStatus(authErrorMessage(data.error, data), true)
+      return
+    }
+    setPinSettingsStatus(data.message || 'PIN이 변경됐어요.', false)
+    if (pinSettingsCurrent) pinSettingsCurrent.value = ''
+    if (pinSettingsNew) pinSettingsNew.value = ''
+    if (pinSettingsConfirm) pinSettingsConfirm.value = ''
+  } catch (error) {
+    setPinSettingsStatus(`PIN 변경 실패: ${error instanceof Error ? error.message : String(error)}`, true)
+  } finally {
+    pinSettingsSubmit.disabled = false
+  }
+})
+
 form.addEventListener('submit', async (event) => {
   event.preventDefault()
   const description = composeDescription()
   if (!description) {
-    setFormStatus('설명 또는 가이드(누구/어떤/뭐 하는) 중 하나 이상 입력해 주세요. 또는 「AI 도움 받기」를 눌러 보세요.', true)
+    guideWhoField?.focus()
     return
   }
   // 가이드만 채운 경우 설명칸에도 반영해 이후 수정·갤러리 연속성이 좋게
@@ -1573,6 +2388,7 @@ form.addEventListener('submit', async (event) => {
       mood: moodField.value,
       size: sizeField.value,
       mode: getGenMode(),
+      precision: Boolean(precisionModeField?.checked),
     })
 
     stopTimer()
@@ -1610,6 +2426,15 @@ form.addEventListener('submit', async (event) => {
       return
     }
 
+    if (data.error === 'description_too_long') {
+      setFormStatus(`설명이 너무 길어요. ${data.maxLength || 1200}자 이내로 줄여 주세요.`, true)
+      return
+    }
+    if (data.error === 'description_required') {
+      setFormStatus('설명 또는 가이드(누구/어떤/뭐 하는) 중 하나 이상 입력해 주세요.', true)
+      return
+    }
+
     if (!data.ok) {
       const attemptSummary = Array.isArray(data.attempts)
         ? data.attempts.map((a) => `${a.engine}: ${a.error}`).join(' / ')
@@ -1634,6 +2459,8 @@ form.addEventListener('submit', async (event) => {
       accepted: false,
       mood: moodField.value,
       engine: data.engine,
+      genMode: data.mode,
+      reviseRound: 0,
     })
     const sceneHint =
       data.scene && Array.isArray(data.scene.subjects) && data.scene.subjects.length
@@ -1668,15 +2495,168 @@ form.addEventListener('submit', async (event) => {
   }
 })
 
+// ─── 사진 · 그림 불러오기 (파일 선택 / 붙여넣기) ───────────────────────────
+// 가지고 있는 사진(예: 오래된 가족 사진)을 새로 생성하지 않고 그대로 "수정 대상"으로
+// 불러온다. refine/animate API는 SSRF 방지 화이트리스트 호스트(fal.media 등)만
+// imageUrl로 받으므로, 먼저 /api/upload-image로 업로드해 허용된 URL을 받아온다.
+async function prepareImageDataUrl(file, maxDim = 2200) {
+  const original = await new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => reject(reader.error || new Error('read_failed'))
+    reader.readAsDataURL(file)
+  })
+  const img = await new Promise((resolve, reject) => {
+    const el = new Image()
+    el.onload = () => resolve(el)
+    el.onerror = () => reject(new Error('image_decode_failed'))
+    el.src = original
+  })
+  const longSide = Math.max(img.naturalWidth, img.naturalHeight)
+  const tooHeavy = typeof original === 'string' && original.length > 9_000_000
+  if (!tooHeavy && longSide <= maxDim) return original
+
+  const scale = Math.min(1, maxDim / longSide)
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(img.naturalWidth * scale))
+  canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.9)
+}
+
+async function loadImageFromFile(file) {
+  if (!file || !String(file.type || '').startsWith('image/')) {
+    setFormStatus('이미지 파일만 불러올 수 있어요 (PNG/JPEG/WEBP).', true)
+    return
+  }
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+
+  if (loadImageButton) loadImageButton.disabled = true
+  const stopTimer = startProgressTimer(setFormStatus, '사진을 불러와 업로드하고 있어요…')
+  try {
+    const dataUrl = await prepareImageDataUrl(file)
+    const response = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ dataUrl }),
+    })
+    const data = await response.json().catch(() => ({}))
+    stopTimer()
+
+    if (response.status === 401) {
+      clearAllAuth()
+      showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return
+    }
+    if (response.status === 429) {
+      setFormStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
+      return
+    }
+    if (!data.ok) {
+      const msg =
+        data.error === 'image_too_large'
+          ? '사진 용량이 너무 커요. 더 작은 사진으로 다시 시도해 주세요.'
+          : data.error === 'upload_engine_not_configured'
+            ? '이미지 불러오기 기능이 서버에 아직 설정되지 않았어요 (FAL_KEY 필요).'
+            : `사진을 불러오지 못했어요: ${data.message || data.error || '알 수 없는 오류'}`
+      setFormStatus(msg, true)
+      return
+    }
+
+    showResult(data.imageUrl, '불러온 사진 (수정 대상)', false, {
+      size: sizeField.value,
+      itemId: null,
+      prompt: (descriptionField.value || '').trim(),
+      accepted: false,
+      mood: moodField.value,
+      engine: 'uploaded',
+      genMode: getGenMode(),
+      reviseRound: 0,
+    })
+    setFormStatus(
+      '사진을 불러왔어요! 아래에서 「1차 수정」・영역 지정으로 고치거나 「수용하기」로 갤러리에 저장하세요.',
+      false,
+    )
+  } catch (error) {
+    stopTimer()
+    setFormStatus(`사진을 불러오지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
+  } finally {
+    stopTimer()
+    if (loadImageButton) loadImageButton.disabled = false
+    if (loadImageInput) loadImageInput.value = ''
+  }
+}
+
+loadImageButton?.addEventListener('click', () => loadImageInput?.click())
+loadImageInput?.addEventListener('change', () => {
+  const file = loadImageInput.files?.[0]
+  if (file) loadImageFromFile(file)
+})
+
+// 화보/일러스트 스튜디오 화면에서 Ctrl+V로 사진을 붙여넣으면 바로 불러온다.
+// 클립보드에 이미지가 없으면(텍스트만 있으면) 아무것도 가로채지 않고 원래 붙여넣기 동작을 둔다.
+document.addEventListener('paste', (event) => {
+  const area = getAppArea()
+  if (area !== 'studio' && area !== 'admin') return
+  const items = event.clipboardData?.items
+  if (!items) return
+  for (const item of items) {
+    if (item.kind === 'file' && String(item.type || '').startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) {
+        event.preventDefault()
+        loadImageFromFile(file)
+      }
+      return
+    }
+  }
+})
+
+// fal/replicate 임시 CDN 링크는 시간이 지나면 만료된다. 「수용하기」 시점에 그 이미지를
+// storymag-media R2 버킷으로 복사해 영구 주소로 바꿔둔다 (실패해도 원래 링크로 그대로 동작).
+async function persistImageToPermanentStorage(imageUrl) {
+  try {
+    const response = await fetch('/api/persist-media', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ url: imageUrl }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!data.ok || !data.url) return null
+    return data.url
+  } catch {
+    return null
+  }
+}
+
+function applyPersistedImageUrl(itemId, originalUrl, permanentUrl) {
+  const items = readGallery()
+  const index = items.findIndex((entry) => entry.id === itemId)
+  if (index !== -1 && items[index].imageUrl === originalUrl) {
+    items[index] = { ...items[index], imageUrl: permanentUrl }
+    writeGallery(items)
+    renderGallery()
+  }
+  if (currentResult.itemId === itemId && currentResult.imageUrl === originalUrl) {
+    currentResult.imageUrl = permanentUrl
+    if (resultImage) resultImage.src = permanentUrl
+  }
+}
+
 acceptButton.addEventListener('click', () => {
   if (!currentResult.imageUrl) return
   const itemId = currentResult.itemId || crypto.randomUUID()
   currentResult.itemId = itemId
+  const acceptedImageUrl = currentResult.imageUrl
   const existing = readGallery().some((entry) => entry.id === itemId)
   if (!existing) {
     saveToGallery({
       id: itemId,
-      imageUrl: currentResult.imageUrl,
+      imageUrl: acceptedImageUrl,
       description: currentResult.prompt,
       prompt: currentResult.prompt,
       mood: currentResult.mood,
@@ -1684,6 +2664,8 @@ acceptButton.addEventListener('click', () => {
       engine: currentResult.engine,
       engineLabel: currentResult.engineLabel,
       fallbackUsed: currentResult.fallbackUsed,
+      genMode: currentResult.genMode,
+      reviseRound: currentResult.reviseRound,
       videoUrl: null,
       createdAt: new Date().toISOString(),
     })
@@ -1691,13 +2673,20 @@ acceptButton.addEventListener('click', () => {
     const items = readGallery()
     const index = items.findIndex((entry) => entry.id === itemId)
     if (index !== -1) {
-      items[index] = { ...items[index], imageUrl: currentResult.imageUrl }
+      items[index] = { ...items[index], imageUrl: acceptedImageUrl }
       writeGallery(items)
       renderGallery()
     }
   }
   enterAcceptedMode()
-  setFormStatus('수용했어요. 갤러리에 저장됐고, 쇼츠 영상도 만들 수 있어요.', false)
+  setFormStatus('수용했어요. 갤러리에 저장됐고, 쇼츠 영상도 만들 수 있어요. (이미지를 영구 저장하는 중…)', false)
+
+  // 갤러리 저장/화면 갱신은 즉시 끝내고, R2 영구 저장은 백그라운드로 이어서 진행한다.
+  persistImageToPermanentStorage(acceptedImageUrl).then((permanentUrl) => {
+    if (!permanentUrl) return
+    applyPersistedImageUrl(itemId, acceptedImageUrl, permanentUrl)
+    setFormStatus('수용했어요. 이미지를 영구 저장했어요 — 캐시를 지워도 갤러리에서 계속 볼 수 있어요.', false)
+  })
 })
 
 reviseToggleButton.addEventListener('click', () => {
@@ -1712,11 +2701,6 @@ reviseAgainButton.addEventListener('click', () => {
 
 reviseCancelButton.addEventListener('click', () => {
   closeRevisePanel()
-})
-
-rejectButton.addEventListener('click', () => {
-  if (!window.confirm('현재 결과를 버리고 같은 설명으로 다시 생성할까요?')) return
-  form.requestSubmit()
 })
 
 document.querySelectorAll('input[name="revise-mode"]').forEach((input) => {
@@ -1853,6 +2837,20 @@ reviseApplyButton.addEventListener('click', async () => {
       setReviseStatus('수정할 사각형 영역을 하나 이상 드래그해서 지정해 주세요.', true)
       return
     }
+    // 영역 지정 수정은 "지정한 사각형 밖은 그대로 보존"하는 방식이라, 누드/전신처럼
+    // 마스크 밖 전체에 영향을 주는 요청과 함께 쓰면 그 부분이 반영되지 않는다
+    // (예: "바구니 제거 + 올누드로" 요청 시 바구니만 지워지고 인물은 그대로 옷을 입은
+    // 채 남는 사고가 실측으로 확인됐다). 미리 알려주고 계속할지 확인한다.
+    const wholeBodyPattern = /누드|나체|전라|전신|올누드|풀바디|속옷|란제리|nude|naked|undress/i
+    if (wholeBodyPattern.test(revision)) {
+      const proceed = window.confirm(
+        '영역 지정 수정은 지정한 사각형 밖은 바뀌지 않아요. 누드/전신처럼 몸 전체에 영향을 주는 요청은 "텍스트로 수정"이 더 잘 맞아요.\n\n그래도 지금 지정한 영역만 수정으로 계속할까요? (취소하면 모드를 바꿔서 다시 시도할 수 있어요)',
+      )
+      if (!proceed) {
+        setReviseStatus('영역 지정을 취소했어요. 「텍스트로 수정」으로 바꿔서 다시 시도해 보세요.', false)
+        return
+      }
+    }
   }
 
   if (!isLoggedIn()) {
@@ -1869,8 +2867,10 @@ reviseApplyButton.addEventListener('click', async () => {
       headers: authHeaders(),
       body: JSON.stringify({
         mode,
-        // 자유 일러스트 고정 — 옛 캐시가 fashion을내도 서버에서 장면 재생성으로 처리
-        genMode: 'free',
+        // 지금 켜진 탭(getGenMode)이 아니라 "이 이미지를 실제로 만든 모드"를 써야 한다 —
+        // 생성 후 탭을 옮기고 돌아와 수정하면 getGenMode()가 다른 값을 반환할 수 있어서,
+        // 화보로 만든 동물 그림이 자유 모드 경로로(또는 반대로) 잘못 흘러가는 사고가 있었다.
+        genMode: currentResult.genMode || getGenMode(),
         imageUrl: currentResult.imageUrl,
         baseDescription: currentResult.prompt || (descriptionField?.value || '').trim(),
         revision,
@@ -1952,6 +2952,7 @@ reviseApplyButton.addEventListener('click', async () => {
       accepted: false,
       mood: currentResult.mood,
       engine: data.engine,
+      reviseRound: (currentResult.reviseRound || 0) + 1,
     })
     // 갤러리에 있던 항목이면 수정본 URL을 바로 반영 (재수용 전에도 최신본 유지)
     if (currentResult.itemId) {
@@ -1964,12 +2965,20 @@ reviseApplyButton.addEventListener('click', async () => {
           engine: data.engine,
           engineLabel: data.engineLabel,
           videoUrl: null,
+          reviseRound: currentResult.reviseRound,
         }
         writeGallery(items)
         renderGallery()
       }
+      // 이 수정본도 임시 CDN 링크이므로, 갤러리에 남는 즉시 영구 저장소로 백그라운드 복사한다.
+      const revisedItemId = currentResult.itemId
+      const revisedImageUrl = data.imageUrl
+      persistImageToPermanentStorage(revisedImageUrl).then((permanentUrl) => {
+        if (!permanentUrl) return
+        applyPersistedImageUrl(revisedItemId, revisedImageUrl, permanentUrl)
+      })
     }
-    // 수정 적용 후: 수정 패널 닫고 수정하기 / 다시 생성 / 수용하기 복구
+    // 수정 적용 후: 수정 패널 닫고 수정하기 / 수용하기 복구
     setReviewChrome('idle')
     if (data.structuralRegen || getGenMode() === 'free') {
       setReviseStatus(
@@ -2066,8 +3075,19 @@ function startNewShoot() {
   setReviseStatus('', false)
   setAnimateStatus('', false)
   revisionText.value = ''
+  // 이전 장면에서 쓰던 가이드(주부/술부/형용사/목적어/보어)와 캐릭터 설명을 모두 비운다 —
+  // 안 비우면 "새 장면 시작"을 눌러도 이전 장면 텍스트가 그대로 남아 헷갈리는 문제가 있었다.
+  resetGuideFields()
+  guideDescLocked = false
+  if (descriptionField) descriptionField.value = ''
+  if (scenePreviewEl) scenePreviewEl.hidden = true
+  if (motionField) motionField.value = ''
   currentResult.imageUrl = ''
   currentResult.previousImageUrl = ''
+  comparingPrevious = false
+  compareBadge.hidden = true
+  setActionsLockedForCompare(false)
+  updateCompareButtons()
   currentResult.itemId = null
   currentResult.prompt = ''
   currentResult.videoUrl = null
@@ -2080,19 +3100,36 @@ function startNewShoot() {
 }
 
 function syncGenModeUi() {
+  const area = getAppArea()
+  if (area !== 'studio' && area !== 'admin') return
   const free = getGenMode() === 'free'
-  if (moodField) moodField.disabled = free
+  const admin = isAdminUser()
+  // 무드(조명·필름 질감)는 화보뿐 아니라 자유 일러스트 장면에도 적용된다 — 더 이상
+  // 자유 모드에서 비활성화하지 않는다.
   const subtitle = document.getElementById('app-subtitle')
+  const title = document.getElementById('app-title') || document.querySelector('.app__title')
   if (subtitle) {
-    subtitle.textContent = '자유 일러스트'
+    subtitle.textContent = free ? '자유 일러스트' : ''
+  }
+  if (title) {
+    title.textContent = free || !admin ? '자유 일러스트 스튜디오' : '화보 스튜디오'
   }
   if (genModeHint) {
-    genModeHint.textContent = ''
-    genModeHint.hidden = true
+    if (admin && !free) {
+      genModeHint.textContent = ''
+      genModeHint.hidden = true
+    } else if (admin) {
+      genModeHint.hidden = false
+      genModeHint.textContent = '장면을 자유 서술로 그립니다. 화보가 필요하면 상단 「관리자 페이지」 탭으로 이동하세요.'
+    } else {
+      genModeHint.textContent = ''
+      genModeHint.hidden = true
+    }
   }
   if (descriptionField) {
-    descriptionField.placeholder =
-      '예: 백설공주가 사과를 들고 고민하고 있다 — 간략한 캐릭터 정보를 적어 주세요'
+    descriptionField.placeholder = free
+      ? '예: 여우가 느티나무 아래에 서있다 — 간략한 캐릭터 정보를 적어 주세요'
+      : '예: 짧은 실크 슬립 드레스, 도시 야경, 자신감 있는 전신 포즈'
   }
   // 자유 모드 기본은 가로(장면), 관리자전용은 세로(전신)
   if (sizeField && !sizeField.dataset.userPicked) {
@@ -2105,10 +3142,19 @@ sizeField?.addEventListener('change', () => {
 document.querySelectorAll('input[name="gen-mode"]').forEach((input) => {
   input.addEventListener('change', syncGenModeUi)
 })
+document.querySelectorAll('[data-app-area]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    setAppArea(btn.getAttribute('data-app-area') || 'studio')
+  })
+})
+// bootAuth → showApp 에서 syncAppAreaUi 호출.
 syncGenModeUi()
 
 newShootHeaderButton.addEventListener('click', startNewShoot)
+document.getElementById('app-home-button')?.addEventListener('click', () => setAppArea('studio'))
+document.getElementById('app-home-link')?.addEventListener('click', () => setAppArea('studio'))
 newShootGalleryButton.addEventListener('click', startNewShoot)
+newShootAdminGalleryButton?.addEventListener('click', startNewShoot)
 
 bgmUploadInput?.addEventListener('change', () => {
   const file = bgmUploadInput.files?.[0] || null
@@ -2198,9 +3244,153 @@ bgmResetButton?.addEventListener('click', () => {
 })
 
 clearGalleryButton.addEventListener('click', () => {
-  if (!window.confirm('저장된 모든 이미지를 삭제할까요?')) return
-  writeGallery([])
+  if (!window.confirm('내 갤러리(자유 일러스트)에 저장된 모든 이미지를 삭제할까요? 관리자 전용 갤러리는 남아있어요.')) return
+  writeGallery(readGallery().filter((item) => item.genMode === 'fashion'))
   renderGallery()
+})
+
+clearAdminGalleryButton?.addEventListener('click', () => {
+  if (!window.confirm('관리자 전용 갤러리에 저장된 모든 이미지를 삭제할까요? 내 갤러리는 남아있어요.')) return
+  writeGallery(readGallery().filter((item) => item.genMode !== 'fashion'))
+  renderGallery()
+})
+
+// ─── 갤러리 백업 (내보내기 / 가져오기) ─────────────────────────────────────
+// 갤러리는 이 브라우저의 localStorage에만 있어서, 캐시를 지우거나 기기를 바꾸면
+// 통째로 사라진다. JSON으로 내보내/가져올 수 있게 해서 최소한의 안전장치를 둔다.
+// (내 갤러리·관리자 갤러리 항목을 모두 포함한 전체 백업)
+const GALLERY_BACKUP_VERSION = 1
+
+function exportGalleryBackup() {
+  const items = readGallery()
+  if (!items.length) {
+    setFormStatus('내보낼 갤러리 항목이 없어요.', true)
+    return
+  }
+  const payload = {
+    app: 'storymag-gallery-backup',
+    version: GALLERY_BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    items,
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+  a.href = url
+  a.download = `storymag-gallery-backup-${stamp}.json`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 2000)
+  setFormStatus(`갤러리 ${items.length}개 항목을 JSON 파일로 내보냈어요.`, false)
+}
+
+function importGalleryBackupFromFile(file) {
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result || ''))
+      const incoming = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.items) ? parsed.items : null
+      if (!incoming) throw new Error('올바른 백업 파일 형식이 아니에요')
+
+      const existing = readGallery()
+      const merged = existing.slice()
+      let added = 0
+      let updated = 0
+      incoming.forEach((item) => {
+        if (!item || !item.id || !item.imageUrl) return
+        const idx = merged.findIndex((entry) => entry.id === item.id)
+        if (idx === -1) {
+          merged.push(item)
+          added += 1
+        } else {
+          merged[idx] = { ...merged[idx], ...item }
+          updated += 1
+        }
+      })
+      writeGallery(merged)
+      renderGallery()
+      setFormStatus(`가져오기 완료: 새 항목 ${added}개, 기존 항목 갱신 ${updated}개.`, false)
+    } catch (error) {
+      setFormStatus(
+        `가져오기 실패: 올바른 백업 파일이 아니에요. (${error instanceof Error ? error.message : String(error)})`,
+        true,
+      )
+    }
+  }
+  reader.onerror = () => setFormStatus('파일을 읽지 못했어요.', true)
+  reader.readAsText(file)
+}
+
+document.getElementById('gallery-export')?.addEventListener('click', exportGalleryBackup)
+document.getElementById('gallery-export-admin')?.addEventListener('click', exportGalleryBackup)
+
+const galleryImportInput = document.getElementById('gallery-import-input')
+document.getElementById('gallery-import')?.addEventListener('click', () => galleryImportInput?.click())
+document.getElementById('gallery-import-admin')?.addEventListener('click', () => galleryImportInput?.click())
+galleryImportInput?.addEventListener('change', () => {
+  const file = galleryImportInput.files?.[0]
+  if (file) importGalleryBackupFromFile(file)
+  galleryImportInput.value = ''
+})
+
+/** R2 영구 저장 기능이 생기기 전에 이미 갤러리에 있던 항목은 여전히 fal/replicate
+ *  임시 링크를 그대로 들고 있다. 그 항목들만 찾아 지금 R2로 옮긴다(이미 영구 저장된
+ *  항목은 건드리지 않음). 각 요청 사이에 살짝 간격을 둬서 레이트리밋에 걸리지 않게 한다. */
+function isPermanentMediaUrl(url) {
+  return typeof url === 'string' && /\br2\.dev\//.test(url)
+}
+
+let galleryMigrateRunning = false
+
+async function migrateGalleryToPermanentStorage(triggerButtons) {
+  if (galleryMigrateRunning) return
+  const targets = readGallery().filter((item) => item.imageUrl && !isPermanentMediaUrl(item.imageUrl))
+  if (!targets.length) {
+    setFormStatus('이미 모든 갤러리 이미지가 영구 저장돼 있어요.', false)
+    return
+  }
+
+  galleryMigrateRunning = true
+  triggerButtons.forEach((btn) => btn && (btn.disabled = true))
+  let done = 0
+  let failed = 0
+  try {
+    for (const target of targets) {
+      setFormStatus(`옛 이미지를 영구 저장소로 옮기는 중… (${done + failed + 1}/${targets.length})`, false)
+      const permanentUrl = await persistImageToPermanentStorage(target.imageUrl)
+      if (permanentUrl) {
+        applyPersistedImageUrl(target.id, target.imageUrl, permanentUrl)
+        done += 1
+      } else {
+        failed += 1
+      }
+      // 연속 호출 사이 짧은 간격 — 레이트리밋(60회/시간) 여유
+      await new Promise((resolve) => window.setTimeout(resolve, 300))
+    }
+  } finally {
+    galleryMigrateRunning = false
+    triggerButtons.forEach((btn) => btn && (btn.disabled = false))
+  }
+
+  if (failed > 0) {
+    setFormStatus(
+      `영구 저장 완료: ${done}개 성공, ${failed}개 실패(이미 만료된 링크일 수 있어요 — 이미지를 다시 생성해 주세요).`,
+      failed === targets.length,
+    )
+  } else {
+    setFormStatus(`영구 저장 완료: ${done}개 이미지를 옮겼어요.`, false)
+  }
+}
+
+const galleryMigrateButtons = [
+  document.getElementById('gallery-migrate'),
+  document.getElementById('gallery-migrate-admin'),
+]
+galleryMigrateButtons.forEach((btn) => {
+  btn?.addEventListener('click', () => migrateGalleryToPermanentStorage(galleryMigrateButtons))
 })
 
 async function bootAuth() {
@@ -2217,10 +3407,19 @@ async function bootAuth() {
       const data = await response.json().catch(() => ({}))
       if (response.ok && data.ok) {
         if (data.user?.email) localStorage.setItem(USER_STORAGE_KEY, data.user.email)
+        if (!isAdminUser()) {
+          clearAllAuth()
+          showPinGate(authErrorMessage('solo_admin_only'))
+          return
+        }
         showApp()
         return
       }
       clearSessionToken()
+      if (data.error === 'solo_admin_only') {
+        showPinGate(authErrorMessage('solo_admin_only'))
+        return
+      }
     } catch {
       /* 세션 검증 실패 — 로그인 화면 */
     }

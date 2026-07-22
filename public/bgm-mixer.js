@@ -1,20 +1,13 @@
 /**
  * 쇼츠 영상에 사용자 음원(Suno 등)을 입히는 클라이언트 믹서.
- * - 슬롯 4개: IndexedDB에 로컬 저장 (브라우저에만 보관)
+ * - 태그(슬롯): 이름을 자유롭게 붙여 원하는 만큼 만들 수 있음. IndexedDB에 로컬 저장 (브라우저에만 보관)
  * - 합성: 영상을 blob으로 받은 뒤 canvas + MediaRecorder로 BGM 합성
  */
 
 const BGM_DB_NAME = 'storymag-bgm'
 const BGM_DB_VERSION = 1
 const BGM_STORE = 'slots'
-
-/** @type {Array<{ id: string, label: string }>} */
-const BGM_SLOT_DEFS = [
-  { id: 'editorial', label: '에디토리얼' },
-  { id: 'glamour', label: '글래머' },
-  { id: 'chic', label: '시크' },
-  { id: 'romantic', label: '로맨틱' },
-]
+const BGM_MAX_LABEL_LENGTH = 24
 
 function openBgmDb() {
   return new Promise((resolve, reject) => {
@@ -30,26 +23,41 @@ function openBgmDb() {
   })
 }
 
+function normalizeBgmLabel(label) {
+  const trimmed = String(label || '').trim().slice(0, BGM_MAX_LABEL_LENGTH)
+  if (!trimmed) throw new Error('empty_label')
+  return trimmed
+}
+
+function generateBgmSlotId() {
+  const rand = Math.random().toString(36).slice(2, 8)
+  return `tag-${Date.now()}-${rand}`
+}
+
+/**
+ * 저장된 태그(슬롯)를 만든 순서대로 나열한다.
+ * (기존 고정 4개 슬롯 시절 데이터가 남아 있으면 그대로 태그로 표시되어 음원이 보존된다.)
+ */
 async function listBgmSlots() {
   const db = await openBgmDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(BGM_STORE, 'readonly')
-    const store = tx.objectStore(BGM_STORE)
-    const req = store.getAll()
+    const req = tx.objectStore(BGM_STORE).getAll()
     req.onsuccess = () => {
-      const saved = new Map((req.result || []).map((row) => [row.id, row]))
+      const rows = (req.result || []).slice().sort((a, b) => {
+        const orderA = typeof a.order === 'number' ? a.order : 0
+        const orderB = typeof b.order === 'number' ? b.order : 0
+        return orderA - orderB
+      })
       resolve(
-        BGM_SLOT_DEFS.map((def) => {
-          const row = saved.get(def.id)
-          return {
-            id: def.id,
-            label: def.label,
-            fileName: row?.fileName || '',
-            hasAudio: Boolean(row?.blob),
-            mime: row?.mime || '',
-            updatedAt: row?.updatedAt || null,
-          }
-        }),
+        rows.map((row) => ({
+          id: row.id,
+          label: row.label || '이름 없음',
+          fileName: row.fileName || '',
+          hasAudio: Boolean(row.blob),
+          mime: row.mime || '',
+          updatedAt: row.updatedAt || null,
+        })),
       )
     }
     req.onerror = () => reject(req.error || new Error('bgm_list_failed'))
@@ -66,35 +74,90 @@ async function getBgmSlotBlob(slotId) {
   })
 }
 
-async function saveBgmSlot(slotId, file) {
+/** 새 태그를 만들고 음원을 저장한다. 성공하면 새 태그의 id를 반환. */
+async function addBgmSlot(label, file) {
   if (!file || !file.size) throw new Error('empty_audio_file')
   if (file.size > 20 * 1024 * 1024) throw new Error('audio_too_large')
-  const def = BGM_SLOT_DEFS.find((item) => item.id === slotId)
-  if (!def) throw new Error('unknown_slot')
+  const cleanLabel = normalizeBgmLabel(label)
+
+  const db = await openBgmDb()
+  const id = generateBgmSlotId()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(BGM_STORE, 'readwrite')
+    tx.objectStore(BGM_STORE).put({
+      id,
+      label: cleanLabel,
+      fileName: file.name || `${cleanLabel}.audio`,
+      mime: file.type || 'audio/mpeg',
+      blob: file,
+      order: Date.now(),
+      updatedAt: new Date().toISOString(),
+    })
+    tx.oncomplete = () => resolve(id)
+    tx.onerror = () => reject(tx.error || new Error('bgm_save_failed'))
+  })
+}
+
+/** 기존 태그의 음원 파일만 교체한다 (이름·순서는 유지). */
+async function replaceBgmSlotAudio(slotId, file) {
+  if (!file || !file.size) throw new Error('empty_audio_file')
+  if (file.size > 20 * 1024 * 1024) throw new Error('audio_too_large')
 
   const db = await openBgmDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(BGM_STORE, 'readwrite')
-    tx.objectStore(BGM_STORE).put({
-      id: slotId,
-      label: def.label,
-      fileName: file.name || `${slotId}.audio`,
-      mime: file.type || 'audio/mpeg',
-      blob: file,
-      updatedAt: new Date().toISOString(),
-    })
+    const store = tx.objectStore(BGM_STORE)
+    const getReq = store.get(slotId)
+    getReq.onsuccess = () => {
+      const existing = getReq.result
+      if (!existing) {
+        reject(new Error('unknown_slot'))
+        return
+      }
+      store.put({
+        ...existing,
+        fileName: file.name || existing.fileName,
+        mime: file.type || 'audio/mpeg',
+        blob: file,
+        updatedAt: new Date().toISOString(),
+      })
+    }
+    getReq.onerror = () => reject(getReq.error || new Error('bgm_get_failed'))
     tx.oncomplete = () => resolve(true)
     tx.onerror = () => reject(tx.error || new Error('bgm_save_failed'))
   })
 }
 
-async function clearBgmSlot(slotId) {
+/** 태그 이름만 바꾼다. */
+async function renameBgmSlot(slotId, newLabel) {
+  const cleanLabel = normalizeBgmLabel(newLabel)
+  const db = await openBgmDb()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(BGM_STORE, 'readwrite')
+    const store = tx.objectStore(BGM_STORE)
+    const getReq = store.get(slotId)
+    getReq.onsuccess = () => {
+      const existing = getReq.result
+      if (!existing) {
+        reject(new Error('unknown_slot'))
+        return
+      }
+      store.put({ ...existing, label: cleanLabel })
+    }
+    getReq.onerror = () => reject(getReq.error || new Error('bgm_get_failed'))
+    tx.oncomplete = () => resolve(true)
+    tx.onerror = () => reject(tx.error || new Error('bgm_rename_failed'))
+  })
+}
+
+/** 태그를 음원과 함께 완전히 삭제한다. */
+async function deleteBgmSlot(slotId) {
   const db = await openBgmDb()
   return new Promise((resolve, reject) => {
     const tx = db.transaction(BGM_STORE, 'readwrite')
     tx.objectStore(BGM_STORE).delete(slotId)
     tx.oncomplete = () => resolve(true)
-    tx.onerror = () => reject(tx.error || new Error('bgm_clear_failed'))
+    tx.onerror = () => reject(tx.error || new Error('bgm_delete_failed'))
   })
 }
 
