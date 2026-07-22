@@ -425,52 +425,71 @@ function amplifyClothingAndScene(description: string): string {
     // 실측으로 확인됐다. 재질(실크/슬립)을 실제로 언급했을 때만 재질을 강제한다.
     const wantsSilkOrSlip = /실크|슬립|slip|silk/i.test(description)
     const wantsDressGarment = /드레스|dress/i.test(description)
+    // 아래 태그들은 "NOT 업무복/가운" 같은 부정 문구를 길게 반복해 왔는데, 그 내용은 이미
+    // DEFAULT_NEGATIVE_PROMPT(business suit/blazer/bathrobe 등)에 포함돼 있다 — positive
+    // 프롬프트 쪽 예산이 다중 키워드 상황에서 특히 귀해서, 중복되는 부정 문구를 걷어내고
+    // 옷 종류/재질만 짧게 못박는다.
     if (wantsSilkOrSlip) {
-      extras.push('wearing a silk slip dress, glossy silk fabric clearly visible, NOT a business suit, NOT a blazer')
+      extras.push('wearing a glossy silk slip dress')
     } else if (wantsDressGarment) {
-      extras.push('wearing a dress, NOT a business suit, NOT a blazer')
+      extras.push('wearing a dress')
     }
   }
-  if (!nude && /란제리|레이스\s*브래지|lingerie|lace\s*bra|thong|탠가/i.test(description)) {
-    extras.push(
-      'wearing a delicate sand/beige lace lingerie set (wired lace bra and matching lace panties), sheer lace texture clearly visible, NOT a dress, NOT a blazer, NOT a sweater, NOT office wear',
-    )
+  const isLaceLingerie = !nude && /란제리|레이스\s*브래지|lingerie|lace\s*bra|thong|탠가/i.test(description)
+  if (isLaceLingerie) {
+    extras.push('wearing a lace lingerie set (bra and panties), sheer lace fabric visible')
+  } else if (wantsUnderwearLook(description)) {
+    // wantsUnderwearLook은 "란제리/lingerie"도 함께 매칭하는 더 넓은 판정이라, 위 레이스
+    // 태그와 동시에 걸리면 같은 내용을 두 번 말하며 예산을 낭비했다 — 더 구체적인 레이스
+    // 태그가 이미 걸렸으면 이 일반형 속옷 태그는 건너뛴다(제거·누드 요청 제외는 함수 내부에서 처리됨).
+    extras.push('wearing only underwear (bra and panties), skin and undergarments visible, NOT a bathrobe')
   }
-  // 속옷차림 — 가운/랩로브/셔츠로 치환되는 실패가 많음 (제거·누드 요청 제외)
-  if (wantsUnderwearLook(description)) {
-    extras.push(
-      'wearing only underwear / undergarments (bra and panties or equivalent lingerie), skin and undergarments clearly visible, NOT a bathrobe, NOT a kimono wrap robe, NOT a coat, NOT a white collared shirt',
-    )
-  }
+  // 아래부터는 "장면을 정의하는" 구조적 요소(거울/배경/도시/야경)를 먼저 배치한다 —
+  // capWordsSimple이 예산 초과 시 뒤쪽부터 자르므로, 상대적으로 덜 치명적인 자세/표정
+  // 같은 장식적 디테일(오블리크 앵글, 감상하는 시선, 자신감 포즈)은 이 함수 맨 뒤로
+  // 옮겨서 다중 키워드가 겹치는 밀도 높은 요청에서도 배경 요소가 먼저 살아남게 한다.
   if (/거울|mirror/i.test(description)) {
-    extras.push(
-      'posed in front of a mirror, mirror or vanity glass readable in the scene, NOT a plain empty studio without a mirror',
-    )
+    extras.push('posed in front of a mirror, mirror visible in frame')
   }
-  if (/비스듬|oblique|diagonal/i.test(description)) {
-    extras.push('standing at an oblique / three-quarter angle')
-  }
-  if (/몸매|감상|admiring/i.test(description)) {
-    extras.push('admiring her own figure, looking toward her body or mirror reflection')
+  const wantsCityOrNightHere = /도시|시티|어반|거리|야경|urban|city|street/i.test(description)
+  const wantsNightHere = /야경|밤\s*풍경|저녁\s*풍경|night\s*view|night\s*skyline|nighttime/i.test(description)
+  // "야경"(밤의 도시 풍경)은 그냥 "도시/거리" 태그만으로는 낮인지 밤인지 애매해서, 실측으로
+  // 밝은 낮 시간 창문으로 나오는 경우가 반복 확인됐다("street lights"만 있으면 낮에도
+  // 가로등이 있을 수 있다고 해석되는 듯함). 야경 요청이면 도시+야간을 한 태그로 합쳐서
+  // (둘 다 걸릴 때 따로따로 두 번 "도시" 얘기를 반복해 예산을 낭비하지 않게) 시간대까지
+  // 한 번에 못박는다. 거울과 마찬가지로 "장면을 정의하는" 핵심 요소라서 흰 배경 디테일
+  // (덜 중요)보다 앞에 배치해 예산이 부족할 때 먼저 살아남게 한다.
+  if (wantsNightHere) {
+    extras.push('nighttime city view through the window, dark sky with glowing city lights')
+  } else if (wantsCityOrNightHere) {
+    extras.push('city background with buildings visible through the window, NOT a plain grey studio wall')
   }
   if (/흰\s*배경|흰색\s*배경|백색\s*배경|white\s*background|클린\s*화이트/i.test(description)) {
+    // "흰 배경 + 창밖 야경"처럼 실내는 화이트인데 창 너머는 어두운 밤인 조합을 요청했을 때,
+    // 아래 "NOT dark backdrop"이 뒤에서 추가되는 야경 태그("dark night sky")와 정반대로
+    // 충돌해서 서로를 지워버리는 사고가 있었다 — 야경/도시가 함께 요청되면 그 문구만 뺀다.
     extras.push(
-      'pure bright white seamless studio background, evenly lit white backdrop, NOT grey, NOT beige, NOT tan, NOT off-white, NOT dark backdrop',
+      wantsCityOrNightHere
+        ? 'white interior walls, NOT grey or beige'
+        : 'pure bright white seamless studio background, NOT grey, NOT beige, NOT dark backdrop',
     )
   }
   if (/귀[^.]{0,30}(가려|보이지\s*않|안\s*보임|관찰되지\s*않|없다|없음)/.test(description)) {
-    extras.push('asymmetric single earring, exactly one ear shows an earring, the other ear bare or hidden by hair, earrings NOT matching on both sides')
+    extras.push('asymmetric single earring, only one ear shows an earring')
   }
   if (/시스루\s*뱅|앞머리|see-?through\s*bang/i.test(description)) {
-    extras.push('delicate see-through bangs (sheer wispy bangs) across the forehead')
+    extras.push('delicate see-through bangs across the forehead')
   }
-  if (/도시|시티|어반|거리|야경|urban|city|street/i.test(description)) {
-    extras.push(
-      'modern urban city background with buildings or street lights, NOT a plain solid grey studio wall',
-    )
+  // 자세/표정 계열 장식적 디테일 — 예산이 부족하면 이 아래부터 먼저 잘려도 배경/의상 같은
+  // 핵심 장면 요소보다 실손실이 적다.
+  if (/비스듬|oblique|diagonal/i.test(description)) {
+    extras.push('oblique / three-quarter angle stance')
+  }
+  if (/몸매|감상|admiring/i.test(description)) {
+    extras.push('admiring her own figure in the mirror')
   }
   if (/자신감|포즈|confident|pose/i.test(description)) {
-    extras.push('confident fashion pose, body language readable in frame')
+    extras.push('confident fashion pose')
   }
   // 예전엔 "밝|투명|clear|bright" 아무 데서나 매칭했다 — "머리색을 밝은 갈색으로"나 "change
   // hair color to bright red"처럼 머리색·의상 색 묘사에 쓴 "밝은"/"bright"에도 걸려서, 얼굴/
@@ -757,6 +776,23 @@ const SDXL_MIN_DESCRIPTION_WORDS = 20
 const SDXL_MAX_DESCRIPTION_WORDS = 60
 
 /**
+ * description 예약분(SDXL_MIN_DESCRIPTION_WORDS)을 항상 고정으로 지키면, amplify가
+ * 정말 많이 필요한 경우(예: 거울+란제리+흰배경+도시+야경처럼 키워드 5~6개가 한 문장에
+ * 겹치는 실측 사례) amplify가 8단어 안팎으로 짜부라져서 장면을 정의하는 핵심 요소(배경·
+ * 거울·야경)가 통째로 잘려나가는 문제가 확인됐다. 이런 경우는 대개 description 원문
+ * 자체가 amplify가 다시 설명해주는 내용과 크게 중복되므로(예: "거울 앞에서...도시의
+ * 야경" 문장이 그대로 mirror/city/night amplify로 매칭됨), description 예약분을
+ * 양보해도 실손실이 적다 — amplify가 실제로 필요로 하는 양(자르기 전 원본 길이)에 맞춰
+ * description 예약분을 단계적으로 줄인다.
+ */
+function resolveMinDescriptionWords(rawAmplifyWords: number): number {
+  if (rawAmplifyWords > 60) return 8
+  if (rawAmplifyWords > 40) return 12
+  if (rawAmplifyWords > 25) return 16
+  return SDXL_MIN_DESCRIPTION_WORDS
+}
+
+/**
  * buildFashionMagazinePrompt가 압축된 description 뒤에 붙이는 고정/조건부 태그들을 계산한다.
  * amplify(의상/장면 보강)도 압축 전 원문(rawDescription) 기준으로 판별한다 — 압축된 영어
  * 태그만 보면 "실크", "거울", "비스듬" 같은 한글 키워드가 압축 과정에서 잘려나가 매칭이
@@ -790,7 +826,8 @@ function buildFashionPromptSuffixParts(input: {
 
   const fixedWords =
     countWords(ethnicityTag) + countWords(nudeFlag) + countWords(moodTag) + countWords(framing) + countWords(qualitySuffix)
-  const amplifyBudget = Math.max(0, SDXL_WORKING_BUDGET_WORDS - fixedWords - SDXL_MIN_DESCRIPTION_WORDS)
+  const minDescriptionWords = resolveMinDescriptionWords(countWords(rawAmplify))
+  const amplifyBudget = Math.max(0, SDXL_WORKING_BUDGET_WORDS - fixedWords - minDescriptionWords)
   const amplify = capWordsSimple(rawAmplify, amplifyBudget)
 
   return { ethnicityTag, amplify, nudeFlag, moodTag, framing, qualitySuffix }
@@ -813,7 +850,13 @@ export function resolveFashionDescriptionWordBudget(input: {
 }): number {
   const suffixWords = estimateFashionSuffixWords(input)
   const available = SDXL_WORKING_BUDGET_WORDS - suffixWords
-  return Math.max(SDXL_MIN_DESCRIPTION_WORDS, Math.min(SDXL_MAX_DESCRIPTION_WORDS, available))
+  // buildFashionPromptSuffixParts와 같은 기준(원본 amplify 길이에 따른 적응형 하한)을 써야
+  // 한다 — 여기서 옛 고정값(SDXL_MIN_DESCRIPTION_WORDS)으로 다시 올려버리면, amplify가
+  // 실제로 더 받아간 몫만큼 총합이 다시 예산을 넘어서는 불일치가 생긴다.
+  const ethnicitySource = polishKoreanPromptText(input.rawDescription)
+  const rawAmplifyWords = countWords(amplifyClothingAndScene(ethnicitySource))
+  const minDescriptionWords = resolveMinDescriptionWords(rawAmplifyWords)
+  return Math.max(minDescriptionWords, Math.min(SDXL_MAX_DESCRIPTION_WORDS, available))
 }
 
 /** buildFashionPromptSuffixParts가 계산하는 고정/조건부 태그들의 단어 수 총합. */
