@@ -106,18 +106,29 @@ export function evaluateTaleScenePolicy(promptText: string): ContentPolicyVerdic
 // 선택적으로 허용하는 조각을 명사+동사 패턴 사이에 넣어 고친다.
 const KO_PARTICLE_GAP = '(?:을|를|이|가|은|는|도)?\\s*'
 
-/** 누드·탈의·속옷제거 의도 (성인 허용 — 순화하지 않음) */
+// 탈의 요청에 등장하는 의류 명사 전체 목록. "가운/로브/옷"만 있던 예전엔 "브래지어를
+// 벗겨줘", "치마를 제거해줘"처럼 세부 품목을 지칭하면 놓치는 사고가 있었다 — 사용자가
+// 실제로 쓸 만한 상의/하의/속옷 명칭을 폭넓게 담아둔다. "브라(?!운)"은 "브라운"(색상)
+// 오발동 방지(기존 wantsUnderwearLook과 동일 이유).
+const KO_CLOTHING_NOUN =
+  '옷|가운|로브|속옷|언더웨어|상의|하의|티셔츠|셔츠|니트|블라우스|브래지어|브라(?!운)|바지|팬츠|팬티|치마|스커트|드레스|원피스|자켓|재킷|코트|조끼|탑'
+
+// "벗다"뿐 아니라 "제거/없애/지우다"도 실제로 쓰이는 탈의 표현이다. 동사 어간만 매칭해서
+// 활용형(제거하다/제거해줘/제거하라, 없애다/없애줘/없애라, 지우다/지워줘/지워라, 벗다/
+// 벗어/벗겨/벗기/벗김/벗을/벗었 등)을 활용형 하나하나 나열하지 않고 전부 커버한다.
+const KO_REMOVE_VERB_STEM = '(?:제거|없애|지워|지우|벗)'
+
+// 의류 명사 + (조사) + 제거 동사 어간 — "명사마다 동사마다" 조합을 일일이 나열하는 대신
+// 하나의 조합 패턴으로 일반화한다(예: 상의를 벗겨줘 / 치마 제거해줘 / 팬티 없애줘 모두 매칭).
+const KO_UNDRESS_NOUN_VERB_PATTERN = `(?:${KO_CLOTHING_NOUN})${KO_PARTICLE_GAP}${KO_REMOVE_VERB_STEM}`
+
+/** 누드·탈의·의류제거 의도 (성인 허용 — 순화하지 않음) */
 export function wantsNudeOrUndress(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
   const pattern = new RegExp(
     [
-      '누드', '나체', 'nude', 'naked',
-      `속옷${KO_PARTICLE_GAP}제거`, '속옷제거', `속옷${KO_PARTICLE_GAP}벗`,
-      '탈의', `옷${KO_PARTICLE_GAP}벗`, `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`,
-      `언더웨어${KO_PARTICLE_GAP}제거`,
-      // "제거"는 예전엔 속옷/언더웨어에만 반응했다 — "가운을 제거해줘"처럼 겉옷(가운·로브·옷)에
-      // "제거"를 쓰는 것도 실제로는 "벗다"와 같은 탈의 요청인데 놓치고 있었다.
-      `가운${KO_PARTICLE_GAP}제거`, `로브${KO_PARTICLE_GAP}제거`, `옷${KO_PARTICLE_GAP}제거`,
+      '누드', '나체', 'nude', 'naked', '탈의',
+      KO_UNDRESS_NOUN_VERB_PATTERN,
       // "strip(?:ping|ped)?"에 단어 경계(\b)가 없어서 "striped"(줄무늬 패턴 — 탈의와 무관한
       // 흔한 의상 묘사 단어)의 앞부분 "strip"만 부분일치로 걸려 오발동하는 사고가 실측으로
       // 확인됐다("striped dress" 같은 영어 압축 프롬프트가 이전 라운드 baseDescription으로
@@ -148,11 +159,13 @@ export function wantsUndressAction(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
   const pattern = new RegExp(
     [
-      // "벗겨"(사동형: 벗겨줘/벗겨주세요/벗겨봐)는 벗다의 흔한 캐주얼 요청 표현인데,
-      // 기존 목록(벗는/벗어/벗기/벗김/벗을/벗었)엔 없어서 빠지고 있었다.
+      // "벗겨"(사동형: 벗겨줘/벗겨주세요/벗겨봐)는 벗다의 흔한 캐주얼 요청 표현이다.
+      // 모션 힌트 문구는 앞서 나온 베이스 설명에서 이미 의류가 특정돼 있어 "천천히 벗어"처럼
+      // 명사 없이 동사만 오는 경우가 많다 — 그래서 "벗다" 활용형은 명사 없이도 단독으로
+      // 인식하고(아래 4번째 줄), "제거/없애/지우다"처럼 더 범용적인 동사만 명사와 묶어서
+      // 요구한다(KO_UNDRESS_NOUN_VERB_PATTERN — "제거" 혼자면 의류 제거인지 알 수 없음).
       '탈의', '벗는', '벗어', '벗기', '벗겨', '벗김', '벗을', '벗었',
-      `속옷${KO_PARTICLE_GAP}제거`, '속옷제거', `언더웨어${KO_PARTICLE_GAP}제거`,
-      `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`, `옷${KO_PARTICLE_GAP}벗`,
+      KO_UNDRESS_NOUN_VERB_PATTERN,
       // wantsNudeOrUndress와 동일한 이유로 \b 필요("striped" 오발동 방지).
       'undress', 'disrobe', '\\bstrip(?:ping|ped)?\\b', 'take\\s*off',
       'removes?\\s*(?:her\\s*)?(?:clothes|clothing|underwear|lingerie|robe|dress)',
@@ -390,12 +403,12 @@ export function isStructuralRefineRevision(revision: string): boolean {
       '전신', '풀\\s*바디', '풀바디', 'full\\s*body', '머리부터', '발끝까지',
       '속옷', '란제리', 'underwear', 'lingerie', '브래지', '팬티', '거울', '차림으로',
       '누드', '나체', 'nude', '다시\\s*그려', '재생성',
-      // 가운/로브/옷을 "벗다·제거"해 달라는 요청(탈의)은 실제로는 전신 의상이 통째로 바뀌는
-      // 만큼 큰 수정이다 — 이 목록에 없어서 낮은 strength(0.28)로만 처리되다가 반영이 거의
-      // 안 되는 문제가 있었다. wantsNudeOrUndress와 동일한 탈의 패턴을 여기서도 인식해서
-      // (nudeRevision과 함께) 얼굴 보존 고강도 경로(strength 0.6·정밀모드)로 승격시킨다.
-      '탈의', `옷${KO_PARTICLE_GAP}벗`, `가운${KO_PARTICLE_GAP}벗`, `로브${KO_PARTICLE_GAP}벗`,
-      `가운${KO_PARTICLE_GAP}제거`, `로브${KO_PARTICLE_GAP}제거`, `옷${KO_PARTICLE_GAP}제거`,
+      // 상의·바지·치마 등 특정 의류를 "벗다·제거·없애다"해 달라는 요청(탈의)은 실제로는
+      // 의상이 통째로 바뀌는 만큼 큰 수정이다 — 이 목록에 없어서 낮은 strength(0.28)로만
+      // 처리되다가 반영이 거의 안 되는 문제가 있었다. wantsNudeOrUndress와 동일한 탈의
+      // 패턴(KO_UNDRESS_NOUN_VERB_PATTERN)을 여기서도 인식해서(nudeRevision과 함께) 얼굴
+      // 보존 고강도 경로(strength 0.6·정밀모드)로 승격시킨다.
+      '탈의', KO_UNDRESS_NOUN_VERB_PATTERN,
     ].join('|'),
     'i',
   )
