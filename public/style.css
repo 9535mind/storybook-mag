@@ -1354,6 +1354,19 @@ body {
   color: #8fd3ff;
 }
 
+.compare-revert-btn {
+  border-color: #8fd3ff;
+  color: #8fd3ff;
+  background: rgba(143, 211, 255, 0.1);
+  font-weight: 600;
+}
+
+.compare-revert-btn:hover {
+  border-color: #8fd3ff;
+  color: #8fd3ff;
+  background: rgba(143, 211, 255, 0.18);
+}
+
 .revise-panel {
   margin-top: 8px;
   padding: 12px;

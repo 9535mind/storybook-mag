@@ -193,6 +193,7 @@ const resultDownload = document.getElementById('result-download')
 const reviewBadge = document.getElementById('review-badge')
 const compareBadge = document.getElementById('compare-badge')
 const compareToggleButtons = document.querySelectorAll('.compare-toggle-btn')
+const compareRevertButtons = document.querySelectorAll('.compare-revert-btn')
 const reviewPanel = document.getElementById('review-panel')
 const revisePanel = document.getElementById('revise-panel')
 const acceptedActions = document.getElementById('accepted-actions')
@@ -323,7 +324,9 @@ const currentResult = {
   engineLabel: '',
   fallbackUsed: false,
   engine: '',
-  previousImageUrl: '',
+  /** 직전 버전의 전체 스냅샷(imageUrl/prompt/mood/size/engine 등) — 「이전과 비교」로 보여주고,
+   * 「이 버전에서 다시 수정」을 누르면 이 스냅샷과 현재 상태를 맞바꿔서 그 시점부터 이어서 수정할 수 있게 한다. */
+  previousSnapshot: null,
   /** 이 이미지를 실제로 생성한 모드('free'|'fashion'). 탭을 나중에 옮겨도 「수정 적용」이
    * 지금 켜져 있는 탭이 아니라 이 이미지가 실제로 만들어진 모드를 쓰도록 고정한다. */
   genMode: 'free',
@@ -343,8 +346,24 @@ const bgmState = {
   uploadFile: null,
 }
 
-/** 「이전과 비교」 토글 중인지 — true면 화면엔 수정 전(previousImageUrl)이 떠 있는 상태 */
+/** 「이전과 비교」 토글 중인지 — true면 화면엔 수정 전(previousSnapshot)이 떠 있는 상태 */
 let comparingPrevious = false
+
+/** currentResult에서 "버전 스냅샷"에 필요한 필드만 뽑아 복사한다(비교/되돌리기에서 재사용). */
+function snapshotCurrentResult() {
+  return {
+    imageUrl: currentResult.imageUrl,
+    imageDataUrl: currentResult.imageDataUrl,
+    prompt: currentResult.prompt,
+    mood: currentResult.mood,
+    size: currentResult.size,
+    engineLabel: currentResult.engineLabel,
+    engine: currentResult.engine,
+    fallbackUsed: currentResult.fallbackUsed,
+    genMode: currentResult.genMode,
+    reviseRound: currentResult.reviseRound,
+  }
+}
 
 /** 확정된 수정 영역들 + 현재 드래그 중인 임시 사각형 */
 const regionState = {
@@ -1124,12 +1143,16 @@ function closeRevisePanel() {
 /** 「이전과 비교」 버튼들의 활성/문구 상태를 갱신한다. */
 function updateCompareButtons() {
   const hasPrevious =
-    Boolean(currentResult.previousImageUrl) &&
-    currentResult.previousImageUrl !== currentResult.imageUrl
+    Boolean(currentResult.previousSnapshot?.imageUrl) &&
+    currentResult.previousSnapshot.imageUrl !== currentResult.imageUrl
   compareToggleButtons.forEach((btn) => {
     btn.disabled = !hasPrevious && !comparingPrevious
     btn.textContent = comparingPrevious ? '현재 결과로 복귀' : '이전과 비교'
     btn.classList.toggle('compare-toggle-btn--active', comparingPrevious)
+  })
+  // 「이 버전에서 다시 수정」 버튼은 실제로 이전 이미지를 보고 있는 동안에만 노출한다.
+  compareRevertButtons.forEach((btn) => {
+    btn.hidden = !comparingPrevious
   })
 }
 
@@ -1156,19 +1179,49 @@ function toggleComparePrevious() {
     exitComparePreview()
     return
   }
-  if (!currentResult.previousImageUrl || currentResult.previousImageUrl === currentResult.imageUrl) {
+  if (!currentResult.previousSnapshot?.imageUrl || currentResult.previousSnapshot.imageUrl === currentResult.imageUrl) {
     setReviseStatus('비교할 이전 이미지가 없어요.', true)
     return
   }
   comparingPrevious = true
-  resultImage.src = currentResult.previousImageUrl
+  resultImage.src = currentResult.previousSnapshot.imageUrl
   compareBadge.hidden = false
-  compareBadge.textContent = '🔍 이전(수정 전) 이미지를 보고 있어요 · 다시 누르면 현재 결과로 돌아와요'
+  compareBadge.textContent =
+    '🔍 이전(수정 전) 이미지를 보고 있어요 · 다시 누르면 현재 결과로 돌아와요 · 「이 버전에서 다시 수정」을 누르면 여기서부터 이어서 수정할 수 있어요'
   setActionsLockedForCompare(true)
   updateCompareButtons()
 }
 
+/** 비교 중 보고 있는 이전 버전을 새 「현재 결과」로 삼아 그 시점부터 다시 수정할 수 있게 한다.
+ * 완전 삭제가 아니라 현재 상태와 맞바꾸는 방식이라, 되돌린 뒤 다시 「이전과 비교」를 누르면
+ * 방금까지 보고 있던(더 최신) 버전을 그대로 다시 볼 수 있다. */
+function revertToPreviousSnapshot() {
+  const snapshot = currentResult.previousSnapshot
+  if (!snapshot?.imageUrl) return
+
+  const displaced = snapshotCurrentResult()
+  Object.assign(currentResult, snapshot, { previousSnapshot: displaced })
+
+  comparingPrevious = false
+  compareBadge.hidden = true
+  resultImage.src = currentResult.imageUrl
+  resultDownload.href = currentResult.imageUrl
+  if (currentResult.engineLabel) {
+    resultEngine.hidden = false
+    resultEngine.textContent = currentResult.engineLabel
+    resultEngine.className = currentResult.fallbackUsed ? 'result__engine result__engine--fallback' : 'result__engine'
+  } else {
+    resultEngine.hidden = true
+  }
+  revisionText.value = ''
+  setActionsLockedForCompare(false)
+  updateReviseButtonLabel()
+  updateCompareButtons()
+  setReviseStatus('이전 버전으로 되돌아왔어요. 여기서부터 다시 수정할 수 있어요.', false)
+}
+
 compareToggleButtons.forEach((btn) => btn.addEventListener('click', toggleComparePrevious))
+compareRevertButtons.forEach((btn) => btn.addEventListener('click', revertToPreviousSnapshot))
 
 /** 이미지 URL이 만료되기 전에 서버로 바이트를 읽어 메모리에 보관 */
 async function cacheImageForAnimate(imageUrl) {
@@ -1214,7 +1267,7 @@ function showResult(imageUrl, engineLabel, fallbackUsed, options) {
   }
 
   if (currentResult.imageUrl && currentResult.imageUrl !== imageUrl) {
-    currentResult.previousImageUrl = currentResult.imageUrl
+    currentResult.previousSnapshot = snapshotCurrentResult()
     // 이미지가 실제로 바뀌면(새 생성/수정/다른 갤러리 항목) 이전 이미지용 모션 힌트는
     // 더 이상 유효하지 않다 — 지우지 않으면 "이전 요청과 무관하게 옛 모션이 그대로
     // 적용되는" 문제가 생긴다.
@@ -3189,7 +3242,7 @@ function startNewShoot() {
   if (scenePreviewEl) scenePreviewEl.hidden = true
   if (motionField) motionField.value = ''
   currentResult.imageUrl = ''
-  currentResult.previousImageUrl = ''
+  currentResult.previousSnapshot = null
   comparingPrevious = false
   compareBadge.hidden = true
   setActionsLockedForCompare(false)
