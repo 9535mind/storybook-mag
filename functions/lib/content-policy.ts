@@ -1948,9 +1948,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
     wantsPartner = true
     wantsPoseChange = true
     bits.push(
-      'BREAST TOUCH MUST BE VISIBLE: a hand clearly cups and strokes her bare breast — fingers on soft breast flesh, breast moves with the touch',
-      'not kissing only — the breast caress continues during the kiss; hand stays on the breast',
-      'FORBIDDEN: hands only on waist/back/face; frozen hands not touching breasts',
+      'sustained breast fondling for most of the clip: hand stays on her bare breast, squeezing and stroking continuously — not a one-second tap',
     )
   }
 
@@ -1959,16 +1957,12 @@ export function amplifyAdultMotionForVideo(motion: string): {
     wantsPartner = true
     wantsPoseChange = true
     bits.push(
-      'soft intimate kissing: faces turn toward each other, lips gently press and move — jaw soft, mouth NOT wide open',
-      'KISS MOUTH: lips press softly; a slight natural glimpse of teeth is OK when lips part — FORBIDDEN wide toothy Hollywood grin',
-      'FACE EXPRESSION LOCK: same Korean face identity; soft pleasure or light shyness — do NOT rebuild the face',
-      buildSoftMouthFaceLock(),
-      'END POSE: finish still kissing (and still touching if requested) — FORBIDDEN snapping back to the original source standing pose',
+      'mandatory deep mouth-to-mouth kissing for most of the clip — lips locked together, heads leaning in, continuous kiss (not a quick peck, not faces apart)',
+      'slight natural teeth OK if lips part; no wide Hollywood grin',
+      'last frame still kissing — do not return to the source still pose',
     )
     if (/나체|누드|nude|naked|전라|topless/i.test(t)) {
-      bits.push(
-        'NUDE KISS: fully nude while kissing — bare breasts with nipples, bare hips/crotch; ZERO panties or lingerie',
-      )
+      bits.push('kissing while fully nude, bare breasts visible')
     }
   }
   if (
@@ -2138,6 +2132,36 @@ export function buildAnimationPrompt(input: {
     /남녀|남여|둘\s*다|남자와|여성과|커플|서로|partner|couple|both\s*adults|man\s+and\s+woman/i.test(
       `${motion} ${fullOriginal}`,
     )
+
+  // 나체+키스/만짐: 장문 잠금이 Wan에서 키스·나체를 죽이고 "툭 만짐"만 남는 실측
+  // → 짧은 동작 타임라인 전용 프롬프트로 보낸다.
+  const leanIntimate =
+    (undressAction || staysNude) &&
+    (intimate.wantsPartner || /키스|kiss|만지|애무|가슴/i.test(motion))
+
+  if (leanIntimate) {
+    const wantsKiss = /키스|kiss/i.test(motion)
+    const wantsBreast =
+      intimate.addon.includes('breast fondling') ||
+      /가슴|breast|만지|애무/i.test(motion)
+    const beats = [
+      'Adult photorealistic video. Same Korean woman face as the input image.',
+      undressAction
+        ? 'BEAT 1 (first third): she takes off ALL clothes — top, bra, pants/skirt, panties — until fully nude with bare breasts and nipples. Clothing must leave her body.'
+        : 'BEAT 1: she is already fully nude — bare breasts, no bra, no panties.',
+      wantsKiss && wantsBreast
+        ? 'BEAT 2 (rest of clip): a consenting adult partner deep-kisses her mouth while continuously fondling her bare breast with his hand. Kiss AND breast touch both stay visible — not a quick peck, not a one-tap.'
+        : wantsKiss
+          ? 'BEAT 2 (rest of clip): a consenting adult partner deep-kisses her mouth continuously — lips locked, heads lean in, most of the clip is kissing.'
+          : wantsBreast
+            ? 'BEAT 2 (rest of clip): a hand continuously fondles her bare breast — sustained caress, not a tap.'
+            : 'BEAT 2: continue the requested nude intimate action.',
+      'LAST FRAME: still fully nude, still in the intimate pose (kissing and/or hand on breast). Do NOT return to the opening still pose. Do NOT put clothes back on.',
+      'Same face identity and breast size as the source. Stable camera, no zoom-in.',
+      motion ? `User motion: ${motion}` : '',
+    ].filter(Boolean)
+    return beats.join(' ')
+  }
 
   // 나체 유지/탈의 시 continuity에 남은 "wearing…"·바지 서술이 옷을 다시 입힘(실측) → 제거
   let original = truncateContinuityText(fullOriginal, ANIMATION_CONTINUITY_MAX_CHARS)

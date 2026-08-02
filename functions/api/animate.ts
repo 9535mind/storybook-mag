@@ -152,10 +152,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const clipRoleRaw = (body.clipRole ?? '').trim().toLowerCase()
   const clipRole =
     clipRoleRaw === 'dual-a' || clipRoleRaw === 'dual-b' ? clipRoleRaw : ('single' as const)
-  // 한글 원문을 판별용으로 같이 넣음 — 번역만 쓰면 나체/탈의가 약해져 중반에 속옷·남자가 붙는 사고
+  // 판별은 한글+영문, Wan에는 영어 모션을 앞에 둬 키스/나체 순응도를 높임
   const prompt = buildAnimationPrompt({
     prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
-    motion: [motion, motionForVideo].filter(Boolean).join('\n'),
+    motion: [motionForVideo, motion].filter(Boolean).join('\n'),
     clipRole,
   })
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
