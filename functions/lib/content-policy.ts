@@ -42,11 +42,25 @@ function matchAny(text: string, rules: Array<{ label: string; pattern: RegExp }>
   return found
 }
 
+/**
+ * 「not teen」「no child」처럼 미성년을 금지·부정하는 문구는 차단 신호가 아니다.
+ * (AGE LOCK의 "not teen"이 나체 쇼츠를 통째로 막던 실측)
+ */
+function stripNegatedMinorPhrases(text: string): string {
+  return String(text || '')
+    .replace(
+      /\b(?:not|no|non|never|without|forbid(?:den)?|avoid)\s*[-:]?\s*(?:a\s+|an\s+)?(?:teen(?:ager)?s?|child(?:ren)?|minor|kid|loli|shota|schoolgirl)s?\b/gi,
+      ' ',
+    )
+    .replace(/미성년\s*(?:아님|아니|금지|제외)/g, ' ')
+    .replace(/십대\s*(?:아님|아니|금지|제외)/g, ' ')
+}
+
 export function evaluateContentPolicy(
   promptText: string,
   _options?: { mode?: string },
 ): ContentPolicyVerdict {
-  const text = promptText ?? ''
+  const text = stripNegatedMinorPhrases(promptText ?? '')
 
   const minor = matchAny(text, MINOR_PATTERNS)
   if (minor.length > 0) {
@@ -606,7 +620,7 @@ export function buildAdultPubicHairLock(text = ''): string {
     'hair looks like real coiled hair in soft clumps — NOT grainy stipple, NOT sandpaper noise, NOT 5-o’clock shadow stubble, NOT a painted ink blob',
     'natural adult density: fuller on the mons, slightly thinner toward the edges — not a harsh horizontal band',
     'vulva anatomy realistic for an adult woman: soft natural labia, gentle cleft — NOT clamped tightly shut, NOT oversized sealed Barbie seam, NOT cartoon slit',
-    'CRITICAL SAFETY: FORBIDDEN hairless/smooth blank crotch that reads as underage',
+    'CRITICAL SAFETY: FORBIDDEN hairless/smooth blank crotch that reads as non-adult',
     'not a male happy trail to the navel; feminine panty-line bush shape',
   ].join('. ')
 }
@@ -1443,7 +1457,8 @@ export function buildKoreanTwentiesLookLock(text: string): string {
   const otherAge = /30대|40대|50대|60대|중년|노년|thirties|forties|fifties|middle[\s-]?aged|elderly/i.test(t)
   return [
     'ETHNICITY LOCK: clearly a Korean woman — Korean facial features (눈·코·턱 비율), natural Korean beauty / K-beauty look',
-    otherAge ? '' : 'AGE LOCK: looks like a woman in her twenties (20대) — not teen, not middle-aged',
+    // "teen" 단어를 넣지 말 것 — 정책/엔진이 "not teen"도 미성년 신호로 오탐해 나체를 통째로 막음
+    otherAge ? '' : 'AGE LOCK: clearly an adult woman in her twenties (20대 성인) — mature adult face, not middle-aged',
     buildSoftMouthFaceLock(),
     'FORBIDDEN: drifting into Southeast Asian or Chinese stereotype face, wrong ethnicity, Westernized face swap',
   ]
