@@ -48,6 +48,7 @@ body {
 #accepted-actions[hidden],
 #region-hint[hidden],
 #region-toolbar[hidden],
+#pin-toolbar[hidden],
 #region-list[hidden],
 .app__mode-bar[hidden] {
   display: none !important;
@@ -1142,6 +1143,48 @@ body {
   white-space: nowrap;
 }
 
+.description-dropzone {
+  position: relative;
+  border-radius: 10px;
+  margin-bottom: 16px;
+}
+
+.description-dropzone .form__textarea {
+  margin-bottom: 0;
+}
+
+.description-dropzone__hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted, #94a3b8);
+}
+
+.description-dropzone__overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border-radius: 10px;
+  border: 2px dashed #facc15;
+  background: rgba(15, 23, 42, 0.72);
+  color: #fef08a;
+  font-size: 15px;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.description-dropzone__overlay[hidden] {
+  display: none !important;
+}
+
+.description-dropzone--active .form__textarea {
+  border-color: #facc15;
+}
+
 .form__textarea,
 .form__select {
   width: 100%;
@@ -1382,6 +1425,21 @@ body {
   margin-top: 4px;
 }
 
+.revise-panel__footer--wrap {
+  grid-template-columns: 1fr 1fr;
+}
+
+.revise-panel__footer--wrap #revise-apply-button,
+.revise-panel__footer--wrap #revise-cancel-button {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 520px) {
+  .revise-panel__footer--wrap {
+    grid-template-columns: 1fr;
+  }
+}
+
 .revise-panel__modes {
   display: flex;
   flex-wrap: wrap;
@@ -1396,6 +1454,60 @@ body {
   align-items: center;
   gap: 6px;
   cursor: pointer;
+}
+
+.revise-panel__mode--pin {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pin-toolbar {
+  margin: 10px 0 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.pin-toolbar__hint {
+  margin: 0 0 10px;
+}
+
+.pin-toolbar__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pin-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  cursor: pointer;
+  background: var(--bg, #fff);
+}
+
+.pin-chip:has(input:checked) {
+  border-color: var(--accent-strong);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.pin-chip input {
+  margin: 0;
+}
+
+.result__stage--pinning {
+  cursor: crosshair;
+}
+
+.revise-text-block[hidden] {
+  display: none !important;
 }
 
 .result__actions {
@@ -1475,6 +1587,18 @@ body {
   color: var(--accent);
 }
 
+.video-duration__btn--dual {
+  border-style: dashed;
+}
+
+.video-duration__btn--dual.is-active {
+  border-style: solid;
+}
+
+.dual-frame-fields[hidden] {
+  display: none !important;
+}
+
 .video-speed-bar {
   display: flex;
   flex-wrap: wrap;
@@ -1488,6 +1612,182 @@ body {
   font-size: 12px;
   color: var(--text-muted);
   margin-right: 2px;
+}
+
+/* 톡톡톡 올가미 우클릭 메뉴 */
+.poly-lasso-menu {
+  position: fixed;
+  z-index: 10050;
+  min-width: 11rem;
+  padding: 4px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+  background: #0f172a;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
+.poly-lasso-menu__item {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #e2e8f0;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.poly-lasso-menu__item:hover {
+  background: rgba(250, 204, 21, 0.16);
+  color: #fef08a;
+}
+
+.admin-subnav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+}
+
+.admin-subnav[hidden] {
+  display: none !important;
+}
+
+.admin-subnav__btn {
+  appearance: none;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: rgba(15, 23, 42, 0.55);
+  color: #cbd5e1;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.admin-subnav__btn--active,
+.admin-subnav__btn[aria-selected='true'] {
+  border-color: #facc15;
+  color: #fef08a;
+  background: rgba(250, 204, 21, 0.12);
+  font-weight: 600;
+}
+
+.admin-fuse-panel {
+  margin: 0 0 1.25rem;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 12px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.55), rgba(8, 15, 30, 0.35));
+}
+
+.admin-fuse-panel[hidden] {
+  display: none !important;
+}
+
+.admin-fuse-panel__title {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: #e2e8f0;
+}
+
+.admin-fuse-panel__lead {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #94a3b8;
+}
+
+.admin-fuse-tray {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.admin-fuse-slot {
+  width: 88px;
+  height: 110px;
+  border: 1px dashed rgba(226, 232, 240, 0.35);
+  border-radius: 8px;
+  background: rgba(8, 15, 30, 0.55);
+  color: #94a3b8;
+  font-size: 12px;
+  cursor: pointer;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
+
+.admin-fuse-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.admin-fuse-slot__label {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fef3c7;
+  font-size: 11px;
+}
+
+.admin-fuse-slot--active {
+  border-color: #facc15;
+  box-shadow: 0 0 0 1px rgba(250, 204, 21, 0.35);
+}
+
+.admin-fuse-toolrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.admin-fuse-canvas-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  margin: 0 auto 10px;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #020617;
+}
+
+.admin-fuse-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: grab;
+  touch-action: none;
+}
+
+.admin-fuse-lasso {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  touch-action: none;
+}
+
+.admin-fuse-lasso--active {
+  pointer-events: auto;
+  cursor: crosshair;
+}
+
+.admin-fuse-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .video-speed-bar .video-duration__btn {

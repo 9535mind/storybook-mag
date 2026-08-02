@@ -202,7 +202,8 @@ async function aiFill(
     guideAction: 'Korean verb/predicate only (술부). Example: 앉아 있다. No subject.',
     guideObject: 'Korean object noun or short phrase only (목적어). Example: 고양이 / 포도.',
     guideComplement: 'Korean complement/manner/place only (보어). Example: 힘없이 / 포도 나무 아래에서.',
-    revision: 'Write a short Korean image-edit instruction. Keep same person/scene unless asked. Follow the director tip.',
+    revision:
+      'Write a short Korean image-edit instruction for ONLY the change requested (outfit, pose, detail). Do NOT write “같은 얼굴 유지” or “한 명만” — the server locks face and single subject automatically. Follow the director tip.',
     motion: 'Write a short Korean video motion hint for I2V. Camera/body/fabric motion. Follow the director tip.',
   }
 

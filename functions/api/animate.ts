@@ -1,5 +1,12 @@
 import { isAdminEmail, requireAuth } from '../lib/auth'
-import { buildAnimationPrompt, evaluateContentPolicy } from '../lib/content-policy'
+import {
+  buildAnimationPrompt,
+  ensureNudeHoldMotionPhrase,
+  evaluateContentPolicy,
+  wantsFullNude,
+  wantsNudeOrUndress,
+  wantsUndressAction,
+} from '../lib/content-policy'
 import { mediaUrlError } from '../lib/media-url'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 import {
@@ -79,6 +86,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     motion?: string
     size?: string
     durationSec?: number
+    /** single | dual-a | dual-b — 줌 연출은 dual만 */
+    clipRole?: string
   }
   try {
     body = await request.json()
@@ -100,9 +109,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const originalPrompt = truncatePromptAtBoundary((body.prompt ?? '').trim(), ANIMATE_PROMPT_MAX_CHARS)
 
-  const motion = (body.motion ?? '').trim()
+  let motion = (body.motion ?? '').trim()
   if (motion.length > 400) {
     return jsonResponse({ ok: false, error: 'motion_too_long' }, 400)
+  }
+
+  // 이미지 프롬프트에 나체 상태가 있으면(수정 누적·마커) 모션이 비어도 go_fast OFF
+  const sourceNudeHold =
+    wantsFullNude(originalPrompt) ||
+    /현재\s*나체|옷\s*없음|fully\s*nude|bare\s*breasts?|visible\s*nipples?/i.test(originalPrompt)
+  // 나체/누드 요청이면 「이미 나체 유지」를 서버에서 자동 부착
+  motion = ensureNudeHoldMotionPhrase(motion, { sourceAlreadyNude: sourceNudeHold })
+  if (motion.length > 480) {
+    motion = motion.slice(0, 480).trim()
   }
 
   const policyText = [originalPrompt, motion].filter(Boolean).join('\n')
@@ -126,12 +145,25 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     translateDescriptionForImagePrompt(originalPrompt, env),
     translateDescriptionForImagePrompt(motion, env),
   ])
-  const prompt = buildAnimationPrompt({ prompt: promptForVideo, motion: motionForVideo })
+  const clipRoleRaw = (body.clipRole ?? '').trim().toLowerCase()
+  const clipRole =
+    clipRoleRaw === 'dual-a' || clipRoleRaw === 'dual-b' ? clipRoleRaw : ('single' as const)
+  // 한글 원문을 판별용으로 같이 넣음 — 번역만 쓰면 나체/탈의가 약해져 중반에 속옷·남자가 붙는 사고
+  const prompt = buildAnimationPrompt({
+    prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
+    motion: [motion, motionForVideo].filter(Boolean).join('\n'),
+    clipRole,
+  })
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
   const requested =
-    typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 8
+    typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 15
   const { approxSec } = resolveWanI2vDuration(requested)
+  const nudeOrUndress =
+    wantsUndressAction(motion) ||
+    wantsNudeOrUndress(motion) ||
+    wantsUndressAction(motionForVideo) ||
+    wantsNudeOrUndress(motionForVideo)
 
   try {
     // delivery URL은 금방 만료 → 항상 Files API로 재업로드한 뒤 I2V 시작
@@ -150,9 +182,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       prompt,
       aspect: resolveReplicateVideoAspect(body.size),
       durationSec: requested,
-      // 구체적인 모션 요청이 있으면 go_fast(빠른 대신 순응도 낮음)를 끄고
-      // 요청한 동작을 더 충실히 따르게 한다. 모션 힌트가 없으면 그대로 빠른 경로 사용.
-      goFast: !motion,
+      // 모션·나체/탈의면 go_fast OFF — 켜면 중반에 팬티·브라·남자 발명이 잦음(실측)
+      goFast: !(motion || nudeOrUndress || sourceNudeHold),
     })
 
     if (started.status === 'succeeded' && started.videoUrl) {

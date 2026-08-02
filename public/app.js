@@ -109,7 +109,7 @@ function syncAppAreaUi() {
   if (observeArea) observeArea.hidden = area !== 'observe'
   // 「내 갤러리」(자유)와 「관리자 전용 갤러리」(화보)는 서로 섞이지 않게 탭별로 완전히 분리해서 보여준다.
   if (freeGallerySection) freeGallerySection.hidden = area !== 'studio'
-  if (adminGallerySection) adminGallerySection.hidden = area !== 'admin'
+  syncAdminWorkspaceUi()
 
   if (appRoot) {
     appRoot.classList.toggle('app--essay', !usesStudioForm)
@@ -233,13 +233,25 @@ const regionToolbar = document.getElementById('region-toolbar')
 const regionUndoButton = document.getElementById('region-undo-button')
 const regionClearButton = document.getElementById('region-clear-button')
 const regionList = document.getElementById('region-list')
+const pinToolbar = document.getElementById('pin-toolbar')
+const pinStatus = document.getElementById('pin-status')
+const reviseTextBlock = document.getElementById('revise-text-block')
+
+/** 찍어서 붙이기 — AI 추측 대신 클릭 좌표에 소품 합성 */
+let pinScale = 1
+let pinBusy = false
 
 const loadImageButton = document.getElementById('load-image-button')
 const loadImageInput = document.getElementById('load-image-input')
 
 const motionField = document.getElementById('motion')
+const motion2Field = document.getElementById('motion-2')
+const motionLabel = document.getElementById('motion-label')
 const animateButton = document.getElementById('animate-button')
 const animateStatus = document.getElementById('animate-status')
+const dualFrameFields = document.getElementById('dual-frame-fields')
+const dualFrameHint = document.getElementById('dual-frame-hint')
+const videoDurationHint = document.getElementById('video-duration-hint')
 const videoResultSection = document.getElementById('video-result')
 const resultVideo = document.getElementById('result-video')
 const videoDurationGroup = document.getElementById('video-duration')
@@ -252,19 +264,63 @@ const VIDEO_MOTION_HINTS = {
   fast: 'faster dynamic movement, quicker subject and camera motion',
 }
 
+/** 한 프레임 길이 + 두 프레임 연속(이름만 24/30, 내부는 12+12 / 15+15) */
+const VIDEO_DURATION_OPTIONS = [10, 12, 15, 18, 24, 30]
+/** @type {Record<number, number>} 표기 초 → 프레임당 초 */
+const DUAL_FRAME_CLIP_SEC = { 24: 12, 30: 15 }
+
+function isDualFrameDuration(sec) {
+  return Object.prototype.hasOwnProperty.call(DUAL_FRAME_CLIP_SEC, Number(sec))
+}
+
+function getDualClipSec(totalSec) {
+  return DUAL_FRAME_CLIP_SEC[Number(totalSec)] || 15
+}
+
 function getSelectedVideoDuration() {
-  const fromAttr = Number(videoDurationGroup?.dataset?.duration || 8)
-  if (fromAttr === 8 || fromAttr === 10 || fromAttr === 12 || fromAttr === 15) return fromAttr
-  return 8
+  const fromAttr = Number(videoDurationGroup?.dataset?.duration || 15)
+  if (VIDEO_DURATION_OPTIONS.includes(fromAttr)) return fromAttr
+  return 15
+}
+
+function syncDualFrameUi(totalSec) {
+  const dual = isDualFrameDuration(totalSec)
+  if (dualFrameFields) dualFrameFields.hidden = !dual
+  if (motionLabel) {
+    motionLabel.textContent = dual ? '전반 모션 (1프레임)' : '모션 힌트 (선택)'
+  }
+  if (motionField) {
+    motionField.placeholder = dual
+      ? '전반 예: 나체가 된다. 딥키스한다'
+      : '예: 나체가 된다. 딥키스한다'
+  }
+  if (dualFrameHint) {
+    dualFrameHint.textContent = `${totalSec}초: 전반→후반 이어붙임. 줌인(1회 후반~2회 초반) · 줌아웃 클로징(2회 후반). 클로즈업으로 끝내려면 후반에 「클로즈업으로 끝내」.`
+  }
+  if (videoDurationHint) {
+    videoDurationHint.innerHTML = dual
+      ? `<strong>${totalSec}초</strong>는 두 프레임 연속 생성입니다. 전반·후반 모션을 적고 아래 버튼으로 만드세요.`
+      : '10~18초: 한 프레임. <strong>24초·30초</strong>: 두 프레임을 연속 생성해 이어 붙입니다 (속도감 유지).'
+  }
+  if (animateButton) {
+    animateButton.textContent = dual
+      ? `${totalSec}초 쇼츠 만들기 (두 프레임 연속)`
+      : '쇼츠 비디오 만들기'
+  }
 }
 
 function setSelectedVideoDuration(sec) {
   const n = Number(sec)
-  const value = n === 8 || n === 10 || n === 12 || n === 15 ? n : 8
+  const value = VIDEO_DURATION_OPTIONS.includes(n) ? n : 15
   if (videoDurationGroup) videoDurationGroup.dataset.duration = String(value)
   videoDurationGroup?.querySelectorAll('[data-duration]').forEach((btn) => {
     btn.classList.toggle('is-active', Number(btn.getAttribute('data-duration')) === value)
   })
+  syncDualFrameUi(value)
+}
+
+function setAnimateBusy(busy) {
+  if (animateButton) animateButton.disabled = busy
 }
 
 function getSelectedVideoSpeed() {
@@ -353,9 +409,10 @@ const currentResult = {
   reviseRound: 0,
 }
 
-/** 「수정하기」 버튼 라벨을 "N차 수정"으로 갱신한다(다음 클릭이 몇 번째 수정인지 표시). */
+/** 이미지 수정 버튼 라벨 — 횟수는 보조 표시만. */
 function updateReviseButtonLabel() {
-  const label = `${(currentResult.reviseRound || 0) + 1}차 수정`
+  const n = (currentResult.reviseRound || 0) + 1
+  const label = n <= 1 ? '이미지 수정' : `이미지 수정 (${n}회차)`
   if (reviseToggleButton) reviseToggleButton.textContent = label
   if (reviseAgainButton) reviseAgainButton.textContent = label
 }
@@ -384,11 +441,24 @@ function snapshotCurrentResult() {
   }
 }
 
-/** 확정된 수정 영역들 + 현재 드래그 중인 임시 사각형 */
-const regionState = {
-  regions: /** @type {Array<{ id: number, x: number, y: number, w: number, h: number }>} */ ([]),
-  nextId: 1,
-  draft: { active: false, startX: 0, startY: 0, x: 0, y: 0, w: 0, h: 0 },
+/** 다듬기용 톡톡톡 다각형 올가미 */
+let reviseLasso = null
+
+function ensureReviseLasso() {
+  if (reviseLasso) return reviseLasso
+  if (!regionCanvas || !window.StorymagPolyLasso?.create) return null
+  reviseLasso = window.StorymagPolyLasso.create(regionCanvas, {
+    onChange: () => {
+      redrawRegions()
+      updateRegionList()
+    },
+    onStatus: (msg, isError) => setReviseStatus(msg, isError),
+    getImageSize: () => ({
+      w: resultImage?.naturalWidth || regionCanvas.width,
+      h: resultImage?.naturalHeight || regionCanvas.height,
+    }),
+  })
+  return reviseLasso
 }
 
 function getSessionToken() {
@@ -893,40 +963,301 @@ function setReviseStatus(message, isError) {
 
 function getSelectedReviseMode() {
   const checked = document.querySelector('input[name="revise-mode"]:checked')
-  return checked?.value === 'region' ? 'region' : 'text'
+  const v = checked?.value
+  if (v === 'region' || v === 'pin' || v === 'text') return v
+  return 'pin'
+}
+
+function getSelectedPinProp() {
+  const checked = document.querySelector('input[name="pin-prop"]:checked')
+  return checked?.value || 'watch'
+}
+
+function wantsAccessoryPinRevision(text) {
+  const t = text || ''
+  // 목걸이 제거는 올가미 AI가 맞고, 추가형 손목·귀 소품만 핀으로 유도
+  if (/목걸이|초커|necklace|choker/i.test(t) && /제거|없애|지워|빼|삭제|remove/i.test(t)) return false
+  return /귀걸이|이어링|피어싱|팔찌|시계|손목시계|워치|팔목|earring|bracelet|\bwatch\b|wristwatch|jewelry|jewellery/i.test(
+    t,
+  )
+}
+
+async function loadCurrentResultDataUrl() {
+  if (!currentResult.imageUrl) throw new Error('no_image')
+  let sourceDataUrl = currentResult.imageDataUrl
+  if (!sourceDataUrl || !String(sourceDataUrl).startsWith('data:')) {
+    const response = await fetch('/api/media-bytes', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ imageUrl: currentResult.imageUrl }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!data?.ok || !data.dataUrl) throw new Error(data?.error || 'media_bytes_failed')
+    sourceDataUrl = data.dataUrl
+    currentResult.imageDataUrl = sourceDataUrl
+  }
+  return sourceDataUrl
+}
+
+function drawPinWatch(ctx, cx, cy, scale) {
+  const w = 72 * scale
+  const h = 88 * scale
+  ctx.save()
+  ctx.translate(cx, cy)
+  // strap
+  ctx.fillStyle = 'rgba(40,40,45,0.92)'
+  ctx.beginPath()
+  ctx.roundRect(-w * 0.22, -h * 0.55, w * 0.44, h * 1.1, 6 * scale)
+  ctx.fill()
+  // case
+  const grd = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2)
+  grd.addColorStop(0, '#e8e8ea')
+  grd.addColorStop(0.5, '#9a9aa3')
+  grd.addColorStop(1, '#d4d4d8')
+  ctx.fillStyle = grd
+  ctx.strokeStyle = 'rgba(60,60,70,0.85)'
+  ctx.lineWidth = 2 * scale
+  ctx.beginPath()
+  ctx.ellipse(0, 0, w * 0.42, h * 0.36, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.stroke()
+  // face
+  ctx.fillStyle = '#f4f4f6'
+  ctx.beginPath()
+  ctx.ellipse(0, 0, w * 0.32, h * 0.27, 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.strokeStyle = '#222'
+  ctx.lineWidth = 1.5 * scale
+  ctx.beginPath()
+  ctx.moveTo(0, 0)
+  ctx.lineTo(0, -h * 0.16)
+  ctx.moveTo(0, 0)
+  ctx.lineTo(w * 0.14, 0.02 * h)
+  ctx.stroke()
+  ctx.fillStyle = '#c9a227'
+  ctx.beginPath()
+  ctx.arc(0, 0, 2.2 * scale, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawPinBracelet(ctx, cx, cy, scale) {
+  const r = 38 * scale
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.strokeStyle = '#c9a227'
+  ctx.lineWidth = 5 * scale
+  ctx.shadowColor = 'rgba(0,0,0,0.25)'
+  ctx.shadowBlur = 4 * scale
+  ctx.beginPath()
+  ctx.ellipse(0, 0, r, r * 0.55, 0, 0, Math.PI * 2)
+  ctx.stroke()
+  ctx.strokeStyle = '#f0d78c'
+  ctx.lineWidth = 2 * scale
+  ctx.beginPath()
+  ctx.ellipse(0, 0, r * 0.92, r * 0.48, 0, 0.2, Math.PI * 1.2)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawPinHoopEarring(ctx, cx, cy, scale) {
+  const r = 22 * scale
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.strokeStyle = '#d4af37'
+  ctx.lineWidth = 3.5 * scale
+  ctx.beginPath()
+  ctx.arc(0, 4 * scale, r, 0.15 * Math.PI, 0.85 * Math.PI)
+  ctx.stroke()
+  ctx.fillStyle = '#e8c547'
+  ctx.beginPath()
+  ctx.arc(0, -r * 0.15, 3 * scale, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.restore()
+}
+
+function drawPinButterflyEarring(ctx, cx, cy, scale) {
+  ctx.save()
+  ctx.translate(cx, cy)
+  const s = 18 * scale
+  ctx.fillStyle = '#d4af37'
+  ctx.strokeStyle = '#8a7020'
+  ctx.lineWidth = 1.2 * scale
+  // left wing
+  ctx.beginPath()
+  ctx.moveTo(0, 0)
+  ctx.quadraticCurveTo(-s * 1.4, -s * 0.9, -s * 1.1, s * 0.2)
+  ctx.quadraticCurveTo(-s * 0.6, s * 0.9, 0, s * 0.35)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  // right wing
+  ctx.beginPath()
+  ctx.moveTo(0, 0)
+  ctx.quadraticCurveTo(s * 1.4, -s * 0.9, s * 1.1, s * 0.2)
+  ctx.quadraticCurveTo(s * 0.6, s * 0.9, 0, s * 0.35)
+  ctx.closePath()
+  ctx.fill()
+  ctx.stroke()
+  ctx.fillStyle = '#f5e6a6'
+  ctx.beginPath()
+  ctx.ellipse(0, s * 0.1, s * 0.18, s * 0.45, 0, 0, Math.PI * 2)
+  ctx.fill()
+  // hook
+  ctx.strokeStyle = '#c9a227'
+  ctx.lineWidth = 2 * scale
+  ctx.beginPath()
+  ctx.arc(0, -s * 0.55, 4 * scale, Math.PI * 0.2, Math.PI * 1.1)
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawPinProp(ctx, prop, cx, cy, scale) {
+  if (prop === 'bracelet') drawPinBracelet(ctx, cx, cy, scale)
+  else if (prop === 'hoop') drawPinHoopEarring(ctx, cx, cy, scale)
+  else if (prop === 'butterfly') drawPinButterflyEarring(ctx, cx, cy, scale)
+  else drawPinWatch(ctx, cx, cy, scale)
+}
+
+async function stampPropAtClientPoint(clientX, clientY) {
+  if (pinBusy || !currentResult.imageUrl || !resultImage) return
+  const rect = resultImage.getBoundingClientRect()
+  if (rect.width < 8 || rect.height < 8) return
+  const nx = (clientX - rect.left) / rect.width
+  const ny = (clientY - rect.top) / rect.height
+  if (nx < 0 || nx > 1 || ny < 0 || ny > 1) return
+
+  pinBusy = true
+  if (pinStatus) pinStatus.textContent = '붙이는 중…'
+  setReviseStatus('선택한 위치에 소품을 붙이는 중…', false)
+  try {
+    if (!isLoggedIn()) {
+      showPinGate('로그인이 필요해요.')
+      return
+    }
+    const sourceDataUrl = await loadCurrentResultDataUrl()
+    const img = new Image()
+    await new Promise((resolve, reject) => {
+      img.onload = () => resolve()
+      img.onerror = () => reject(new Error('image_decode_failed'))
+      img.src = sourceDataUrl
+    })
+    const w = img.naturalWidth || img.width
+    const h = img.naturalHeight || img.height
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('canvas_unavailable')
+    if (typeof ctx.roundRect !== 'function') {
+      ctx.roundRect = function (x, y, rw, rh, r) {
+        const rad = typeof r === 'number' ? r : 0
+        this.beginPath()
+        this.moveTo(x + rad, y)
+        this.arcTo(x + rw, y, x + rw, y + rh, rad)
+        this.arcTo(x + rw, y + rh, x, y + rh, rad)
+        this.arcTo(x, y + rh, x, y, rad)
+        this.arcTo(x, y, x + rw, y, rad)
+        this.closePath()
+      }
+    }
+    ctx.drawImage(img, 0, 0, w, h)
+    const prop = getSelectedPinProp()
+    const baseScale = (Math.min(w, h) / 900) * pinScale
+    drawPinProp(ctx, prop, nx * w, ny * h, Math.max(0.45, baseScale))
+    const dataUrl = canvas.toDataURL('image/png')
+
+    const uploadRes = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ dataUrl }),
+    })
+    const uploadData = await uploadRes.json().catch(() => ({}))
+    if (!uploadData?.ok || !uploadData.imageUrl) {
+      throw new Error(uploadData?.message || uploadData?.error || 'upload_failed')
+    }
+
+    const labels = {
+      watch: '시계',
+      butterfly: '나비 귀걸이',
+      hoop: '링 귀걸이',
+      bracelet: '팔찌',
+    }
+    const label = labels[prop] || '소품'
+    const nextPrompt = polishConceptText(
+      [currentResult.prompt, `${label} 추가(위치 지정 합성)`].filter(Boolean).join('. '),
+    )
+    showResult(uploadData.imageUrl, '로컬 합성 · 찍어서 붙이기', false, {
+      size: currentResult.size,
+      itemId: currentResult.itemId,
+      prompt: nextPrompt,
+      accepted: false,
+      mood: currentResult.mood,
+      engine: 'pin-stamp',
+      reviseRound: (currentResult.reviseRound || 0) + 1,
+    })
+    currentResult.imageDataUrl = dataUrl
+    setReviewChrome('revising')
+    const pinRadio = document.querySelector('input[name="revise-mode"][value="pin"]')
+    if (pinRadio) pinRadio.checked = true
+    syncReviseModeUi()
+    if (pinStatus) pinStatus.textContent = `${label} 붙임 · 다른 위치 클릭하면 하나 더`
+    setReviseStatus(
+      `${label}을(를) 클릭한 자리에 붙였어요. 크기: 휠로 조절(지금 ${pinScale.toFixed(1)}×). 더 붙이려면 다시 클릭.`,
+      false,
+    )
+  } catch (error) {
+    setReviseStatus(
+      `붙이기 실패: ${error instanceof Error ? error.message : 'unknown'}. 잠시 후 다시 시도해 주세요.`,
+      true,
+    )
+    if (pinStatus) pinStatus.textContent = '실패 — 다시 클릭해 보세요'
+  } finally {
+    pinBusy = false
+  }
+}
+
+function setPinDrawEnabled(enabled) {
+  if (pinToolbar) pinToolbar.hidden = !enabled
+  if (reviseTextBlock) reviseTextBlock.hidden = enabled
+  if (reviseApplyButton) reviseApplyButton.hidden = enabled
+  resultStage?.classList.toggle('result__stage--pinning', enabled)
+  if (enabled) {
+    setRegionDrawEnabled(false)
+    if (pinStatus) {
+      pinStatus.textContent = `대기 — 클릭으로 붙이기 · 휠 크기 ${pinScale.toFixed(1)}×`
+    }
+  }
+}
+
+function syncReviseModeUi() {
+  const mode = getSelectedReviseMode()
+  if (mode === 'pin') {
+    setPinDrawEnabled(true)
+  } else if (mode === 'region') {
+    setPinDrawEnabled(false)
+    setRegionDrawEnabled(true)
+  } else {
+    setPinDrawEnabled(false)
+    setRegionDrawEnabled(false)
+  }
 }
 
 function clearAllRegions() {
-  regionState.regions = []
-  regionState.nextId = 1
-  regionState.draft.active = false
-  regionState.draft.w = 0
-  regionState.draft.h = 0
+  const lasso = ensureReviseLasso()
+  if (lasso) lasso.clearAll()
   redrawRegions()
   updateRegionList()
 }
 
 function undoLastRegion() {
-  if (!regionState.regions.length) {
-    setReviseStatus('취소할 영역이 없어요.', true)
+  const lasso = ensureReviseLasso()
+  if (!lasso || !lasso.undoLastPoint()) {
+    setReviseStatus('취소할 점/선택이 없어요.', true)
     return
   }
-  const removed = regionState.regions.pop()
   redrawRegions()
   updateRegionList()
-  setReviseStatus(
-    removed ? `${regionState.regions.length + 1}번 영역을 취소했어요.` : '마지막 영역을 취소했어요.',
-    false,
-  )
-}
-
-function findRegionIndexAtPoint(x, y) {
-  // 위에 그린(나중) 영역부터 히트 테스트
-  for (let i = regionState.regions.length - 1; i >= 0; i -= 1) {
-    const r = regionState.regions[i]
-    if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i
-  }
-  return -1
 }
 
 function syncRegionCanvasSize() {
@@ -940,97 +1271,34 @@ function syncRegionCanvasSize() {
   }
 }
 
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value))
-}
-
-function pointerToCanvasPoint(event) {
-  const bounds = regionCanvas.getBoundingClientRect()
-  const scaleX = regionCanvas.width / Math.max(1, bounds.width)
-  const scaleY = regionCanvas.height / Math.max(1, bounds.height)
-  const x = clamp((event.clientX - bounds.left) * scaleX, 0, regionCanvas.width)
-  const y = clamp((event.clientY - bounds.top) * scaleY, 0, regionCanvas.height)
-  return { x, y }
-}
-
-function drawOneRegion(ctx, rect, label) {
-  if (rect.w < 4 || rect.h < 4) return
-  ctx.fillStyle = 'rgba(124, 92, 255, 0.22)'
-  ctx.strokeStyle = 'rgba(232, 180, 255, 0.95)'
-  ctx.lineWidth = 2
-  ctx.fillRect(rect.x, rect.y, rect.w, rect.h)
-  ctx.strokeRect(rect.x, rect.y, rect.w, rect.h)
-
-  const badge = String(label)
-  const badgeW = 22
-  const badgeH = 18
-  const bx = rect.x + 4
-  const by = rect.y + 4
-  ctx.fillStyle = 'rgba(124, 92, 255, 0.95)'
-  ctx.fillRect(bx, by, badgeW, badgeH)
-  ctx.fillStyle = '#ffffff'
-  ctx.font = 'bold 12px sans-serif'
-  ctx.textBaseline = 'middle'
-  ctx.textAlign = 'center'
-  ctx.fillText(badge, bx + badgeW / 2, by + badgeH / 2 + 1)
-}
-
 function redrawRegions() {
+  if (!regionCanvas || regionCanvas.hidden) return
   syncRegionCanvasSize()
   const ctx = regionCanvas.getContext('2d')
-  if (!ctx) return
-  ctx.clearRect(0, 0, regionCanvas.width, regionCanvas.height)
-
-  regionState.regions.forEach((region, index) => {
-    drawOneRegion(ctx, region, index + 1)
-  })
-
-  if (regionState.draft.active || regionState.draft.w >= 4) {
-    // 드래그 중 임시 영역은 다음 번호로 미리보기
-    drawOneRegion(ctx, regionState.draft, regionState.regions.length + 1)
-  }
+  const lasso = ensureReviseLasso()
+  if (lasso) lasso.draw(ctx)
+  else if (ctx) ctx.clearRect(0, 0, regionCanvas.width, regionCanvas.height)
 }
 
 function updateRegionList() {
-  if (!regionState.regions.length) {
+  const lasso = ensureReviseLasso()
+  const regions = lasso?.getRegions?.() || []
+  const draft = lasso?.getDraftCount?.() || 0
+  if (!regions.length && !draft) {
     regionList.hidden = true
     regionList.textContent = ''
     return
   }
   regionList.hidden = false
-  regionList.textContent = regionState.regions
-    .map((_, index) => `${index + 1}번 영역`)
-    .join(' · ')
+  const parts = regions.map((_, index) => `${index + 1}번 선택`)
+  if (draft) parts.push(`그리는 중(${draft}점)`)
+  regionList.textContent = parts.join(' · ')
 }
 
-/** 모든 확정 영역 합집합 → 마스크(흰=수정). 최대변 768 PNG(이진화 유지, JPEG는 마스크를 망가뜨림). */
+/** 닫힌 다각형 합집합 → 마스크(흰=수정, 가장자리 소프트). */
 function buildMaskDataUrlFromRegion() {
-  if (!regionState.regions.length) return null
-  const natW = resultImage.naturalWidth || regionCanvas.width
-  const natH = resultImage.naturalHeight || regionCanvas.height
-  const maxSide = 768
-  const outScale = Math.min(1, maxSide / Math.max(natW, natH))
-  const outW = Math.max(1, Math.round(natW * outScale))
-  const outH = Math.max(1, Math.round(natH * outScale))
-  const scaleX = outW / regionCanvas.width
-  const scaleY = outH / regionCanvas.height
-
-  const mask = document.createElement('canvas')
-  mask.width = outW
-  mask.height = outH
-  const ctx = mask.getContext('2d')
-  ctx.fillStyle = '#000000'
-  ctx.fillRect(0, 0, outW, outH)
-  ctx.fillStyle = '#ffffff'
-  for (const region of regionState.regions) {
-    ctx.fillRect(
-      Math.round(region.x * scaleX),
-      Math.round(region.y * scaleY),
-      Math.max(1, Math.round(region.w * scaleX)),
-      Math.max(1, Math.round(region.h * scaleY)),
-    )
-  }
-  return mask.toDataURL('image/png')
+  const lasso = ensureReviseLasso()
+  return lasso?.buildMaskDataUrl?.(768) || null
 }
 
 /** 수정 결과가 거의 검은 화면(필터 블랭크)인지 검사 */
@@ -1074,7 +1342,9 @@ function setRegionDrawEnabled(enabled) {
   regionToolbar.hidden = !enabled
   resultStage.classList.toggle('result__stage--drawing', enabled)
   resultImage.draggable = false
+  const lasso = ensureReviseLasso()
   if (enabled) {
+    lasso?.setEnabled(true)
     const ready = () => {
       syncRegionCanvasSize()
       redrawRegions()
@@ -1087,20 +1357,25 @@ function setRegionDrawEnabled(enabled) {
       requestAnimationFrame(ready)
     }
   } else {
-    clearAllRegions()
+    lasso?.setEnabled(false)
     regionList.hidden = true
   }
 }
 
-/** idle: 수정/다시생성/수용 버튼 · revising: 수정 패널만 */
+/** idle: 수정·쇼츠·수용 · revising: 수정 패널만(쇼츠는 잠깐 숨김) */
 function setReviewChrome(mode) {
   const revising = mode === 'revising'
   if (reviewActions) reviewActions.hidden = revising
   revisePanel.hidden = !revising
+  // 수용 전에도 쇼츠 가능 — 다듬기 중일 때만 가려 한 화면에 한 일
+  if (animatePanel && currentResult.imageUrl) {
+    animatePanel.hidden = revising
+  }
   if (!revising) {
+    setPinDrawEnabled(false)
     setRegionDrawEnabled(false)
   } else {
-    setRegionDrawEnabled(getSelectedReviseMode() === 'region')
+    syncReviseModeUi()
   }
 }
 
@@ -1109,7 +1384,8 @@ function enterReviewMode() {
   reviewBadge.hidden = false
   reviewPanel.hidden = false
   acceptedActions.hidden = true
-  animatePanel.hidden = true
+  // 수용 없이 다듬기·쇼츠 바로 가능
+  if (animatePanel) animatePanel.hidden = false
   setReviewChrome('idle')
   setReviseStatus('', false)
 }
@@ -1121,7 +1397,7 @@ function enterAcceptedMode() {
   revisePanel.hidden = true
   if (reviewActions) reviewActions.hidden = false
   acceptedActions.hidden = false
-  animatePanel.hidden = false
+  if (animatePanel) animatePanel.hidden = false
   setRegionDrawEnabled(false)
   updateMoveGalleryButton()
 }
@@ -1150,12 +1426,19 @@ moveGalleryButton?.addEventListener('click', () => {
 
 function openRevisePanel() {
   reviewPanel.hidden = false
+  // 기본: 찍어서 붙이기(시계·귀걸이). 옷·구도는 텍스트, 지우기는 올가미.
+  const pinRadio = document.querySelector('input[name="revise-mode"][value="pin"]')
+  if (pinRadio) pinRadio.checked = true
   setReviewChrome('revising')
-  setReviseStatus('수정 요청을 입력한 뒤 「수정 적용」을 누르세요.', false)
+  setReviseStatus(
+    '시계·귀걸이·팔찌는 「찍어서 붙이기」로 자리를 클릭하세요. 옷·나체·구도는 「텍스트」, 목걸이 제거 등은 「올가미」.',
+    false,
+  )
 }
 
 function closeRevisePanel() {
   setReviewChrome('idle')
+  setPinDrawEnabled(false)
   setRegionDrawEnabled(false)
   setReviseStatus('', false)
 }
@@ -2137,33 +2420,45 @@ function wantsUndressActionClient(text) {
   ).test(t)
 }
 
-async function requestAnimate() {
-  if (!currentResult.imageUrl) return
+/**
+ * @param {{ motionOverride?: string, durationSec?: number, skipHide?: boolean, statusPrefix?: string, persist?: boolean, clipRole?: 'single'|'dual-a'|'dual-b' }} [options]
+ * @returns {Promise<{ ok: boolean, videoUrl?: string }>}
+ */
+async function requestAnimate(options = {}) {
+  if (!currentResult.imageUrl) return { ok: false }
 
   if (!isLoggedIn()) {
     showPinGate('로그인이 필요해요.')
-    return
+    return { ok: false }
   }
 
-  animateButton.disabled = true
-  hideVideoResult()
+  setAnimateBusy(true)
+  if (!options.skipHide) hideVideoResult()
 
-  const motionBase = (motionField?.value || '').trim()
+  const motionBase =
+    typeof options.motionOverride === 'string'
+      ? options.motionOverride.trim()
+      : (motionField?.value || '').trim()
   const fromMotion = motionBase.match(/(\d+)\s*초/)
-  let durationSec = getSelectedVideoDuration()
-  if (fromMotion) {
+  let durationSec =
+    typeof options.durationSec === 'number' && Number.isFinite(options.durationSec)
+      ? options.durationSec
+      : getSelectedVideoDuration()
+  // 단일 클립 API는 10~18. 24/30은 두 프레임 연속 경로에서 clipSec로만 넘긴다.
+  if (fromMotion && options.durationSec == null) {
     const n = Number(fromMotion[1])
-    if (n <= 8) durationSec = 8
-    else if (n <= 10) durationSec = 10
+    if (n <= 10) durationSec = 10
     else if (n <= 12) durationSec = 12
-    else durationSec = 15
-    setSelectedVideoDuration(durationSec)
+    else if (n <= 15) durationSec = 15
+    else if (n <= 18) durationSec = 18
+    else if (n <= 24) durationSec = 24
+    else durationSec = 30
+    if (!isDualFrameDuration(getSelectedVideoDuration()) && !isDualFrameDuration(durationSec)) {
+      setSelectedVideoDuration(durationSec)
+    }
   }
+  if (![10, 12, 15, 18].includes(durationSec)) durationSec = 15
   const speedKey = getSelectedVideoSpeed()
-  // 사용자가 모션 힌트에 직접 반대되는 속도를 써놓고(예: "느리게 걷는다") 속도 버튼도
-  // 따로 선택했으면(예: 빠르게), 자동으로 붙는 속도 힌트가 사용자 문구와 모순돼 영상
-  // 모델에 비일관적인 지시가 전달될 수 있다 — 이때는 사용자가 직접 쓴 텍스트를 우선하고
-  // 자동 속도 힌트는 붙이지 않는다.
   const speedConflict =
     (speedKey === 'slow' && /빠르게|빨리|급하게|격렬하게|재빠르게|fast|quick(?:ly)?|rapid(?:ly)?/i.test(motionBase)) ||
     (speedKey === 'fast' && /느리게|느린|천천히|slow(?:ly)?/i.test(motionBase))
@@ -2171,20 +2466,18 @@ async function requestAnimate() {
   const motion = [motionBase, speedHint].filter(Boolean).join('. ')
   const speedLabel = speedKey === 'slow' ? '느리게' : speedKey === 'fast' ? '빠르게' : '보통'
   const undressMotion = wantsUndressActionClient(motionBase)
-  // 실제로 어떤 모션 문구가 이번 요청에 반영됐는지 눈으로 바로 확인할 수 있게 상태 문구에
-  // 노출한다 — 이전 요청 값이 그대로 남아 쓰이는지 헷갈릴 때 즉시 알아챌 수 있다.
+  const prefix = options.statusPrefix ? `${options.statusPrefix} ` : ''
   const motionPreview = motionBase
-    ? ` (모션: "${motionBase.slice(0, 60)}${motionBase.length > 60 ? '…' : ''}"${speedConflict ? ` · 속도 버튼(${speedLabel})은 문구와 반대돼 자동 속도 힌트를 붙이지 않았어요` : ''})`
-    : ' (모션 힌트 없음 · 기본 동작)'
+    ? ` (모션: "${motionBase.slice(0, 60)}${motionBase.length > 60 ? '…' : ''}")`
+    : ' (모션 힌트 없음)'
   const stopTimer = startProgressTimer(
     setAnimateStatus,
     undressMotion
-      ? `탈의·누드 모션으로 쇼츠(약 ${durationSec}초)를 시작해요…${motionPreview} (원본이 옷을 입은 상태면 엔진이 잘 안 벗기는 경우가 있어요)`
-      : `쇼츠 영상(약 ${durationSec}초 · ${speedLabel})을 시작하고 있어요…${motionPreview}`,
+      ? `${prefix}탈의·누드 쇼츠(약 ${durationSec}초)…${motionPreview}`
+      : `${prefix}쇼츠(약 ${durationSec}초 · ${speedLabel})…${motionPreview}`,
   )
 
   try {
-    // 캐시가 없으면 한 번 더 시도 (만료 전이면 성공)
     if (!currentResult.imageDataUrl && currentResult.imageUrl) {
       await cacheImageForAnimate(currentResult.imageUrl)
     }
@@ -2199,6 +2492,7 @@ async function requestAnimate() {
         motion,
         size: currentResult.size,
         durationSec,
+        clipRole: options.clipRole === 'dual-a' || options.clipRole === 'dual-b' ? options.clipRole : 'single',
       }),
     })
     const rawText = await response.text()
@@ -2214,7 +2508,7 @@ async function requestAnimate() {
     if (response.status === 401) {
       clearAllAuth()
       showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
-      return
+      return { ok: false }
     }
 
     if (response.status === 422) {
@@ -2222,18 +2516,18 @@ async function requestAnimate() {
         '정책에 의해 차단된 표현이 포함되어 있어요. 미성년·강간·실존인물 묘사는 사용할 수 없어요.',
         true,
       )
-      return
+      return { ok: false }
     }
 
     if (!data.ok) {
       setAnimateStatus(`영상 생성에 실패했어요: ${animateErrorMessage(data, response)}`, true)
-      return
+      return { ok: false }
     }
 
     let finalData = data
     if (data.pending && data.predictionId) {
       setAnimateStatus(
-        `영상 렌더링 중(약 ${durationSec}초 · ${speedLabel})… 완료까지 1~2분 걸릴 수 있어요`,
+        `${prefix}영상 렌더링 중(약 ${durationSec}초 · ${speedLabel})… 1~2분 걸릴 수 있어요`,
         false,
       )
       finalData = await pollAnimateUntilDone(
@@ -2242,17 +2536,17 @@ async function requestAnimate() {
         speedLabel,
         (elapsedSec) => {
           setAnimateStatus(
-            `영상 렌더링 중… ${elapsedSec}초 경과 (약 ${durationSec}초 · ${speedLabel})`,
+            `${prefix}영상 렌더링 중… ${elapsedSec}초 경과 (약 ${durationSec}초 · ${speedLabel})`,
             false,
           )
         },
       )
-      if (!finalData) return
+      if (!finalData) return { ok: false }
     }
 
     if (!finalData.videoUrl) {
       setAnimateStatus('영상 생성에 실패했어요: 결과 주소가 비어 있어요.', true)
-      return
+      return { ok: false }
     }
 
     const draft = buildYoutubeShortsDraft({
@@ -2265,8 +2559,6 @@ async function requestAnimate() {
       motion: motionBase,
       youtubeDraft: draft,
     })
-    // 다시 만들기로 옛 영상이 이미 R2에 영구 저장돼 있었다면, 새 영상이 안전하게
-    // 저장된 뒤에 지운다.
     const animatedItemId = currentResult.itemId
     const previousPermanentVideoUrl = animatedItemId
       ? (() => {
@@ -2274,28 +2566,215 @@ async function requestAnimate() {
           return isPermanentMediaUrl(prev) ? prev : null
         })()
       : null
-    updateGalleryItemVideo(currentResult.itemId, finalData.videoUrl, draft)
+    if (options.persist !== false) {
+      updateGalleryItemVideo(currentResult.itemId, finalData.videoUrl, draft)
+    }
     const dur = finalData.durationSec || durationSec
-    setAnimateStatus(`쇼츠 영상 제작 완료(약 ${dur}초 · ${speedLabel})! (영상을 영구 저장하는 중…)`, false)
+    setAnimateStatus(`${prefix}쇼츠 완료(약 ${dur}초 · ${speedLabel})!`, false)
 
-    // 영상도 replicate.delivery의 임시 CDN 링크라 시간이 지나면 만료된다. 이미지와
-    // 마찬가지로 갤러리에 남는 즉시 R2로 백그라운드 복사해 영구 주소로 바꿔둔다.
     const animatedVideoUrl = finalData.videoUrl
-    persistImageToPermanentStorage(animatedVideoUrl).then((permanentUrl) => {
-      if (!permanentUrl) return
-      applyPersistedVideoUrl(animatedItemId, animatedVideoUrl, permanentUrl)
-      if (previousPermanentVideoUrl) deletePermanentMediaIfNeeded(previousPermanentVideoUrl)
-      setAnimateStatus(`쇼츠 영상 제작 완료(약 ${dur}초 · ${speedLabel})! 영상도 영구 저장했어요.`, false)
-    })
+    if (options.persist !== false) {
+      persistImageToPermanentStorage(animatedVideoUrl).then((permanentUrl) => {
+        if (!permanentUrl) return
+        applyPersistedVideoUrl(animatedItemId, animatedVideoUrl, permanentUrl)
+        if (previousPermanentVideoUrl) deletePermanentMediaIfNeeded(previousPermanentVideoUrl)
+        setAnimateStatus(`${prefix}쇼츠 완료(약 ${dur}초)! 영구 저장했어요.`, false)
+      })
+    }
+    return { ok: true, videoUrl: animatedVideoUrl }
   } catch (error) {
     stopTimer()
     setAnimateStatus(
       `영상 생성에 실패했어요: ${error instanceof Error ? error.message : String(error)}`,
       true,
     )
+    return { ok: false }
   } finally {
     stopTimer()
-    animateButton.disabled = false
+    if (!options.keepBusy) setAnimateBusy(false)
+  }
+}
+
+/** 영상 끝 프레임 → data URL (CORS 실패 시 null) */ 
+async function captureVideoEndFrame(videoUrl) {
+  const video = document.createElement('video')
+  video.muted = true
+  video.playsInline = true
+  video.preload = 'auto'
+  video.crossOrigin = 'anonymous'
+  video.src = videoUrl
+  await new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error('video_meta_timeout')), 20000)
+    video.onloadedmetadata = () => {
+      window.clearTimeout(t)
+      resolve()
+    }
+    video.onerror = () => {
+      window.clearTimeout(t)
+      reject(new Error('video_meta_failed'))
+    }
+  })
+  const dur = Number(video.duration)
+  if (!Number.isFinite(dur) || dur <= 0) throw new Error('video_no_duration')
+  video.currentTime = Math.max(0, dur - 0.08)
+  await new Promise((resolve, reject) => {
+    const t = window.setTimeout(() => reject(new Error('video_seek_timeout')), 12000)
+    video.onseeked = () => {
+      window.clearTimeout(t)
+      resolve()
+    }
+    video.onerror = () => {
+      window.clearTimeout(t)
+      reject(new Error('video_seek_failed'))
+    }
+  })
+  const canvas = document.createElement('canvas')
+  canvas.width = video.videoWidth || 720
+  canvas.height = video.videoHeight || 1280
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('canvas_unavailable')
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  return canvas.toDataURL('image/jpeg', 0.92)
+}
+
+async function mergeShortsVideos(videoUrls) {
+  const response = await fetch('/api/merge-videos', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ videoUrls }),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (!data?.ok || !data?.videoUrl) {
+    throw new Error(data?.message || data?.error || 'merge_failed')
+  }
+  return data.videoUrl
+}
+
+/**
+ * 두 프레임 연속 쇼츠.
+ * UI 이름: 24초 / 30초 — 내부만 12+12 / 15+15 후 병합.
+ * @param {number} [totalSec]
+ */
+async function requestDualFrameShorts(totalSec) {
+  const total = isDualFrameDuration(totalSec) ? Number(totalSec) : getSelectedVideoDuration()
+  if (!isDualFrameDuration(total)) {
+    setAnimateStatus('24초 또는 30초를 선택한 뒤 다시 눌러 주세요.', true)
+    return
+  }
+  const clipSec = getDualClipSec(total)
+
+  if (!currentResult.imageUrl) return
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+  const motion1 = (motionField?.value || '').trim()
+  const motion2 = (motion2Field?.value || '').trim()
+  if (!motion1 || !motion2) {
+    setAnimateStatus('전반·후반 모션을 모두 적어 주세요. (두 프레임 연속)', true)
+    syncDualFrameUi(total)
+    return
+  }
+
+  setAnimateBusy(true)
+  setSelectedVideoDuration(total)
+  const savedImageUrl = currentResult.imageUrl
+  const savedImageDataUrl = currentResult.imageDataUrl
+  const savedPrompt = currentResult.prompt
+
+  try {
+    setAnimateStatus(`${total}초 쇼츠: 전반(1/2) 생성…`, false)
+    const clip1 = await requestAnimate({
+      motionOverride: motion1,
+      durationSec: clipSec,
+      statusPrefix: `[${total}초 · 1/2]`,
+      persist: false,
+      keepBusy: true,
+      clipRole: 'dual-a',
+    })
+    if (!clip1.ok || !clip1.videoUrl) return
+
+    setAnimateStatus(`[${total}초 · 1/2] 끝 프레임으로 후반 연결 중…`, false)
+    let endFrame = null
+    try {
+      endFrame = await captureVideoEndFrame(clip1.videoUrl)
+    } catch (err) {
+      console.warn('end frame capture failed', err)
+    }
+    if (endFrame?.startsWith('data:image/')) {
+      showResult(endFrame, '전반 끝 프레임', false, {
+        size: currentResult.size,
+        itemId: currentResult.itemId,
+        prompt: `${savedPrompt || ''} · already nude continuity`.trim(),
+        accepted: true,
+        mood: currentResult.mood,
+        engine: currentResult.engine,
+        genMode: currentResult.genMode,
+      })
+      currentResult.imageDataUrl = endFrame
+      currentResult.imageUrl = endFrame
+    } else {
+      setAnimateStatus(
+        `[${total}초 · 1/2] 끝 프레임을 못 가져와 원본 스틸로 후반을 이어갑니다.`,
+        false,
+      )
+      currentResult.imageUrl = savedImageUrl
+      currentResult.imageDataUrl = savedImageDataUrl
+      currentResult.prompt = savedPrompt
+    }
+
+    const motion2Safe = /이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude/i.test(motion2)
+      ? motion2
+      : `이미 완전 나체 유지(브라·팬티 되살림 금지). ${motion2}`
+    if (motion2Field) motion2Field.value = motion2Safe
+
+    setAnimateStatus(`${total}초 쇼츠: 후반(2/2) 생성…`, false)
+    const clip2 = await requestAnimate({
+      motionOverride: motion2Safe,
+      durationSec: clipSec,
+      skipHide: true,
+      statusPrefix: `[${total}초 · 2/2]`,
+      persist: false,
+      keepBusy: true,
+      clipRole: 'dual-b',
+    })
+    if (!clip2.ok || !clip2.videoUrl) return
+
+    setAnimateStatus(`${total}초: 두 프레임을 이어 붙이는 중…`, false)
+    try {
+      const mergedUrl = await mergeShortsVideos([clip1.videoUrl, clip2.videoUrl])
+      const draft = buildYoutubeShortsDraft({
+        prompt: savedPrompt,
+        motion: `${motion1} / ${motion2Safe}`,
+        genMode: currentResult.genMode,
+      })
+      showVideoResult(mergedUrl, {
+        prompt: savedPrompt,
+        motion: `${motion1} / ${motion2Safe}`,
+        youtubeDraft: draft,
+      })
+      updateGalleryItemVideo(currentResult.itemId, mergedUrl, draft)
+      persistImageToPermanentStorage(mergedUrl).then((permanentUrl) => {
+        if (!permanentUrl) return
+        applyPersistedVideoUrl(currentResult.itemId, mergedUrl, permanentUrl)
+        setAnimateStatus(`${total}초 쇼츠 완료! 영구 저장했어요.`, false)
+      })
+      setAnimateStatus(`${total}초 쇼츠 완료! (두 프레임 연속)`, false)
+    } catch (mergeErr) {
+      showVideoResult(clip2.videoUrl, {
+        prompt: savedPrompt,
+        motion: motion2Safe,
+      })
+      setAnimateStatus(
+        `두 프레임은 만들었지만 자동 이어 붙이기 실패: ${
+          mergeErr instanceof Error ? mergeErr.message : String(mergeErr)
+        }. 후반 영상을 확인하세요.`,
+        true,
+      )
+    }
+  } finally {
+    setAnimateBusy(false)
+    setSelectedVideoDuration(total)
   }
 }
 
@@ -2780,7 +3259,7 @@ async function loadImageFromFile(file) {
       reviseRound: 0,
     })
     setFormStatus(
-      '사진을 불러왔어요! 아래에서 「1차 수정」・영역 지정으로 고치거나 「수용하기」로 갤러리에 저장하세요.',
+      '사진을 불러왔어요! 수용 없이 「이미지 수정」·「쇼츠」를 바로 할 수 있어요. 갤러리 저장만 수용하세요.',
       false,
     )
   } catch (error) {
@@ -2799,23 +3278,80 @@ loadImageInput?.addEventListener('change', () => {
   if (file) loadImageFromFile(file)
 })
 
-// 화보/일러스트 스튜디오 화면에서 Ctrl+V로 사진을 붙여넣으면 바로 불러온다.
-// 클립보드에 이미지가 없으면(텍스트만 있으면) 아무것도 가로채지 않고 원래 붙여넣기 동작을 둔다.
-document.addEventListener('paste', (event) => {
-  const area = getAppArea()
-  if (area !== 'studio' && area !== 'admin') return
-  const items = event.clipboardData?.items
-  if (!items) return
-  for (const item of items) {
-    if (item.kind === 'file' && String(item.type || '').startsWith('image/')) {
-      const file = item.getAsFile()
-      if (file) {
-        event.preventDefault()
-        loadImageFromFile(file)
-      }
-      return
+/** 클립보드/드롭에서 첫 이미지 파일 추출 (캡처·파일 탐색기 드래그 모두) */
+function pickImageFileFromDataTransfer(dataTransfer) {
+  if (!dataTransfer) return null
+  const files = dataTransfer.files
+  if (files?.length) {
+    for (const file of files) {
+      if (String(file.type || '').startsWith('image/')) return file
     }
   }
+  const items = dataTransfer.items
+  if (items?.length) {
+    for (const item of items) {
+      if (item.kind === 'file' && String(item.type || '').startsWith('image/')) {
+        const file = item.getAsFile()
+        if (file) return file
+      }
+    }
+  }
+  return null
+}
+
+function isStudioImageLoadContext() {
+  const area = getAppArea()
+  return area === 'studio' || area === 'admin'
+}
+
+// 화보/관리자: Ctrl+V 캡처·이미지 붙여넣기 → 수정 대상으로 불러오기
+document.addEventListener('paste', (event) => {
+  if (!isStudioImageLoadContext()) return
+  // 텍스트만 붙여넣는 경우는 가로채지 않음 (설명 칸 등)
+  const file = pickImageFileFromDataTransfer(event.clipboardData)
+  if (!file) return
+  event.preventDefault()
+  void loadImageFromFile(file)
+})
+
+// 캐릭터/컨셉 영역: 폴더에서 마우스로 끌어다 놓기
+const descriptionDropzone = document.getElementById('description-dropzone')
+const descriptionDropOverlay = descriptionDropzone?.querySelector('.description-dropzone__overlay')
+let descriptionDragDepth = 0
+
+function setDescriptionDropActive(on) {
+  descriptionDropzone?.classList.toggle('description-dropzone--active', on)
+  if (descriptionDropOverlay) descriptionDropOverlay.hidden = !on
+}
+
+descriptionDropzone?.addEventListener('dragenter', (event) => {
+  if (!isStudioImageLoadContext()) return
+  event.preventDefault()
+  descriptionDragDepth += 1
+  setDescriptionDropActive(true)
+})
+descriptionDropzone?.addEventListener('dragover', (event) => {
+  if (!isStudioImageLoadContext()) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+})
+descriptionDropzone?.addEventListener('dragleave', (event) => {
+  if (!isStudioImageLoadContext()) return
+  event.preventDefault()
+  descriptionDragDepth = Math.max(0, descriptionDragDepth - 1)
+  if (descriptionDragDepth === 0) setDescriptionDropActive(false)
+})
+descriptionDropzone?.addEventListener('drop', (event) => {
+  if (!isStudioImageLoadContext()) return
+  event.preventDefault()
+  descriptionDragDepth = 0
+  setDescriptionDropActive(false)
+  const file = pickImageFileFromDataTransfer(event.dataTransfer)
+  if (!file) {
+    setFormStatus('이미지 파일만 끌어다 놓을 수 있어요 (PNG/JPEG/WEBP/GIF).', true)
+    return
+  }
+  void loadImageFromFile(file)
 })
 
 // fal/replicate 임시 CDN 링크는 시간이 지나면 만료된다. 「수용하기」/영상 완성 시점에
@@ -2948,9 +3484,7 @@ reviseCancelButton.addEventListener('click', () => {
 
 document.querySelectorAll('input[name="revise-mode"]').forEach((input) => {
   input.addEventListener('change', () => {
-    if (!revisePanel.hidden) {
-      setRegionDrawEnabled(getSelectedReviseMode() === 'region')
-    }
+    if (!revisePanel.hidden) syncReviseModeUi()
   })
 })
 
@@ -2959,110 +3493,141 @@ resultImage.addEventListener('dragstart', (event) => {
   event.preventDefault()
 })
 
-regionCanvas.addEventListener('pointerdown', (event) => {
-  if (regionCanvas.hidden) return
+// 찍어서 붙이기: 결과 이미지 클릭·휠
+resultImage?.addEventListener('click', (event) => {
+  if (revisePanel?.hidden || getSelectedReviseMode() !== 'pin') return
   event.preventDefault()
-  event.stopPropagation()
-  syncRegionCanvasSize()
-  const point = pointerToCanvasPoint(event)
-
-  // 기존 번호 박스를 짧게 클릭하면 해당 영역만 삭제
-  const hitIndex = findRegionIndexAtPoint(point.x, point.y)
-  regionState._hitIndexOnDown = hitIndex
-  regionState._downX = point.x
-  regionState._downY = point.y
-
-  regionState.draft.active = true
-  regionState.draft.startX = point.x
-  regionState.draft.startY = point.y
-  regionState.draft.x = point.x
-  regionState.draft.y = point.y
-  regionState.draft.w = 0
-  regionState.draft.h = 0
-  regionCanvas.setPointerCapture(event.pointerId)
-  redrawRegions()
+  stampPropAtClientPoint(event.clientX, event.clientY)
 })
 
-regionCanvas.addEventListener('pointermove', (event) => {
-  if (!regionState.draft.active) return
-  event.preventDefault()
-  const point = pointerToCanvasPoint(event)
-  regionState.draft.x = Math.min(regionState.draft.startX, point.x)
-  regionState.draft.y = Math.min(regionState.draft.startY, point.y)
-  regionState.draft.w = Math.abs(point.x - regionState.draft.startX)
-  regionState.draft.h = Math.abs(point.y - regionState.draft.startY)
-  redrawRegions()
-})
+resultStage?.addEventListener(
+  'wheel',
+  (event) => {
+    if (revisePanel?.hidden || getSelectedReviseMode() !== 'pin') return
+    event.preventDefault()
+    const dir = event.deltaY > 0 ? -0.1 : 0.1
+    pinScale = Math.min(2.8, Math.max(0.4, pinScale + dir))
+    if (pinStatus) pinStatus.textContent = `크기 ${pinScale.toFixed(1)}× — 클릭으로 붙이기`
+  },
+  { passive: false },
+)
 
-regionCanvas.addEventListener('pointerup', (event) => {
-  if (!regionState.draft.active) return
-  event.preventDefault()
-  regionState.draft.active = false
-  try {
-    regionCanvas.releasePointerCapture(event.pointerId)
-  } catch {
-    /* ignore */
-  }
-
-  const moved =
-    Math.abs(regionState.draft.w) < 8 &&
-    Math.abs(regionState.draft.h) < 8 &&
-    typeof regionState._hitIndexOnDown === 'number' &&
-    regionState._hitIndexOnDown >= 0
-
-  // 거의 움직이지 않은 클릭 = 해당 번호 영역 삭제
-  if (moved) {
-    const removedOrder = regionState._hitIndexOnDown + 1
-    regionState.regions.splice(regionState._hitIndexOnDown, 1)
-    regionState.draft.w = 0
-    regionState.draft.h = 0
-    redrawRegions()
-    updateRegionList()
-    setReviseStatus(`${removedOrder}번 영역을 삭제했어요.`, false)
-    regionState._hitIndexOnDown = -1
-    return
-  }
-
-  // 충분히 큰 사각형만 확정 영역으로 추가 (기존 영역 유지)
-  if (regionState.draft.w >= 12 && regionState.draft.h >= 12) {
-    regionState.regions.push({
-      id: regionState.nextId,
-      x: regionState.draft.x,
-      y: regionState.draft.y,
-      w: regionState.draft.w,
-      h: regionState.draft.h,
-    })
-    regionState.nextId += 1
-    setReviseStatus(
-      `${regionState.regions.length}번 영역까지 지정됐어요. 잘못됐으면 「마지막 영역 취소」를 누르세요.`,
-      false,
-    )
-  }
-  regionState.draft.w = 0
-  regionState.draft.h = 0
-  regionState._hitIndexOnDown = -1
-  redrawRegions()
-  updateRegionList()
-})
-
-regionCanvas.addEventListener('pointercancel', () => {
-  regionState.draft.active = false
-  regionState.draft.w = 0
-  regionState.draft.h = 0
-  redrawRegions()
-})
-
+// 올가미 입력은 poly-lasso.js가 region-canvas에 직접 붙인다.
 regionUndoButton.addEventListener('click', () => {
   undoLastRegion()
 })
 
 regionClearButton.addEventListener('click', () => {
   clearAllRegions()
-  setReviseStatus('모든 선택 영역을 지웠어요. 다시 드래그해 주세요.', false)
+  setReviseStatus('모든 선택을 지웠어요. 좌클릭으로 점을 다시 찍으세요.', false)
 })
+
+/** 좌우 이중 초상(diptych) 제거 요청 — AI 대신 절반 크롭이 확실함 */
+function wantsDiptychCropFix(text) {
+  return /이중\s*초상|좌우\s*(이중|분신|둘)|한\s*쪽만|한쪽만|한\s*장만|diptych|split\s*screen|둘로\s*나|분신\s*제거/i.test(
+    text || '',
+  )
+}
+
+function parseDiptychCropSide(text) {
+  if (/오른|right/i.test(text || '')) return 'right'
+  return 'left'
+}
+
+/**
+ * 현재 결과 이미지를 좌/우 절반만 남긴 data URL로 반환.
+ * CORS 회피: /api/media-bytes로 dataUrl을 받은 뒤 크롭.
+ */
+async function cropCurrentResultToHalf(side = 'left') {
+  if (!currentResult.imageUrl) throw new Error('no_image')
+  let sourceDataUrl = currentResult.imageDataUrl
+  if (!sourceDataUrl || !String(sourceDataUrl).startsWith('data:')) {
+    const response = await fetch('/api/media-bytes', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ imageUrl: currentResult.imageUrl }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!data?.ok || !data.dataUrl) throw new Error(data?.error || 'media_bytes_failed')
+    sourceDataUrl = data.dataUrl
+    currentResult.imageDataUrl = sourceDataUrl
+  }
+  const img = new Image()
+  await new Promise((resolve, reject) => {
+    img.onload = () => resolve()
+    img.onerror = () => reject(new Error('image_decode_failed'))
+    img.src = sourceDataUrl
+  })
+  const fullW = img.naturalWidth || img.width
+  const fullH = img.naturalHeight || img.height
+  if (fullW < 32 || fullH < 32) throw new Error('image_too_small')
+  const halfW = Math.max(1, Math.floor(fullW / 2))
+  const canvas = document.createElement('canvas')
+  canvas.width = halfW
+  canvas.height = fullH
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('canvas_unavailable')
+  const sx = side === 'right' ? halfW : 0
+  ctx.drawImage(img, sx, 0, halfW, fullH, 0, 0, halfW, fullH)
+  return canvas.toDataURL('image/png')
+}
+
+async function applyDiptychCrop(side = 'left') {
+  if (!currentResult.imageUrl) {
+    setReviseStatus('자를 이미지가 없어요.', true)
+    return
+  }
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+  reviseApplyButton.disabled = true
+  const leftBtn = document.getElementById('diptych-crop-left')
+  const rightBtn = document.getElementById('diptych-crop-right')
+  if (leftBtn) leftBtn.disabled = true
+  if (rightBtn) rightBtn.disabled = true
+  setReviseStatus(`이중 초상 ${side === 'right' ? '오른쪽' : '왼쪽'}만 남기는 중…`, false)
+  try {
+    const cropped = await cropCurrentResultToHalf(side)
+    const sideLabel = side === 'right' ? '오른쪽' : '왼쪽'
+    showResult(cropped, `이중초상 제거 (${sideLabel}만 유지)`, false, {
+      size: currentResult.size,
+      itemId: currentResult.itemId,
+      prompt: polishConceptText(
+        [currentResult.prompt, `단일 프레임(${sideLabel} 패널만 유지)`].filter(Boolean).join('. '),
+      ),
+      accepted: false,
+      mood: currentResult.mood,
+      engine: 'crop',
+      reviseRound: (currentResult.reviseRound || 0) + 1,
+    })
+    currentResult.imageDataUrl = cropped
+    setReviseStatus(
+      `이중 초상에서 ${sideLabel}만 남겼어요. 이제 한 장으로 이어서 수정·쇼츠할 수 있어요.`,
+      false,
+    )
+    revisionText.value = ''
+  } catch (error) {
+    setReviseStatus(
+      `자르기에 실패했어요: ${error instanceof Error ? error.message : 'unknown'}. 새로고침 후 다시 시도해 주세요.`,
+      true,
+    )
+  } finally {
+    reviseApplyButton.disabled = false
+    if (leftBtn) leftBtn.disabled = false
+    if (rightBtn) rightBtn.disabled = false
+  }
+}
+
+document.getElementById('diptych-crop-left')?.addEventListener('click', () => applyDiptychCrop('left'))
+document.getElementById('diptych-crop-right')?.addEventListener('click', () => applyDiptychCrop('right'))
 
 reviseApplyButton.addEventListener('click', async () => {
   if (!currentResult.imageUrl) return
+  if (getSelectedReviseMode() === 'pin') {
+    setReviseStatus('찍어서 붙이기 모드입니다. 소품을 고른 뒤 사진 위를 클릭하세요. (수정 적용 버튼 없음)', true)
+    return
+  }
   const revision = polishConceptText(revisionText.value || '')
   if (revision && revision !== (revisionText.value || '').trim()) {
     revisionText.value = revision
@@ -3072,22 +3637,28 @@ reviseApplyButton.addEventListener('click', async () => {
     return
   }
 
+  // 이중 초상 제거는 AI보다 절반 크롭이 확실 — 수정 적용으로도 동일 처리
+  if (wantsDiptychCropFix(revision)) {
+    await applyDiptychCrop(parseDiptychCropSide(revision))
+    return
+  }
+
   const mode = getSelectedReviseMode()
   let maskDataUrl = null
   if (mode === 'region') {
     maskDataUrl = buildMaskDataUrlFromRegion()
     if (!maskDataUrl) {
-      setReviseStatus('수정할 사각형 영역을 하나 이상 드래그해서 지정해 주세요.', true)
+      setReviseStatus(
+        '올가미 모드입니다. 부분만 고치려면 점을 찍어 닫으세요. 전신·구도처럼 전체를 바꾸려면 위에서 「텍스트로 수정」을 고른 뒤 다시 「수정 적용」을 누르세요.',
+        true,
+      )
       return
     }
-    // 영역 지정 수정은 "지정한 사각형 밖은 그대로 보존"하는 방식이라, 누드/전신처럼
-    // 마스크 밖 전체에 영향을 주는 요청과 함께 쓰면 그 부분이 반영되지 않는다
-    // (예: "바구니 제거 + 올누드로" 요청 시 바구니만 지워지고 인물은 그대로 옷을 입은
-    // 채 남는 사고가 실측으로 확인됐다). 미리 알려주고 계속할지 확인한다.
+    // 올가미 수정은 "선택 밖은 그대로 보존" — 누드/전신처럼 전역 요청과 섞으면 반만 반영된다.
     const wholeBodyPattern = /누드|나체|전라|전신|올누드|풀바디|속옷|란제리|nude|naked|undress/i
     if (wholeBodyPattern.test(revision)) {
       const proceed = window.confirm(
-        '영역 지정 수정은 지정한 사각형 밖은 바뀌지 않아요. 누드/전신처럼 몸 전체에 영향을 주는 요청은 "텍스트로 수정"이 더 잘 맞아요.\n\n그래도 지금 지정한 영역만 수정으로 계속할까요? (취소하면 모드를 바꿔서 다시 시도할 수 있어요)',
+        '올가미 수정은 선택한 영역 밖은 바뀌지 않아요. 누드/전신처럼 몸 전체에 영향을 주는 요청은 "텍스트로 수정"이 더 잘 맞아요.\n\n그래도 지금 선택한 영역만 수정으로 계속할까요? (취소하면 모드를 바꿔서 다시 시도할 수 있어요)',
       )
       if (!proceed) {
         setReviseStatus('영역 지정을 취소했어요. 「텍스트로 수정」으로 바꿔서 다시 시도해 보세요.', false)
@@ -3120,7 +3691,7 @@ reviseApplyButton.addEventListener('click', async () => {
         maskDataUrl,
         mood: currentResult.mood,
         size: currentResult.size || sizeField?.value || 'landscape',
-        regionCount: regionState.regions.length,
+        regionCount: ensureReviseLasso()?.getRegions?.().length || 0,
       }),
     })
     const rawText = await response.text()
@@ -3138,6 +3709,13 @@ reviseApplyButton.addEventListener('click', async () => {
       return
     }
     if (response.status === 422) {
+      if (data.error === 'use_accessory_pin') {
+        const pinRadio = document.querySelector('input[name="revise-mode"][value="pin"]')
+        if (pinRadio) pinRadio.checked = true
+        syncReviseModeUi()
+        setReviseStatus(data.message || '「찍어서 붙이기」로 자리를 클릭하세요.', true)
+        return
+      }
       setReviseStatus('내부 정책에 의해 차단된 수정 요청이에요.', true)
       return
     }
@@ -3185,9 +3763,18 @@ reviseApplyButton.addEventListener('click', async () => {
       return
     }
 
-    const nextPrompt = data.structuralRegen
-      ? polishConceptText([currentResult.prompt, revision].filter(Boolean).join('. '))
-      : currentResult.prompt
+    // 탈의·의상 수정도 structuralRegen=false(img2img)라서, 예전엔 prompt를 안 갱신했음 →
+    // 쇼츠가 옛 "가운/옷 입은" 서술만 보고 나체 이미지에 다시 옷을 입히는 회귀(실측).
+    // 수정 지시는 항상 누적한다. 나체 요청이면 판별용 마커를 한 줄 더 붙인다.
+    const nudeRev =
+      /누드|나체|전라|유두|유방|젖꼭지|탈의|벗기|벗겨|벗어|벗는|nude|naked|undress|bare\s*breast|topless/i.test(
+        revision,
+      )
+    const nextPrompt = polishConceptText(
+      [currentResult.prompt, revision, nudeRev ? '현재 나체(옷 없음, 유두 보임)' : '']
+        .filter(Boolean)
+        .join('. '),
+    )
     showResult(data.imageUrl, data.engineLabel, Boolean(data.fallbackUsed), {
       size: currentResult.size,
       itemId: currentResult.itemId,
@@ -3270,11 +3857,16 @@ window.addEventListener('resize', () => {
 })
 
 animateButton.addEventListener('click', () => {
-  if (!currentResult.accepted) {
-    setAnimateStatus('먼저 결과를 수용한 뒤에 쇼츠 영상을 만들 수 있어요.', true)
+  if (!currentResult.imageUrl) {
+    setAnimateStatus('먼저 이미지를 생성하거나 불러와 주세요.', true)
     return
   }
-  requestAnimate()
+  const dur = getSelectedVideoDuration()
+  if (isDualFrameDuration(dur)) {
+    void requestDualFrameShorts(dur)
+    return
+  }
+  void requestAnimate()
 })
 
 videoDurationGroup?.querySelectorAll('[data-duration]').forEach((btn) => {
@@ -3718,6 +4310,65 @@ async function bootAuth() {
   }
 
   showPinGate()
+}
+
+const ADMIN_PANEL_KEY = 'storymag-admin-panel'
+
+function getAdminPanel() {
+  const saved = localStorage.getItem(ADMIN_PANEL_KEY)
+  return saved === 'fuse' || saved === 'gallery' ? saved : 'fashion'
+}
+
+function setAdminPanel(panel) {
+  const next = panel === 'fuse' || panel === 'gallery' ? panel : 'fashion'
+  localStorage.setItem(ADMIN_PANEL_KEY, next)
+  syncAdminWorkspaceUi()
+}
+
+function syncAdminWorkspaceUi() {
+  const area = getAppArea()
+  const panel = getAdminPanel()
+  const subnav = document.getElementById('admin-subnav')
+  const fusePanel = document.getElementById('admin-fuse-panel')
+  const formPanel = document.getElementById('generate-form')?.closest('section.panel')
+  const isAdminArea = area === 'admin'
+
+  if (subnav) subnav.hidden = !isAdminArea
+  document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
+    const on = btn.getAttribute('data-admin-panel') === panel
+    btn.classList.toggle('admin-subnav__btn--active', on && isAdminArea)
+    btn.setAttribute('aria-selected', on && isAdminArea ? 'true' : 'false')
+  })
+
+  if (fusePanel) fusePanel.hidden = !(isAdminArea && panel === 'fuse')
+  if (adminGallerySection) adminGallerySection.hidden = !(isAdminArea && panel === 'gallery')
+
+  if (formPanel) {
+    formPanel.hidden = isAdminArea && panel !== 'fashion'
+  }
+  if (resultSection) {
+    if (isAdminArea && panel !== 'fashion') {
+      resultSection.hidden = true
+    } else if (area === 'studio' || area === 'admin') {
+      syncResultVisibilityForArea(area === 'admin' ? 'fashion' : 'free')
+    }
+  }
+}
+
+document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    setAdminPanel(btn.getAttribute('data-admin-panel') || 'fashion')
+  })
+})
+
+if (window.StorymagAdminFuse?.init) {
+  window.StorymagAdminFuse.init({
+    getCurrentResult: () => currentResult,
+    showResult,
+    setAdminPanel,
+    setFormStatus,
+    moodField,
+  })
 }
 
 bootAuth()

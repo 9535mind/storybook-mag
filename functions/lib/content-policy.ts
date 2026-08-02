@@ -114,7 +114,7 @@ const KO_PARTICLE_GAP =
 // 실제로 쓸 만한 상의/하의/속옷 명칭을 폭넓게 담아둔다. "브라(?!운)"은 "브라운"(색상)
 // 오발동 방지(기존 wantsUnderwearLook과 동일 이유).
 const KO_CLOTHING_NOUN =
-  '옷|가운|로브|속옷|언더웨어|상의|하의|티셔츠|셔츠|니트|블라우스|브래지어|브라(?!운)|바지|팬츠|팬티|치마|스커트|드레스|원피스|자켓|재킷|코트|조끼|탑|스타킹|양말'
+  '옷|가운|로브|스웨터|가디건|속옷|언더웨어|상의|하의|티셔츠|셔츠|니트|블라우스|브래지어|브라(?!운)|바지|팬츠|팬티|치마|스커트|드레스|원피스|자켓|재킷|코트|조끼|탑|스타킹|양말'
 
 // "벗다"뿐 아니라 "제거/없애/지우다"도 실제로 쓰이는 탈의 표현이다. 동사 어간만 매칭해서
 // 활용형(제거하다/제거해줘/제거하라, 없애다/없애줘/없애라, 지우다/지워줘/지워라, 벗다/
@@ -161,6 +161,12 @@ export function wantsNudeOrUndress(text: string): boolean {
       `remove\\s*(?:her\\s*)?${EN_CLOTHING_NOUN}`,
       `take(?:s|ing)?\\s*off\\s*(?:her\\s*|the\\s*)?${EN_CLOTHING_NOUN}`,
       'fully\\s*nude', 'bare\\s*(?:skin|body)', '완전\\s*노출', '전라',
+      // 「유방/유두 보여줘」「가슴 노출」— 누드·나체 단어 없이도 탈의 의도 (실측: 가운만 색 바뀜)
+      '유두', '유방', '젖꼭지', 'topless', 'bare\\s*breasts?', 'visible\\s*nipples?',
+      'show\\s*(?:her\\s*)?(?:breasts?|nipples?)', 'nipples?\\s*(?:visible|showing)',
+      '가슴\\s*(?:을\\s*)?(?:보여|노출|드러내|내보여)',
+      '가운\\s*(?:을\\s*)?(?:열어|벗|풀어|헤쳐)', '로브\\s*(?:을\\s*)?(?:열어|벗|풀어)',
+      'open\\s*(?:her\\s*)?(?:robe|gown)', 'open\\s*the\\s*robe',
     ].join('|'),
     'i',
   )
@@ -227,7 +233,7 @@ export function wantsDressAction(text: string): boolean {
 }
 
 const NUDE_STATE_WORD_PATTERN =
-  /누드|나체|nude|naked|fully\s*nude|bare\s*(?:skin|body)|완전\s*노출|전라/i
+  /누드|나체|nude|naked|fully\s*nude|bare\s*(?:skin|body|breasts?)|완전\s*노출|전라|유두|유방|젖꼭지|topless|visible\s*nipples?|가슴\s*(?:을\s*)?(?:보여|노출|드러내)/i
 
 /**
  * "바지를 벗기고 치마를 입혀라"/"팬티는 벗기고 가운만 입혀라"처럼 한 문장에 탈의+착의가
@@ -279,6 +285,15 @@ export function isClothingChangeRevision(text: string): boolean {
  * 얼굴 클로즈업 / 캐주얼 티 / 비즈니스 정장으로 의상이 바뀌는 실패를 강하게 억제한다.
  * (누드 요청 시에는 buildFashionNegativePrompt가 outfit 강제 항목을 제거한다.)
  */
+/** 수정 반복 시 얼굴이 하얗게/흑갈색으로 드리프트·서양인 치환되는 실패 패턴 (철칙 금지). */
+export const IDENTITY_DRIFT_NEGATIVE = [
+  'different person, different face, face swap, identity change',
+  'pale white face, chalky white skin, ghostly pale, overexposed bleached face, porcelain doll bleach',
+  'muddy dark brown skin, blackish brown face, burned dark skin, orange fake tan, uneven skin darkening',
+  'caucasian face when source is asian, western european facial features, wrong ethnicity',
+  'changed body type, slimmed down body, bulked up body, different breast size, different hip shape',
+].join(', ')
+
 export const DEFAULT_NEGATIVE_PROMPT = [
   'worst quality, low quality, blurry, deformed, bad anatomy, extra limbs, extra fingers',
   'watermark, text, logo',
@@ -291,6 +306,7 @@ export const DEFAULT_NEGATIVE_PROMPT = [
   'unrelated subject, different scene than requested',
   // 증명사진·패널 콜라주만 금지 (한 장면 속 여러 인물/동물은 허용)
   'contact sheet, triptych, multiple panels, split screen collage, passport photos, ID photo strip, duplicated identical portraits side by side',
+  IDENTITY_DRIFT_NEGATIVE,
 ].join(', ')
 
 const OUTFIT_FORCE_NEGATIVE =
@@ -388,10 +404,375 @@ function isDanceRevision(description: string): boolean {
  * ${revision}" 형태로 합쳐져 있어도, base의 "치마를 입고 있다" 같은 서술 때문에 이번
  * revision의 순수 탈의 지시가 상쇄되는 사고를 막는다(wantsFullNude 주석 참고).
  */
+/** 음모·체모만 손보자는 수정인지 (쇼츠/전역 나체 락과 분리 — 요청 시에만) */
+export function wantsPubicHairOnlyRefine(revision: string): boolean {
+  const t = polishKoreanPromptText(revision || '')
+  return /음모|치모|체모|곱슬\s*음모|pubic\s*hair|\bbush\b/i.test(t)
+}
+
+/** 귀걸이·목걸이·시계 등 장신구만 — 전신 img2img strength↑로 인물이 사라지던 실측 분리 */
+export function wantsJewelryAccessoryRefine(revision: string): boolean {
+  const t = polishKoreanPromptText(revision || '')
+  return /귀걸이|이어링|피어싱|목걸이|초커|팔찌|반지|시계|손목시계|워치|발찌|earring|necklace|choker|bracelet|piercing|jewelry|jewellery|\bwatch\b|wristwatch|anklet/i.test(
+    t,
+  )
+}
+
+/** 손목 시계·팔찌 — 귀 마스크가 아니라 손목 마스크로 라우팅 */
+export function wantsWristAccessoryRefine(revision: string): boolean {
+  const t = polishKoreanPromptText(revision || '')
+  if (/귀걸이|이어링|earring|피어싱|piercing/i.test(t) && !/시계|워치|\bwatch\b|팔찌|bracelet|팔목/i.test(t)) {
+    return false
+  }
+  return /시계|손목시계|워치|손목|팔목|팔찌|발찌|\bwatch\b|wristwatch|bracelet|anklet/i.test(t)
+}
+
+/** 목걸이 추가·제거·변경 */
+export function wantsNecklaceRefine(revision: string): boolean {
+  const t = polishKoreanPromptText(revision || '')
+  return /목걸이|초커|펜던트|necklace|choker|pendant/i.test(t)
+}
+
+/** 목걸이 제거·없애기 */
+export function wantsNecklaceRemove(revision: string): boolean {
+  const t = polishKoreanPromptText(revision || '')
+  if (!wantsNecklaceRefine(t)) return false
+  return /제거|없애|지워|빼|삭제|벗어|빼고|없이|remove|delete|without|no\s*necklace/i.test(t)
+}
+
+/** 장신구만 추가/변경 — 얼굴·헤어·옷·배경·포즈 픽셀 유지 전제 */
+export function buildJewelryAccessoryRefinePrompt(revision: string): string {
+  const t = polishKoreanPromptText(revision || '')
+  const wrist = wantsWristAccessoryRefine(t)
+  const necklace = wantsNecklaceRefine(t)
+  if (wrist && necklace) return buildWristAndNecklaceRefinePrompt(t)
+  if (wrist) return buildWristWatchRefinePrompt(t)
+  if (necklace) return buildNecklaceRefinePrompt(t)
+  const butterfly = /나비|butterfly/i.test(t)
+  return [
+    'Local edit: ONLY change the masked ear/jewelry areas. Paint jewelry into the white mask only.',
+    butterfly
+      ? 'Add clearly visible butterfly-shaped dangling earrings on the visible ear(s) — ornate butterfly wing motif, metallic, readable at a glance.'
+      : 'Add or change the requested jewelry on the SAME woman from the source photo.',
+    'CRITICAL: keep the exact same face, hair, body, clothing, pose, background, and camera framing outside the mask — do not invent a new person or studio portrait.',
+    'FORBIDDEN inventions: surgical/medical face mask, KF94, covering the mouth/nose, new buildings, extra walls, changed sky or trees.',
+    'If the source is a profile, put the earring on the visible ear near the jaw/hairline. Do not blank the ear — the earring must be clearly visible.',
+    t ? `Jewelry request: ${t}.` : '',
+    'Photorealistic seamless inpaint, same lighting.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** 손목에 시계/팔찌만 — 얼굴·옷·배경 유지 */
+export function buildWristWatchRefinePrompt(revision: string): string {
+  const t = polishKoreanPromptText(revision || '')
+  const wantsWatch = /시계|워치|\bwatch\b|wristwatch/i.test(t)
+  const wantsBracelet = /팔찌|bracelet/i.test(t)
+  let addLine =
+    'Add a clearly visible wristwatch on the most prominent visible wrist — slim metal or leather strap, readable watch face, fashion editorial.'
+  if (wantsWatch && wantsBracelet) {
+    addLine =
+      'Add BOTH: a slim wristwatch on one wrist AND a slim elegant metal bracelet on the other wrist — both clearly visible, fashion editorial. Do not leave either wrist bare if both are in frame.'
+  } else if (wantsBracelet && !wantsWatch) {
+    addLine = 'Add a slim elegant bracelet on the most visible wrist — metallic, clear, fashion editorial.'
+  }
+  return [
+    'Local edit: ONLY change the masked wrist areas. Paint accessory onto visible wrists only.',
+    addLine,
+    'CRITICAL: keep the exact same face, hair, body, clothing, pose, background, and camera framing. Do not invent a new person.',
+    'FORBIDDEN: surgical face mask, new buildings, changing outfit or hair, blanking wrists without the requested accessory.',
+    'If wrists are not in frame, do not invent arms from a close-up crop — leave the image unchanged rather than inventing a new pose.',
+    t ? `Accessory request: ${t}.` : '',
+    'Photorealistic seamless inpaint, same lighting.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** 목걸이만 추가/제거 */
+export function buildNecklaceRefinePrompt(revision: string): string {
+  const t = polishKoreanPromptText(revision || '')
+  const remove = wantsNecklaceRemove(t)
+  return [
+    'Local edit: ONLY change the masked neck/chest necklace area.',
+    remove
+      ? 'REMOVE the necklace, chain, cross pendant, and any neck jewelry completely. Bare clean neck and upper chest skin matching the source. No chain shadow leftover.'
+      : 'Add or change the necklace as requested on the SAME woman — clear pendant/chain, fashion editorial.',
+    'CRITICAL: keep the exact same face, hair, blouse, pose, background, and framing. Do not invent a new person or change clothing.',
+    'FORBIDDEN: surgical face mask, new buildings, changing outfit.',
+    t ? `Necklace request: ${t}.` : '',
+    'Photorealistic seamless inpaint, same lighting.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** 손목 액세서리 + 목걸이 처리(제거 포함) 한 번에 */
+export function buildWristAndNecklaceRefinePrompt(revision: string): string {
+  const t = polishKoreanPromptText(revision || '')
+  const wantsWatch = /시계|워치|\bwatch\b|wristwatch/i.test(t)
+  const wantsBracelet = /팔찌|bracelet/i.test(t)
+  const removeNecklace = wantsNecklaceRemove(t)
+  const wristLine =
+    wantsWatch && wantsBracelet
+      ? 'On the wrists: add a slim wristwatch on one wrist AND a slim metal bracelet on the other — both clearly visible.'
+      : wantsBracelet
+        ? 'On the wrists: add a slim elegant bracelet on the most visible wrist.'
+        : 'On the wrists: add a clearly visible slim wristwatch on the most prominent wrist.'
+  const neckLine = removeNecklace
+    ? 'On the neck: REMOVE the necklace, chain, and cross pendant completely — bare clean neck matching the skin, no leftover chain.'
+    : 'On the neck: apply the necklace change as requested.'
+  return [
+    'Local edit: ONLY change the masked wrist and neck areas.',
+    wristLine,
+    neckLine,
+    'CRITICAL: keep the exact same face, hair, clothing (white blouse, red skirt), pose, studio white background, and framing. Same woman.',
+    'FORBIDDEN: surgical face mask, new buildings, changing outfit or hair, inventing a new person.',
+    t ? `Request: ${t}.` : '',
+    'Photorealistic seamless inpaint, same lighting.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/**
+ * 한 장 안에서 좌우로 옷/색/몸이 갈라진 생성 오류 수정
+ * (두 패널 크롭과 다름 — 세로 이음새·반반 색 통일)
+ */
+export function wantsSplitCompositeFix(revision: string): boolean {
+  const t = polishKoreanPromptText(revision || '')
+  return /갈라|반반|세로\s*나|이음|통일|하나로|한\s*벌|색\s*하나로|split\s*(?:color|outfit|composite)|half[\s-]?and[\s-]?half|merged\s*twin|세로\s*분할/i.test(
+    t,
+  )
+}
+
+/** 한 장·한 사람·한 옷으로 되돌리는 짧은 수정 프롬프트 */
+export function buildSplitCompositeFixPrompt(revision: string): string {
+  const t = polishKoreanPromptText(revision || '')
+  return [
+    'Image-to-image repair of ONE photo of ONE woman.',
+    'CRITICAL: the source wrongly shows a vertical split — left and right halves differ in clothing color or look fused. Unify into a single coherent person and a single outfit color across the whole torso.',
+    'No vertical seam down the middle, no half-and-half garment, no side-by-side twin inside one frame.',
+    'Keep the same face identity. Prefer the clearer half of the face/outfit if they conflict.',
+    'Photorealistic single portrait, not a diptych.',
+    t ? `User note: ${t}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** 제모·민무늬를 아주 명시했을 때만 true (bare/smooth 같은 약한 단어로는 허용하지 않음) */
+export function wantsExplicitPubicShave(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  return /제모|민무늬|쉐이븐|왁싱|waxed|shaved\s*(pubic|bush|crotch)?|no\s*pubic\s*hair|음모\s*(없|제거|밀)/i.test(
+    t,
+  )
+}
+
+/**
+ * 탈의·나체 시 성별/가슴 드리프트 방지 (헐렁한 옷 → 중성·남성 근육형으로 바뀌는 실측).
+ */
+export function buildFemaleAdultAnatomyLock(text = ''): string {
+  const t = polishKoreanPromptText(text || '')
+  const large = /큰\s*가슴|풍만|거유|글래머|busty|large\s*breasts?/i.test(t)
+  const small = /작은\s*가슴|빈유|small\s*breasts?/i.test(t)
+  const bust =
+    large
+      ? 'clear soft female breasts with full volume'
+      : small
+        ? 'clear soft female breasts, smaller natural volume — still unmistakably female, not flat male pecs'
+        : 'clear soft adult female breasts with natural soft tissue volume (not flat, not male pectorals)'
+  return [
+    'SEX LOCK: the subject is an adult WOMAN — feminine face, female body, female chest',
+    `${bust}, visible female nipples when nude`,
+    'FORBIDDEN: male or androgynous flat chest, bodybuilder pecs, six-pack masculinization, turning her into a man',
+    'FORBIDDEN: leaving jeans/pants/underwear on when nude/undress is requested — remove lower garments completely',
+  ].join('. ')
+}
+
+/**
+ * 성인 여성 음모·외음 — 기본 강제(곱슬 가닥 + 현실적 비율).
+ * 민무늬·점묘 텍스처·과도하게 다문 “인형형” 금지. 명시적 제모만 예외.
+ */
+export function buildAdultPubicHairLock(text = ''): string {
+  const t = polishKoreanPromptText(text || '')
+  if (wantsExplicitPubicShave(t)) {
+    return 'pubic area smooth/shaved ONLY because the user explicitly requested shaving/waxing'
+  }
+  return [
+    'MANDATORY photorealistic adult pubic hair: soft dark-brown natural CURLS with visible separate strands on the mons / panty triangle (곱슬·가닥)',
+    'hair looks like real coiled hair in soft clumps — NOT grainy stipple, NOT sandpaper noise, NOT 5-o’clock shadow stubble, NOT a painted ink blob',
+    'natural adult density: fuller on the mons, slightly thinner toward the edges — not a harsh horizontal band',
+    'vulva anatomy realistic for an adult woman: soft natural labia, gentle cleft — NOT clamped tightly shut, NOT oversized sealed Barbie seam, NOT cartoon slit',
+    'CRITICAL SAFETY: FORBIDDEN hairless/smooth blank crotch that reads as underage',
+    'not a male happy trail to the navel; feminine panty-line bush shape',
+  ].join('. ')
+}
+
+/** 체모만 사실적으로 — 마스크 inpaint / 국소 img2img용 짧은 프롬프트 */
+export function buildRealisticPubicHairRefinePrompt(revision: string): string {
+  const t = polishKoreanPromptText(revision || '')
+  if (wantsExplicitPubicShave(t)) {
+    return [
+      'Local edit of the masked pubic area only.',
+      'Smooth shaved bare pubic skin as explicitly requested. No dense bush.',
+      'Do not change face, breasts, pose, or background outside the mask.',
+    ].join(' ')
+  }
+  return [
+    'Local edit of the masked pubic area only.',
+    'Photorealistic adult refine: replace grainy/stubble faux-hair with real soft dark-brown curly strands and small coils; natural bush volume on the mons.',
+    'Relax an overly clamped/sealed vulva seam into a soft natural adult labial contour — modest and realistic, not exaggerated.',
+    buildAdultPubicHairLock(t),
+    'Not a male happy trail climbing to the navel; skin above the panty line stays bare.',
+    'Do not change face, breasts, pose, lighting, or background outside the mask.',
+    t ? `User note: ${t}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** 유두·유륜 크기/형태만 */
+export function wantsNippleAreolaRefine(revision: string): boolean {
+  const t = polishKoreanPromptText(revision || '')
+  return /유두|유륜|젖꼭지|유두\s*륜|nipple|areola/i.test(t)
+}
+
+export function buildNippleAreolaRefinePrompt(revision: string): string {
+  const t = polishKoreanPromptText(revision || '')
+  const larger = /크|크게|키우|커지|larger|bigger|enlarge/i.test(t)
+  return [
+    'Local edit of the masked breast area only.',
+    larger
+      ? 'Slightly larger nipples and areolae, natural round areola shape, soft pinkish-brown tone, realistic texture — modest enlarge, not cartoonish.'
+      : 'Refine nipple and areola shape to look natural and clear, soft pinkish-brown, realistic texture.',
+    'Keep the same breast size/shape and the same woman. Do not change face, hair, pose, or background outside the mask.',
+    t ? `User note: ${t}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/**
+ * 옷이 달라붙어 보이는 실루엣 = 나체/영상에서도 같은 몸매.
+ * (타이트한 상의의 큰 가슴 → 나체에 바비형 빈유로 바뀌는 실망 방지)
+ */
+export function buildClothingSilhouetteBodyLock(text = ''): string {
+  const t = polishKoreanPromptText(text || '')
+  const bits = [
+    'CLOTHING SILHOUETTE → BODY LOCK: read breast size, waist, hips, and overall figure from how the clothes fit in the source photo — nude or video must match that implied body, not a generic Barbie doll',
+    'breast placement height matches the source (high-set near shoulders vs lower toward the mid-ribcage) — do not relocate the bust on the torso',
+    'if the outfit shows a full/large bust under fabric, keep LARGE full breasts when nude — FORBIDDEN tiny barbie breasts, flat doll chest, or shrinking the bust after undress',
+    'if the outfit shows a narrow/slim waist, keep that slim waist — do not thicken the midsection',
+    'if the outfit shows wider hips or a curvy hourglass, keep that hip/waist ratio when nude',
+  ]
+  if (/큰\s*가슴|풍만\s*가슴|거유|글래머|busty|large\s*breasts?|full\s*bust|voluptuous/i.test(t)) {
+    bits.push('text confirms large bust — preserve generous breast volume and projection when nude')
+  }
+  if (/가는\s*허리|얇은\s*허리|잘록|개미\s*허리|슬림\s*허리|wasp\s*waist|slim\s*waist|narrow\s*waist/i.test(t)) {
+    bits.push('text confirms slim waist — keep a narrow cinched waist')
+  }
+  if (/글래머|풍만|curvy|hourglass|글래머체/i.test(t)) {
+    bits.push('curvy hourglass continuity — full bust, defined waist, hips matching the clothed silhouette')
+  }
+  return bits.join('. ') + '.'
+}
+
+/**
+ * 나체 시 유두·성인 음모가 보이게 — 평활/검열·소아형 크롯치 편향 억제.
+ * 제모 요청이면 smooth 유지.
+ */
+export function buildNudeAnatomyVisibilityLock(text: string): string {
+  const t = polishKoreanPromptText(text || '')
+  return [
+    'visible nipples on bare breasts, uncensor nipples',
+    buildAdultPubicHairLock(t),
+    'no mosaic, no censor bar, no skin-smoothed away nipples or genitals',
+    buildClothingSilhouetteBodyLock(t),
+  ].join(', ')
+}
+
+/**
+ * 「같은 얼굴 유지」「한 명만」은 수정 시 서버가 기본으로 건다(buildIroncladIdentityLock 등).
+ * 사용자가 습관적으로 적으면 CLIP 예산을 낭비하고 변경 지시와 경쟁하므로 제거한다.
+ */
+export function stripDefaultContinuityEchoes(revision: string): string {
+  let t = polishKoreanPromptText(revision || '')
+  const patterns = [
+    /같은\s*얼굴\s*(을\s*)?(유지|그대로)[.!,，。\s]*/gi,
+    /얼굴\s*(을\s*)?(유지해|유지하|그대로\s*유지)[.!,，。\s]*(줘|주세요|요)?[.!,，。\s]*/gi,
+    /동일\s*인물\s*(유지)?[.!,，。\s]*/gi,
+    /원본\s*얼굴\s*(유지)?[.!,，。\s]*/gi,
+    /한\s*명만[.!,，。\s]*/gi,
+    /한\s*사람만[.!,，。\s]*/gi,
+    /일인만[.!,，。\s]*/gi,
+    /keep\s*(the\s*)?same\s*face[.!,，。\s]*/gi,
+    /same\s*face(?:\s*please)?[.!,，。\s]*/gi,
+    /exactly\s*one\s*(?:woman|person|girl)[.!,，。\s]*/gi,
+    /only\s*one\s*(?:woman|person|girl)[.!,，。\s]*/gi,
+  ]
+  for (const p of patterns) t = t.replace(p, ' ')
+  return t
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s*([.!,，。])\s*\1+/g, '$1')
+    .replace(/^[.!,，。\s]+|[.!,，。\s]+$/g, '')
+    .trim()
+}
+
+/**
+ * 얼굴·체형·피부톤 철칙 잠금 (짧음 — SDXL CLIP 예산 안).
+ * 사용자가 피부/체형을 바꾸라고 한 항목만 잠금에서 뺀다.
+ * 화보 수정에서는 항상 호출 — 사용자가 「같은 얼굴」을 적지 않아도 적용된다.
+ */
+export function buildIroncladIdentityLock(revision: string, baseDescription = ''): string {
+  const rev = polishKoreanPromptText(revision || '')
+  const revisionTargetsSkinTone = /피부\s*(색|톤)|태닝|skin\s*tone|\btan\b|하얗|검게|어둡게/i.test(rev)
+  const revisionTargetsBody =
+    /체형|몸매|살\s*빼|살\s*찌|다이어트|가슴\s*(키우|줄이|크게|작게)|잘록한\s*허리|엉덩이\s*(키우|줄이)|body\s*type|lose\s*weight|gain\s*weight|breast\s*(size|enlarge|reduce)/i.test(
+      rev,
+    )
+  const bits = [
+    'IRONCLAD: same person, same face identity — preserve exact facial features from source',
+    !revisionTargetsSkinTone &&
+      'same natural East Asian / Korean skin tone — not pale white, not muddy dark brown',
+    !revisionTargetsBody && 'same body type and proportions',
+    'same lighting on face, no bleach, no darken',
+    'exactly one woman, never invent a second person or side-by-side twin',
+    buildKoreanTwentiesLookLock(`${baseDescription} ${rev}`),
+  ].filter((v): v is string => Boolean(v))
+  if (baseDescription && !revisionTargetsSkinTone) {
+    bits.push('match source photo colorimetry')
+  }
+  return bits.join(', ') + '.'
+}
+
 export function buildFashionNegativePrompt(descriptionOrBase: string, revision?: string): string {
   const description = revision === undefined ? descriptionOrBase : `${descriptionOrBase} ${revision}`.trim()
   const extras: string[] = []
   let base = DEFAULT_NEGATIVE_PROMPT
+
+  // 1인 초상 수정에서 원본·결과 나란히 / 복제 인물이 나오는 실측 억제 (커플·두 명 요청은 제외)
+  if (
+    !/두\s*명|둘이|커플|연인|남자와|여성과|파트너|함께\s*있는|two\s*(?:people|persons|women|men)|couple|with\s*a\s*(?:man|woman|partner)/i.test(
+      description,
+    )
+  ) {
+    extras.push(
+      'two people, second person, extra person, another woman, twin sister, clone face',
+      'diptych, before and after split, side by side two portraits, dual portrait collage',
+      'mirrored twin panels, left-right duplicate face, split canvas two versions, comparison layout',
+      'vertical seam down torso, half-and-half clothing colors, left side different outfit from right, split-color garment',
+    )
+  }
+  // 전신→상체 줌인 억제. base 설명에「전신」이 있어도 빼면 안 됨 — 이번 revision이
+  // 아래로 확장일 때만 이 네거티브를 끈다.
+  if (revision === undefined || !isFramingExtendRevision(revision)) {
+    extras.push(
+      'zoomed-in crop tighter than source, bust-only shot when source showed more body',
+      'unexpected upper-body crop, head and shoulders only when source was full body or three-quarter',
+    )
+  }
 
   // wantsNudeOrUndress가 아니라 wantsFullNude를 쓴다 — "바지를 벗기고 치마를 입혀라"
   // 같은 옷 교체 요청까지 wantsNudeOrUndress만으로 판단하면 "옷을 입지 말라"는 네거티브를
@@ -403,6 +784,12 @@ export function buildFashionNegativePrompt(descriptionOrBase: string, revision?:
       'clothes, clothing, dressed, wearing clothes, fully clothed',
       'bathrobe, bath robe, kimono robe, wrap robe, dressing gown, coat, shirt, dress',
       'lingerie, underwear, bra, panties, covering the body with fabric',
+      // 유두·체모 검열/뭉개기 금지
+      'censored nipples, covered nipples, no nipples, blank breasts, barbie doll body',
+      'censored crotch, mosaic genitals, blurred pubic area, missing pubic detail when nude',
+      'pasties, nipple tape, strategic covering, steam censor',
+      // 탈의 img2img가 강할수록 얼굴 치환·복제 인물이 잘 생김
+      'different face from source, new face, face morph, identity swap',
     )
   } else if (wantsUnderwearLook(description)) {
     extras.push(
@@ -484,6 +871,35 @@ export function polishKoreanPromptText(text: string): string {
   return t.replace(/\s+/g, ' ').trim()
 }
 
+/**
+ * 「허리/무릎/발목까지 그려줘」「전신으로」「발 보이게」— 크롭을 넓혀 같은 사람을 더 보여 달라는 요청.
+ * 순수 T2I·일반 img2img로는 얼굴이 바뀌거나 구도가 안 넓어짐 → 아웃페인트 우선.
+ */
+export function isFramingExtendRevision(revision: string): boolean {
+  const r = polishKoreanPromptText(revision)
+  return /허리|반신|상반신|하반신|가슴\s*아래|배꼽|골반|무릎|발목|발끝|발\s*까지|다리\s*까지|허벅지|전신|풀\s*바디|풀바디|full\s*body|머리부터|발끝까지|머리\s*부터\s*발|크롭|잘린|잘려|잘림|보이게\s*그려|더\s*그려|아래로\s*그려|아래까지|발\s*보여|발\s*나오게|waist|torso|midriff|half[\s-]?body|feet\s*visible|head\s*to\s*toe|show\s*(the\s*)?(feet|ankles|knees|waist)|uncrop|outpaint|확장/i.test(
+    r,
+  )
+}
+
+/** 아웃페인트 픽셀 — 요청 범위에 따라 아래로(필요 시 좌우) 확장량. */
+export function resolveFramingExpandPixels(revision: string): {
+  expand_top: number
+  expand_bottom: number
+  expand_left: number
+  expand_right: number
+} {
+  const r = polishKoreanPromptText(revision)
+  if (/전신|풀\s*바디|풀바디|발끝|발목|발\s*까지|머리부터|head\s*to\s*toe|feet\s*visible/i.test(r)) {
+    return { expand_top: 64, expand_bottom: 1400, expand_left: 160, expand_right: 160 }
+  }
+  if (/무릎|허벅지|다리\s*까지|knees?/i.test(r)) {
+    return { expand_top: 48, expand_bottom: 1100, expand_left: 120, expand_right: 120 }
+  }
+  // 허리·반신·상반신 (증명사진 → 허리까지)
+  return { expand_top: 32, expand_bottom: 720, expand_left: 80, expand_right: 80 }
+}
+
 /** 화보 모드: 전신·의상처럼 img2img로 얼굴이 깨지기 쉬운 큰 수정 */
 export function isStructuralRefineRevision(revision: string): boolean {
   const r = polishKoreanPromptText(revision)
@@ -492,6 +908,7 @@ export function isStructuralRefineRevision(revision: string): boolean {
       '전신', '풀\\s*바디', '풀바디', 'full\\s*body', '머리부터', '발끝까지',
       '속옷', '란제리', 'underwear', 'lingerie', '브래지', '팬티', '거울', '차림으로',
       '누드', '나체', 'nude', '다시\\s*그려', '재생성', '탈의',
+      '유두', '유방', '젖꼭지', 'topless',
     ].join('|'),
     'i',
   )
@@ -500,7 +917,29 @@ export function isStructuralRefineRevision(revision: string): boolean {
   // 놓치면 낮은 strength(0.28)로만 처리되다가 반영이 거의 안 되는 문제가 있었다.
   // isClothingChangeRevision 하나로 세 가지 표현 방식을 전부 통틀어 판별한다(뒤에서
   // nudeRevision과 함께 얼굴 보존 고강도 경로(strength 0.6·정밀모드)로 승격시킨다).
-  return pattern.test(r) || isClothingChangeRevision(r)
+  return pattern.test(r) || isClothingChangeRevision(r) || isFramingExtendRevision(r)
+}
+
+/** 프레이밍 확장 수정용 — 같은 사람·같은 옷으로 아래로 확장 (하반신만/나체 발명 금지). */
+export function buildFramingExtendRefineAddon(revision: string, baseDescription = ''): string {
+  const corpus = `${baseDescription} ${revision}`
+  const wantsNude = wantsFullNude(revision, baseDescription)
+  const r = polishKoreanPromptText(revision)
+  const target = /전신|발목|발끝|풀\s*바디|feet|head\s*to\s*toe/i.test(r)
+    ? 'full body head-to-toe including knees, ankles and feet'
+    : /무릎|허벅지|knees?/i.test(r)
+      ? 'three-quarter or full-leg framing including knees'
+      : 'waist-up / half-body framing showing from head down to the waist'
+  return [
+    'FRAMING EXTEND: keep the EXACT SAME face and person from the source photo — do not redesign the face.',
+    `Widen the canvas downward to ${target}. Preserve the original head/shoulders pixels.`,
+    'NOT a new passport photo, NOT the same tight headshot crop again, NOT a different woman, NOT headless.',
+    wantsNude
+      ? buildNudeAnatomyVisibilityLock(corpus)
+      : 'Keep the original outfit and sweater/clothes — do NOT undress, do NOT invent nudity.',
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 /** "귀걸이 추가해줘"/"나비 넣어줘"처럼 원본에 없던 새 물체·요소를 더하는 수정인지 판별한다.
@@ -632,6 +1071,7 @@ function amplifyClothingAndScene(descriptionOrBase: string, revision?: string): 
     extras.push(
       'adult nude, bare skin, no clothing, no lingerie, no underwear, no bra, no panties, no bathrobe, no robe',
       'garments removed / undressed as requested — do NOT keep fabric covering the body',
+      buildNudeAnatomyVisibilityLock(description),
     )
   } else {
     // "실크/슬립"(재질을 명시)과 "드레스/dress"(그냥 의상 종류)를 분리한다. 예전엔 이 둘을
@@ -919,10 +1359,10 @@ export function defaultEthnicityTag(text: string): string {
   if (ETHNICITY_MENTIONED_PATTERN.test(text)) return ''
   const hasMale = MALE_SUBJECT_PATTERN.test(text)
   const hasFemale = FEMALE_SUBJECT_PATTERN.test(text)
-  if (hasMale && !hasFemale) return 'Korean man, attractive face'
-  if (hasMale && hasFemale) return 'Korean man and Korean woman, attractive faces'
+  if (hasMale && !hasFemale) return 'Korean man in his 20s, attractive Korean face'
+  if (hasMale && hasFemale) return 'Korean man and Korean woman in their 20s, attractive Korean faces'
   // 명시가 없으면 화보 기본 대상(여성)으로 간주
-  return 'Korean woman, attractive face'
+  return 'Korean woman in her 20s, attractive Korean face'
 }
 
 const GENERIC_PERSON_PATTERN =
@@ -943,12 +1383,33 @@ export function defaultEthnicitySentence(text: string): string {
   const hasMale = MALE_SUBJECT_PATTERN.test(text)
   const hasFemale = FEMALE_SUBJECT_PATTERN.test(text)
   if (hasMale && !hasFemale) {
-    return 'Default ethnicity (user did not specify): the man is Korean, with a handsome, attractive Korean face.'
+    return 'Default ethnicity (user did not specify): the man is Korean in his twenties, with a handsome Korean face.'
   }
   if (hasMale && hasFemale) {
-    return 'Default ethnicity (user did not specify): both the man and the woman are Korean, with attractive Korean faces.'
+    return 'Default ethnicity (user did not specify): both are Korean in their twenties, with attractive Korean faces.'
   }
-  return 'Default ethnicity (user did not specify): the woman is Korean, with a pretty, attractive Korean face.'
+  return 'Default ethnicity (user did not specify): the woman is Korean in her twenties, with a pretty Korean face — Korean facial proportions, not a drifted Southeast-Asian or Westernized look.'
+}
+
+/**
+ * 한국인 20대 얼굴 고정 — 쇼츠/수정에서 동남아·중국제 이목구비로 흔들리는 실측 억제.
+ * 다른 국적·연령을 명시한 경우에는 넣지 않는다.
+ */
+export function buildKoreanTwentiesLookLock(text: string): string {
+  const t = polishKoreanPromptText(text || '')
+  const otherNation =
+    /중국인|일본인|태국|베트남|서양인|백인|흑인|chinese|japanese|thai|vietnamese|caucasian|african\s*american|southeast\s*asian/i.test(
+      t,
+    ) && !/한국|korean/i.test(t)
+  if (otherNation) return ''
+  const otherAge = /30대|40대|50대|60대|중년|노년|thirties|forties|fifties|middle[\s-]?aged|elderly/i.test(t)
+  return [
+    'ETHNICITY LOCK: clearly a Korean woman — Korean facial features (눈·코·턱 비율), natural Korean beauty / K-beauty look',
+    otherAge ? '' : 'AGE LOCK: looks like a woman in her twenties (20대) — not teen, not middle-aged',
+    'FORBIDDEN: drifting into Southeast Asian or Chinese stereotype face, wrong ethnicity, Westernized face swap',
+  ]
+    .filter(Boolean)
+    .join('. ')
 }
 
 // 무드 셀렉터: 필름·사진 질감(조명/컬러그레이딩) 축으로 재설계 — "패션 사진" 형용사만
@@ -1061,7 +1522,9 @@ function buildFashionPromptSuffixParts(input: {
   // 계열(스텝 8·CFG 2~4로 낮음)은 negative 프롬프트 순응도가 약해서, 학습 데이터 편향으로
   // 속옷을 입혀버리는 사고가 실측으로 반복 확인됐다 — 보통 더 잘 지켜지는 양성 프롬프트에도
   // 같은 지시를 중복으로 넣어 이탈 확률을 낮춘다.
-  const nudeFlag = nude ? 'adult nude, bare skin, no bra, no panties' : ''
+  const nudeFlag = nude
+    ? `adult nude, bare skin, no bra, no panties, ${buildNudeAnatomyVisibilityLock(ethnicitySource)}`
+    : ''
   const moodTag = resolveMoodTag(input.mood)
   const framing = resolveFramingHint(input.size)
   const qualitySuffix = 'photorealistic, natural skin, sharp focus, 8k'
@@ -1127,6 +1590,8 @@ export function buildFashionMagazinePrompt(input: {
   })
 
   const parts = [
+    // 생성에서도 좌우 이중 초상(diptych) 실측 억제 — 맨 앞
+    'single frame one woman portrait photo, not a diptych or split screen',
     description,
     // 짧은 태그라 앞쪽에 둬야 77토큰 예산에서 잘리지 않고 반영됨
     suffix.ethnicityTag,
@@ -1240,7 +1705,7 @@ export function buildRefinePrompt(input: {
       // "bare skin, remove garments" 지시를 넣으면 착의 지시와 정반대로 충돌한다. base를
       // 같이 넘겨서 이전 라운드에 확립된 누드 상태는 계속 승계되게 한다.
       wantsFullNude(revision, base)
-        ? 'Adult nude/undress as requested: bare skin, remove garments — do not keep underwear or robes.'
+        ? `Adult nude/undress as requested: bare skin, remove garments — do not keep underwear or robes. ${buildNudeAnatomyVisibilityLock(`${base} ${revision}`)}`
         : 'CRITICAL: Do NOT invent a human woman, fashion model, bathrobe, or studio portrait.',
       freeEthnicity,
       base ? `Original scene (must still hold): ${base}.` : '',
@@ -1251,6 +1716,9 @@ export function buildRefinePrompt(input: {
   }
 
   if (input.mode === 'region') {
+    if (wantsJewelryAccessoryRefine(revision)) {
+      return buildJewelryAccessoryRefinePrompt(revision)
+    }
     return [
       'Local edit of an existing photo. ONLY change the masked white areas.',
       `Local change: ${revision}.${revisionAmplify}`,
@@ -1260,12 +1728,14 @@ export function buildRefinePrompt(input: {
       // 편향으로 브라·팬티를 다시 그려 넣는 사고가 텍스트 수정 경로보다도 더 흔했다
       // (마스크 영역이 좁아 모델이 "뭔가로는 채워야 한다"고 판단하기 쉬움).
       wantsFullNude(revision, base)
-        ? 'Adult nude/undress as requested inside the mask: bare skin, remove the garment — do NOT redraw a bra, panties, lingerie, or any covering fabric in its place.'
+        ? `Adult nude/undress inside the mask: bare skin, remove the garment — no bra/panties redrawn. ${buildNudeAnatomyVisibilityLock(`${base} ${revision}`)}`
         : '',
       'Do NOT invent a new person, new face, new body, or new scene outside the mask.',
-      'Preserve exact face identity, skin tone, hair, eye shape, and unmasked pixels — same woman.',
+      'Do NOT invent a surgical face mask, medical mask, or new buildings in the background.',
+      buildIroncladIdentityLock(revision, base),
+      'Preserve unmasked pixels exactly — same woman.',
       base ? `Context: ${base}.` : '',
-      'Photorealistic seamless inpaint, same lighting and color grade.',
+      'Photorealistic seamless inpaint, same lighting and color grade — no pale bleach, no dark muddy skin.',
     ]
       .filter(Boolean)
       .join(' ')
@@ -1278,13 +1748,21 @@ export function buildRefinePrompt(input: {
   const revisionTargetsHair = /머리\s*(색|카락|스타일)|염색|dye|hair\s*color/i.test(revision)
   const revisionTargetsEyes = /눈\s*(색|동자)|eye\s*color|colored\s*contacts?/i.test(revision)
   const revisionTargetsLips = /입술\s*색|립스틱|lipstick|lip\s*color/i.test(revision)
-  const revisionTargetsSkinTone = /피부\s*(색|톤)|태닝|skin\s*tone|\btan\b/i.test(revision)
+  const revisionTargetsSkinTone = /피부\s*(색|톤)|태닝|skin\s*tone|\btan\b|하얗|검게|어둡게/i.test(revision)
+  // 「허리까지 그려줘」의 허리는 체형 변경이 아님 — 체형 키워드만 잠금 해제
+  const revisionTargetsBody =
+    /체형|몸매|살\s*빼|살\s*찌|다이어트|가슴\s*(키우|줄이|크게|작게)|잘록한\s*허리|엉덩이\s*(키우|줄이)|body\s*type|lose\s*weight|gain\s*weight|breast\s*(size|enlarge|reduce)/i.test(
+      revision,
+    )
+  const revisionTargetsPubic = /음모|치모|제모|민무늬|pubic|shav(e|ed)|wax/i.test(revision)
   const identityLockAttributes = [
     !revisionTargetsEyes && 'same eyes',
     'same nose',
     !revisionTargetsLips && 'same lips',
     !revisionTargetsHair && 'same hair',
-    !revisionTargetsSkinTone && 'same skin tone',
+    !revisionTargetsSkinTone && 'same natural Korean skin tone (not pale white, not dark brown)',
+    !revisionTargetsBody && 'same body type',
+    !revisionTargetsPubic && wantsFullNude(revision, base) && 'same pubic detail as source',
   ].filter((v): v is string => Boolean(v))
 
   // 이 문장형 프롬프트는 그대로 SDXL/Juggernaut(CLIP ~77토큰≈65~70단어) img2img 엔진에
@@ -1296,24 +1774,28 @@ export function buildRefinePrompt(input: {
   // amplify/base(원본 참고문 — 어차피 img2img는 원본 이미지 픽셀을 직접 보므로 텍스트
   // 손실의 피해가 상대적으로 적다)에 남는 예산을 나눠서 CLIP 한도 안에서 핵심 안전
   // 지시(배경 유지·가운 방지·란제리)가 항상 살아남게 한다.
-  const imgEditPrefix = 'Image-to-image edit of the SAME photo.'
-  const identityLockSentence = `IDENTITY LOCK: same face, ${identityLockAttributes.join(', ')}.`
+  // SINGLE FRAME을 맨 앞에 — 실측: 비교 UI 스크린샷·정밀모델에서 좌우 이중 초상이 한 장에 박힘
+  const imgEditPrefix =
+    'SINGLE FRAME ONLY: one photo, one woman. FORBIDDEN: diptych, split screen, side-by-side twin, before-after collage, two panels.'
+  const identityLockSentence = `${buildIroncladIdentityLock(revision, base)} IDENTITY LOCK: same face, ${identityLockAttributes.join(', ')}.`
   const applyPrefix = 'ONLY apply this change:'
+  const framingCastNote =
+    'Same camera framing and crop as the source (full-body stays full-body; no bust zoom). Still exactly one subject in one frame.'
   const bgAndPoseNote = 'Keep background and pose unchanged unless the change requires it.'
   const bathrobeNote = 'Do not add a bathrobe, kimono, or coat unless requested.'
   const nudeOrLingerieNote = wantsFullNude(revision, base)
-    ? 'Nude/undress requested: bare skin, remove garments, no bra or panties left.'
+    ? `CRITICAL UNDRESS: open/remove the robe, gown, sweater, bra — bare breasts with visible nipples; no fabric covering the chest. ${buildNudeAnatomyVisibilityLock(`${base} ${revision}`)}`
     : 'If lingerie/underwear is requested, show it, never a robe.'
   const contextPrefix = 'Context (must still hold):'
-  const photoNote = 'Photorealistic, same lighting.'
+  const photoNote = 'Photorealistic, same lighting. Reminder: single frame, not a dual portrait.'
 
-  // 모든 "고정 문구"(래퍼 텍스트 포함 — 예전엔 "Image-to-image edit..."/"Context (must still
-  // hold):" 같은 래퍼 자체의 단어 수를 빼먹어서 실측 결과가 예산보다 늘 10단어쯽 더 길었다)를
-  // 먼저 합산하고, revision(절대 안 자름)을 뺀 나머지만 amplify/base에 나눠준다.
+  // 모든 고정 문구 단어 수를 먼저 합산하고, revision(절대 안 자름)을 뺀 나머지만
+  // amplify/base에 나눠준다 (CLIP ~77토큰 예산).
   const fixedWords =
     countWords(imgEditPrefix) +
     countWords(identityLockSentence) +
     countWords(applyPrefix) +
+    countWords(framingCastNote) +
     countWords(bgAndPoseNote) +
     countWords(bathrobeNote) +
     countWords(nudeOrLingerieNote) +
@@ -1328,6 +1810,7 @@ export function buildRefinePrompt(input: {
   return [
     `${imgEditPrefix} ${identityLockSentence}`,
     `${applyPrefix} ${revision}.${cappedAmplify ? ` ${cappedAmplify}.` : ''}`,
+    framingCastNote,
     bgAndPoseNote,
     bathrobeNote,
     nudeOrLingerieNote,
@@ -1354,15 +1837,170 @@ function truncateContinuityText(text: string, maxLen: number): string {
   return slice.slice(0, cut).trim()
 }
 
-/** 정지 이미지를 짧은 영상으로 바꿀 때 쓰는 I2V 모션 프롬프트. */
-export function buildAnimationPrompt(input: { prompt?: string; motion?: string }): string {
+/**
+ * I2V 모션: 애무·눕기·올라타기 등 Wan이 무시하기 쉬운 성인 동작을 영어 동작 지시로 증폭.
+ * (단순 번역만 넣으면 "subtle camera / limbs only" 잠금에 밀려 안 먹히는 실측)
+ */
+export function amplifyAdultMotionForVideo(motion: string): {
+  addon: string
+  wantsPartner: boolean
+  wantsPoseChange: boolean
+} {
+  const t = polishKoreanPromptText(motion || '')
+  const bits: string[] = []
+  let wantsPartner = false
+  let wantsPoseChange = false
+
+  // 가슴/유두 빨기 — 빤다/빨아/빨아라 포함
+  if (
+    /(?:가슴|젖|유방|유두|젖꼭지)\s*(?:을\s*|를\s*)?(?:빨|빤)|빨아(?:라|줘|요)?|빤다|빨며|빨고|suck(?:s|ing)?\s*(?:on\s*)?(?:her\s*)?(?:breast|nipple)/i.test(
+      t,
+    )
+  ) {
+    wantsPartner = true
+    bits.push(
+      'VISIBLE oral contact on the bare breast and nipple: mouth and lips sealed on the nipple, tongue and rhythmic sucking, breast soft tissue moving with each suck — not a freeze, not staring without contact',
+    )
+  }
+
+  // 눕다 / 눕히다
+  if (/눕|누워|lie\s*down|lying\s*(?:down|back)|lays?\s*(?:her\s*)?down|laid\s*(?:her\s*)?down/i.test(t)) {
+    wantsPoseChange = true
+    if (/눕히|눕혀|눕힌|lays?\s*her|laid\s*her/i.test(t)) wantsPartner = true
+    bits.push(
+      'FULL BODY pose change to lying on her back: she reclines onto the surface, head settles back, torso horizontal, legs rest — she must NOT stay standing for the whole clip',
+    )
+  }
+
+  // 배 위에 올라탄다 / 걸터앉다
+  if (
+    /배\s*위|올라\s*타|올라탄|올라타|걸터|타고\s*앉|straddl|mount(?:s|ing)?(?:\s+(?:her|on))?|on\s*(?:her\s*)?(?:belly|stomach|abdomen|torso)/i.test(
+      t,
+    )
+  ) {
+    wantsPartner = true
+    wantsPoseChange = true
+    bits.push(
+      'a second consenting adult straddles / sits astride on her belly or lower torso with clear weight and hip placement on the abdomen — not standing beside her, not a solo pose',
+    )
+  }
+
+  // 키스·애무·만짐 (파트너 동작이 흔한 케이스)
+  if (/딥\s*키스|키스|kiss(?:es|ing)?/i.test(t)) {
+    wantsPartner = true
+    bits.push(
+      'deep kissing: faces turn toward each other, strong visible mouth and cheek motion, lips pressing and moving, jaw soft — not a frozen face stamp',
+      'FACE EXPRESSION LOCK: keep the same facial bone structure and identity; expression stays a light smile, light shyness, or soft pleasure — do NOT contort, snarl, or rebuild the face into a different person for the kiss',
+    )
+  }
+  if (
+    /애무|쓰다듬|주무르|만지|문지르|caress|fondl|grope|rub(?:s|bing)?\s*(?:her\s*)?(?:breast|body|chest)/i.test(
+      t,
+    )
+  ) {
+    if (!/스스로|혼자|self[\s-]?touch|masturbat/i.test(t)) wantsPartner = true
+    bits.push(
+      'hands actively caressing the body/breasts with continuous touching motion — fingers press and stroke, not a static hand pose',
+    )
+  }
+
+  return { addon: bits.join('. '), wantsPartner, wantsPoseChange }
+}
+
+/**
+ * 얼굴·체형·나체·음모 등 "기본 구조"를 소스와 같게 묶는 잠금 문구.
+ * 텍스트에 힌트가 있으면 구체화하고, 없어도 I2V/수정이 구조를 갈아엎지 못하게 최소 잠금을 건다.
+ * (모션이 바꾸라고 한 속성 — 예: 착의 — 은 호출 쪽에서 빼거나 덮어쓴다.)
+ */
+export function buildAdultStructureLock(
+  text: string,
+  opts?: { forNudeHold?: boolean; allowPoseChange?: boolean },
+): string {
+  const t = polishKoreanPromptText(text || '')
+  const bits: string[] = [
+    'STRUCTURE LOCK from the source image: same face identity, same age look',
+    'same natural East Asian / Korean skin tone — not pale white, not muddy dark brown',
+    'same body type and silhouette (shoulders, waist, hips, breast size/shape, limb proportions)',
+    buildClothingSilhouetteBodyLock(t),
+    buildKoreanTwentiesLookLock(t),
+  ]
+
+  if (/글래머|글래머러스|글래머체|풍만|글래머\s*몸|curvy|voluptuous|hourglass/i.test(t)) {
+    bits.push('curvy glamorous figure — keep that body type, do not slim her down')
+  } else if (/슬림|마른|날씬|가느다란|slim|slender|thin\b/i.test(t)) {
+    bits.push('slim slender figure — keep that body type, do not bulk her up')
+  } else if (/탄탄|근육|운동|athletic|fit\b|toned/i.test(t)) {
+    bits.push('athletic toned figure — keep muscle tone and proportions')
+  } else if (/통통|포동|플러스|chubby|plus[\s-]?size|plump/i.test(t)) {
+    bits.push('soft fuller figure — keep that body type')
+  }
+
+  if (/큰\s*가슴|풍만\s*가슴|거유|large\s*breasts?|busty/i.test(t)) {
+    bits.push('same large breast size/shape as source — never shrink to barbie/tiny breasts when nude')
+  } else if (/작은\s*가슴|빈유|small\s*breasts?/i.test(t)) {
+    bits.push('same small breast size/shape as source')
+  }
+  if (/가는\s*허리|얇은\s*허리|잘록|개미\s*허리|slim\s*waist|narrow\s*waist|wasp\s*waist/i.test(t)) {
+    bits.push('same slim narrow waist as source / clothed silhouette')
+  }
+
+  if (opts?.forNudeHold || wantsFullNude(t) || /음모|치모|누드|나체|nude|naked/i.test(t)) {
+    bits.push(
+      buildFemaleAdultAnatomyLock(t),
+      'nude anatomy continuity: same woman, female breasts and hips/crotch — do not sanitize, censor, or redraw underwear over genitals',
+      buildAdultPubicHairLock(t),
+    )
+  }
+
+  bits.push(
+    opts?.allowPoseChange
+      ? 'Do NOT morph into a different woman or different face. Full-body pose MAY change as the motion requires (lie down, recline, mount, etc.).'
+      : 'Do NOT morph into a different woman, different face, or different body. Motion may move limbs/camera only.',
+  )
+  return bits.join('. ') + '.'
+}
+
+/** 나체/누드 요청 모션에 「이미 나체 유지」가 없으면 붙인다 (바지 재등장 완화). */
+export function ensureNudeHoldMotionPhrase(motion: string, opts?: { sourceAlreadyNude?: boolean }): string {
+  const t = polishKoreanPromptText(motion || '')
+  if (!t) return t
+  if (/이미\s*(완전\s*)?나체\s*유지|나체\s*유지\s*\(|fully\s*nude\s*hold|already\s*(fully\s*)?nude/i.test(t)) {
+    return t
+  }
+  const asksNude =
+    wantsNudeOrUndress(t) ||
+    wantsUndressAction(t) ||
+    wantsFullNude(t) ||
+    /누드|나체|nude|naked/i.test(t)
+  if (!asksNude && !opts?.sourceAlreadyNude) return t
+  // 탈의 동작이어도 "벗은 뒤 = 이미 나체인 상태 유지"로 통일 (사용자 요청)
+  return `이미 완전 나체 유지(바지·브라·팬티 되살림 금지). ${t}`
+}
+
+/** 모션에 「클로즈업으로 끝내」「줌인 유지」 등 — 2프레임 후반 줌아웃 대신 클로즈 종결 */
+export function wantsEndCloseUp(motion: string): boolean {
+  const t = polishKoreanPromptText(motion || '')
+  return /클로즈\s*업\s*(으로\s*)?(끝|종|마무리)|줌\s*인\s*(으로\s*)?(끝|유지|종)|줌인\s*상태|클로즈업\s*상태|가까이\s*(에서\s*)?(끝|마무리)|close[\s-]?up\s*(end|ending|finish|hold)|end\s*(on\s*)?(a\s*)?close[\s-]?up|stay\s*zoomed|keep\s*zoomed|no\s*zoom[\s-]?out/i.test(
+    t,
+  )
+}
+
+/** 정지 이미지를 짧은 영상으로 바꿀 때 쓰는 I2V 모션 프롬프트.
+ *  clipRole: single=한 클립(줌 연출 없음) · dual-a=24/30 전반 · dual-b=후반 */
+export function buildAnimationPrompt(input: {
+  prompt?: string
+  motion?: string
+  clipRole?: 'single' | 'dual-a' | 'dual-b'
+}): string {
   const fullOriginal = polishKoreanPromptText(input.prompt ?? '')
+  const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
+  const endCloseUp = wantsEndCloseUp(input.motion ?? '')
   // 참고문은 짧게 줄여서 모션 힌트와의 경쟁을 줄이지만, 누드/탈의 판별(sourceIsNude)은
   // 원문 전체로 해야 한다 — 여러 번 수정을 거치며 누적된 텍스트는 "누드로 바꿔줘" 같은
   // 문구가 뒤쪽(잘려 나가는 부분)에 있을 수 있어서, 잘린 텍스트만 보면 이미 누드인 원본을
   // "옷을 입은 상태"로 잘못 판정해 되레 옷을 입혀버리는 사고가 날 수 있다.
-  const original = truncateContinuityText(fullOriginal, ANIMATION_CONTINUITY_MAX_CHARS)
   const motion = polishKoreanPromptText(input.motion ?? '')
+  const intimate = amplifyAdultMotionForVideo(motion)
   // 소스 이미지 자체가 이미 누드/전라인지(상태)와, 이번 모션이 "옷을 벗는 전환 동작"을
   // 실제로 요청했는지(동작)를 분리해서 판단한다. 이 둘을 하나로 합쳐서 판단하면,
   // 이미 누드인 이미지에 단순 포즈/움직임만 요청해도 "옷이 벗겨지는 동작" 문구가 붙어서
@@ -1371,7 +2009,10 @@ export function buildAnimationPrompt(input: { prompt?: string; motion?: string }
   // wantsFullNude — 누적된 설명이 "바지를 벗기고 치마를 입혀라" 같은 옷 교체 지시를
   // 담고 있을 때 wantsNudeOrUndress만 쓰면 현재 실제로는 치마를 입은 상태인데도 "소스가
   // 누드"로 잘못 판정돼 이후 로직이 뒤틀리는 문제가 있었다.
-  const sourceIsNude = wantsFullNude(fullOriginal)
+  // "현재 나체" 마커·유두/유방 누적 수정도 소스가 나체인 신호로 본다.
+  const sourceIsNude =
+    wantsFullNude(fullOriginal) ||
+    /현재\s*나체|옷\s*없음|fully\s*nude|bare\s*breasts?|visible\s*nipples?/i.test(fullOriginal)
   // wantsUndressAction은 "벗다/제거/undress/strip" 같은 동작 동사만 잡는다. 그런데 "누드인
   // 상태로 만들어라/누드로 바꿔줘"처럼 동작 동사 없이 '상태'만 요청하는 경우가 실측으로 흔했고,
   // 이때 undressAction이 false로 판정되어 "탈의 동작" 지시가 전혀 안 붙어서 옷이 그대로
@@ -1383,19 +2024,104 @@ export function buildAnimationPrompt(input: { prompt?: string; motion?: string }
   // 떨어져 "끝까지 누드 유지, 어떤 옷도 등장 금지"라는 정반대 지시가 강제로 붙는 사고가 있었다.
   const dressAction = !undressAction && wantsDressAction(motion)
   const staysNude = sourceIsNude && !undressAction && !dressAction
+  const structureCorpus = `${fullOriginal}\n${motion}`
+  const coupleRequested =
+    intimate.wantsPartner ||
+    /남녀|남여|둘\s*다|남자와|여성과|커플|서로|partner|couple|both\s*adults|man\s+and\s+woman/i.test(
+      `${motion} ${fullOriginal}`,
+    )
+
+  // 나체 유지/탈의 시 continuity에 남은 "wearing…"·바지 서술이 옷을 다시 입힘(실측) → 제거
+  let original = truncateContinuityText(fullOriginal, ANIMATION_CONTINUITY_MAX_CHARS)
+  if (staysNude || undressAction) {
+    original = original
+      .replace(/\b(?:wearing|wears|dressed in|clothed in|in a|in an)\s+[^.,;]+/gi, 'bare skin')
+      .replace(
+        /(?:가운|로브|드레스|스웨터|니트|브라|팬티|속옷|바지|팬츠|청바지|슬랙스|치마|스커트|bathrobe|robe|sweater|lingerie|pants|jeans|trousers|skirt)\s*(?:을|를|만)?\s*(?:입은|걸친|착용)?/gi,
+        '',
+      )
+      .replace(/\b(?:pants|jeans|trousers|panties|bra|skirt)\b/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+    original = truncateContinuityText(original, ANIMATION_CONTINUITY_MAX_CHARS)
+  }
 
   // 모션 지시는 맨 앞에 CRITICAL로 강조한다. 예전엔 긴 "원본 연속성" 문단(원본 이미지
   // 프롬프트 전체) 뒤에 짧게 붙어 있어서, Wan I2V가 앞부분의 장문 설명에 가중치를 두고
   // 사용자가 요청한 모션(예: 특정 동작·전환)을 잘 따라가지 않는 문제가 있었다.
   const parts = ['Premium photorealistic adult short-form video.']
+  // 나체 유지는 모션보다 앞에 — Wan이 뒤쪽 누드 락을 무시하고 옷을 입히던 실측
+  const koreanLook = buildKoreanTwentiesLookLock(structureCorpus)
+  if (koreanLook) parts.push(koreanLook)
+  if (staysNude || undressAction) {
+    parts.push(buildFemaleAdultAnatomyLock(structureCorpus))
+  }
+  if (staysNude) {
+    parts.push(
+      'NUDE HOLD FIRST: source is already fully nude adult woman — bare female breasts with visible nipples, no clothing in any frame.',
+    )
+  } else if (undressAction) {
+    parts.push(
+      'UNDRESS FIRST: remove sweater/cardigan AND jeans/pants/underwear early; end as a nude adult woman with soft female breasts and visible nipples — no bra, no panties, no jeans left on.',
+    )
+  }
   if (motion) {
     parts.push(
       `CRITICAL MOTION — this is the main point of the clip, follow it exactly: ${motion}.`,
     )
+    if (intimate.addon) {
+      parts.push(`ACTION DETAIL (must be visible on screen): ${intimate.addon}.`)
+    }
   } else {
     parts.push('Natural movement, soft hair and fabric motion, confident pose.')
   }
-  parts.push('Cinematic lighting, subtle camera motion.')
+  parts.push(
+    intimate.wantsPoseChange || intimate.wantsPartner
+      ? 'Cinematic lighting; subjects move within a slowly evolving frame.'
+      : 'Cinematic lighting, subtle camera motion.',
+  )
+  // 줌인/클로즈업 연출은 24·30초(2프레임 연속)에만. 단일 클립은 소스 구도 유지.
+  if (clipRole === 'single') {
+    parts.push(
+      'CAMERA (single clip): hold the same framing and shot scale as the source still for the whole clip — no intentional zoom-in or zoom-out choreography.',
+    )
+  } else if (clipRole === 'dual-a') {
+    parts.push(
+      'CAMERA (dual clip 1/2): hold wide source framing through most of this clip so actions (undress etc.) can finish.',
+      'Only in the LAST portion of THIS clip begin a SLOW gradual zoom-in toward a medium/close framing — bridging into clip 2. Never smash-zoom at the start.',
+    )
+    if (undressAction) {
+      parts.push(
+        'Undress must finish BEFORE that late zoom begins — pants/panties fully off while still wide.',
+      )
+    }
+  } else {
+    // dual-b
+    parts.push(
+      'CAMERA (dual clip 2/2): start already closer (continuing the late zoom-in from clip 1); early/mid portion stays in that closer intimate framing.',
+    )
+    if (endCloseUp) {
+      parts.push(
+        'USER REQUEST: END ON CLOSE-UP — do NOT zoom out; finish the clip held in close-up / zoomed-in framing as requested.',
+      )
+    } else {
+      parts.push(
+        'In the FINAL portion of THIS clip, SLOWLY zoom back out to a wider closing frame (soft zoom-out ending). Do not smash cut.',
+      )
+    }
+  }
+  if (clipRole !== 'single') {
+    parts.push(
+      'During any zoom: SAME face identity and SAME skin color/tone as the source — no face morph, no pale bleach, no muddy recolor.',
+    )
+  }
+  // 얼굴·체형·나체·음모 — 눕기/올라타기면 포즈 변경 허용 (limbs-only 잠금이 동작을 죽이던 실측)
+  parts.push(
+    buildAdultStructureLock(structureCorpus, {
+      forNudeHold: undressAction || staysNude,
+      allowPoseChange: intimate.wantsPoseChange,
+    }),
+  )
   if (original) {
     parts.push(
       `Subject/appearance continuity from source image (identity/outfit reference only — the motion instruction above always takes priority): ${original}`,
@@ -1403,21 +2129,40 @@ export function buildAnimationPrompt(input: { prompt?: string; motion?: string }
   }
   if (undressAction) {
     parts.push(
-      'CRITICAL ADULT MOTION: garments / underwear / robe are removed during the clip; end state is adult nude with bare skin visible.',
-      'Do NOT freeze the subject fully clothed. Do NOT keep bra, panties, lingerie, or bathrobe at the end.',
-      'Smooth undressing action, fabric sliding off, skin revealed as requested.',
+      'CRITICAL ADULT MOTION: garments / underwear / robe are removed while the camera stays wide enough to show hips and legs; hands pull down pants/panties fully.',
+      'Then STAY fully nude with bare skin, visible nipples, and the same pubic/body-hair state as the source through the LAST frame.',
+      'Do NOT freeze clothed. Do NOT keep or re-add bra, panties, lingerie, or bathrobe after undressing.',
+      'FORBIDDEN mid-clip: anyone putting bra/panties/clothes back on her; clothes returning after nude; censored nipples or mosaic crotch; zooming so early that undress cannot finish.',
+      'Smooth undressing, fabric sliding off, nude established, then continue the requested intimate action — no re-dressing.',
     )
   } else if (dressAction) {
     parts.push(
       'CRITICAL ADULT MOTION: the subject starts bare-skinned/nude and puts on or wraps herself in a garment (robe, dress, or clothing) during the clip; end state is dressed as requested.',
       'Do NOT freeze the subject fully nude for the whole clip. Do NOT keep bare skin visible at the end if the motion asks her to get dressed.',
       'Smooth dressing action, fabric sliding on and settling naturally onto the body.',
+      'While dressing, keep the same face and body type as the source until fabric covers them.',
     )
   } else if (staysNude) {
     parts.push(
       'CRITICAL: the subject is ALREADY fully nude / bare-skinned in the source image, starting from frame one.',
       'She STAYS fully nude for the entire clip — do NOT add, invent, fade in, or generate ANY clothing, underwear, bra, panties, lingerie, robe, or dress at any point in the video.',
       'No garments ever appear during the motion. Bare skin remains visible in every single frame, from start to finish.',
+      'Keep the same breasts, hips, and pubic presentation as the source photo — no censor blur, no invented lingerie patch.',
+      'Visible nipples and pubic detail as in the source — uncensor, no mosaic.',
+      'FORBIDDEN: anyone putting bra or panties on her; clothes reappearing mid-clip.',
+    )
+  }
+  // 솔로 나체: 파트너 요청이 없을 때만 2인물 금지.
+  // 빨기·올라타기·눕히기는 파트너가 필요해서 CAST LOCK이 동작을 죽이던 실측 → 그때는 허용.
+  if ((undressAction || staysNude) && !coupleRequested) {
+    parts.push(
+      'CAST LOCK: only the single person from the input photo. FORBIDDEN inventing a second person, man partner, or stranger who dresses her.',
+    )
+  } else if (intimate.wantsPartner) {
+    parts.push(
+      'CAST: a second consenting adult may appear only to perform the requested intimate action.',
+      'IDENTITY LOCK: the woman from the source photo keeps the SAME face, same haircut, same body type and proportions — do NOT morph her into a more muscular, taller, or different-looking woman.',
+      'FACE WHILE NUDE/KISS: while undressing and kissing, facial identity stays the same; only a light smile, light blushing shyness, or soft pleasure — never a distorted kissing grimace that changes who she is. Deep kiss = strong lips/mouth/cheek movement on that same face.',
     )
   }
   parts.push('Follow the source image identity, including adult content when requested — do not sanitize.')
@@ -1426,6 +2171,16 @@ export function buildAnimationPrompt(input: { prompt?: string; motion?: string }
   // 문장 끝에서 한 번 더 짧게 재강조해서 최근 지시 우선(recency) 효과도 함께 노린다.
   if (motion) {
     parts.push(`Reminder — the required motion for this clip is: ${motion}.`)
+    if (intimate.addon) {
+      parts.push(`ACTION REMINDER: ${intimate.addon}.`)
+    }
+  }
+  if (undressAction || staysNude) {
+    parts.push(
+      'FINAL LOCK: last frame still fully nude — same face, same body type, bare breasts and bare hips/crotch, ZERO bra, ZERO panties. No one re-dressing her.',
+      'FINAL BODY: breast size and waist match the clothed silhouette from the source — not barbie-flat, not a different figure.',
+      `FINAL PUBIC: ${buildAdultPubicHairLock(structureCorpus)}`,
+    )
   }
   return parts.join(' ')
 }

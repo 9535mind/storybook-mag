@@ -2,6 +2,11 @@ name = "storymag"
 compatibility_date = "2026-07-01"
 pages_build_output_dir = "public"
 
+# fal/Replicate 폴링이 한 요청에 수십 회 fetch를 씀 — 기본 50(무료)이면
+# inpaint 타임아웃 후 폴백에서 "Too many subrequests"로 연쇄 실패함.
+[limits]
+subrequests = 1000
+
 # 언어 반응형 장면 이해 (Llama) — 실패 시 휴리스틱으로 폴백
 [ai]
 binding = "AI"

@@ -6,7 +6,8 @@ export type FalImageSize =
 
 /** Pages Function wall-clock 전에 JSON으로 돌아오도록 보조 엔진 예산을 짧게 잡는다. */
 const FAL_TIMEOUT_MS = 22_000
-const FAL_REFINE_TIMEOUT_MS = 18_000
+/** inpaint는 큐 대기가 길어 짧게 잡으면 이중 모델 폴백으로 서브요청만 소진됨 */
+const FAL_REFINE_TIMEOUT_MS = 28_000
 
 type FalQueueSubmitResponse = {
   status_url?: string
@@ -26,6 +27,15 @@ type FalImageResultResponse = {
   detail?: string | Array<{ msg?: string }>
   error?: string
 }
+
+type FalVideoResultResponse = {
+  video?: { url?: string }
+  detail?: string | Array<{ msg?: string }>
+  error?: string
+}
+
+/** ffmpeg 병합 — 쇼츠 두 클립 이어 붙이기 */
+export const FAL_VIDEO_MERGE_TIMEOUT_MS = 90_000
 
 function extractErrorMessage(payload: {
   error?: string
@@ -96,7 +106,8 @@ async function pollFalResult<T extends { detail?: string | Array<{ msg?: string 
       throw new Error(extractErrorMessage(statusPayload) || `fal_${status.toLowerCase()}`)
     }
 
-    await sleep(attempt < 10 ? 500 : 1_000)
+    // 500ms 폴링은 Workers 서브요청 한도를 빨리 소진함 → 간격↑
+    await sleep(attempt < 6 ? 900 : 1_600)
   }
 
   throw new Error('fal_provider_timeout')
@@ -154,6 +165,70 @@ async function runFalQueue(
   return { imageUrl }
 }
 
+async function runFalQueueVideo(
+  falKey: string,
+  falModel: string,
+  body: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<{ videoUrl: string }> {
+  const startedAt = Date.now()
+  const endpoint = `https://queue.fal.run/${falModel}`
+
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+    Math.min(timeoutMs, 20_000),
+  )
+
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse
+  if (!submitResponse.ok) {
+    throw new Error(extractErrorMessage(submitPayload))
+  }
+
+  let resultPayload: FalVideoResultResponse
+  if (submitPayload.status_url && submitPayload.response_url) {
+    resultPayload = await pollFalResult<FalVideoResultResponse>(
+      falKey,
+      submitPayload.status_url,
+      submitPayload.response_url,
+      startedAt,
+      timeoutMs,
+    )
+  } else {
+    resultPayload = submitPayload as FalVideoResultResponse
+  }
+
+  const policyMsg = extractErrorMessage(resultPayload)
+  const videoUrl = resultPayload.video?.url?.trim()
+  if (!videoUrl) {
+    throw new Error(policyMsg !== 'fal_generation_failed' ? policyMsg : 'missing_video_url')
+  }
+  return { videoUrl }
+}
+
+/** 영상 클립 이어 붙이기 (보조). Wan 단일 클립 상한 ≈24초(슬로)일 때 12+12 등에 사용 */
+export async function mergeFalVideos(options: {
+  falKey: string
+  videoUrls: string[]
+  timeoutMs?: number
+}): Promise<{ videoUrl: string }> {
+  const urls = (options.videoUrls || []).map((u) => String(u || '').trim()).filter(Boolean)
+  if (urls.length < 2) throw new Error('merge_needs_two_videos')
+  return runFalQueueVideo(
+    options.falKey,
+    'fal-ai/ffmpeg-api/merge-videos',
+    { video_urls: urls },
+    options.timeoutMs ?? FAL_VIDEO_MERGE_TIMEOUT_MS,
+  )
+}
+
 /**
  * Flux.2는 negative_prompt를 지원하지 않음.
  * Replicate용 negative를 긍정 제약으로 바꿔 프롬프트에 심는다.
@@ -184,6 +259,23 @@ export function bakeConstraintsForFlux(prompt: string, negativePrompt?: string):
   if (/studio void|black background|headshot|portrait crop|fashion magazine/i.test(neg)) {
     extras.push(
       'Full-body or medium-wide environmental wildlife shot with readable outdoor setting and natural ground.',
+    )
+  }
+  // 수정 반복 시 얼굴 하얗게/흑갈색·서양인 치환 — Flux는 negative API가 없어 긍정 제약으로 흡수
+  if (
+    /same face|IRONCLAD|IDENTITY|Korean|skin tone|body type|pale white|muddy dark|caucasian|different person/i.test(
+      src,
+    )
+  ) {
+    extras.push(
+      'Keep the exact same East Asian / Korean face and natural warm skin tone from the source photo.',
+      'Do not bleach the face pale white, do not darken skin to muddy or blackish brown, do not turn her Caucasian.',
+      'Keep the same body type and proportions as the source.',
+    )
+  }
+  if (/nude|bare skin|nipple|pubic|uncensor|나체|유두|음모/i.test(src)) {
+    extras.push(
+      'If nude: show visible nipples on bare breasts and natural pubic detail (or shaved if requested) — no mosaic, no censor blur, no blank barbie anatomy.',
     )
   }
   if (!extras.length) return prompt
@@ -375,6 +467,95 @@ export async function refineFalImageToImage(options: {
   })
 }
 
+/** 지시형 이미지 수정 — Flux Kontext (마스크 없이 문장으로 국소·전역 편집).
+ *  inpaint/img2img보다 "시계 추가/옷 색 변경"류 지시 추종이 목적에 맞음. */
+export const FAL_KONTEXT_EDIT_TIMEOUT_MS = 45_000
+
+export async function refineFalKontextEdit(options: {
+  falKey: string
+  imageUrl: string
+  /** 짧은 영문 수정 지시 */
+  prompt: string
+  /** pro | max — max는 지시 추종↑·비용↑ */
+  tier?: 'pro' | 'max'
+  timeoutMs?: number
+}): Promise<{ imageUrl: string }> {
+  const model =
+    options.tier === 'max' ? 'fal-ai/flux-pro/kontext/max' : 'fal-ai/flux-pro/kontext'
+  return runFalQueue(
+    options.falKey,
+    model,
+    {
+      prompt: options.prompt,
+      image_url: options.imageUrl,
+      num_images: 1,
+      output_format: 'png',
+      safety_tolerance: '5',
+      guidance_scale: 3.5,
+    },
+    options.timeoutMs ?? FAL_KONTEXT_EDIT_TIMEOUT_MS,
+  )
+}
+
+/** 증명사진→허리/전신: 캔버스를 아래로 진짜 확장(얼굴 픽셀 유지). */
+export const FAL_OUTPAINT_TIMEOUT_MS = 55_000
+
+export async function outpaintFalImage(options: {
+  falKey: string
+  imageUrl: string
+  expand_top?: number
+  expand_bottom?: number
+  expand_left?: number
+  expand_right?: number
+  /** high|fast — Pages 한도 안에서는 fast 권장 */
+  mode?: 'high' | 'fast'
+}): Promise<{ imageUrl: string }> {
+  let imageUrl = options.imageUrl
+  if (imageUrl.startsWith('data:')) {
+    const ext = imageUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    imageUrl = await uploadDataUrlToFal(options.falKey, imageUrl, `outpaint-src-${Date.now()}.${ext}`)
+  }
+  const body = {
+    image_url: imageUrl,
+    expand_top: Math.max(0, Math.min(2048, Math.round(options.expand_top || 0))),
+    expand_bottom: Math.max(0, Math.min(2048, Math.round(options.expand_bottom || 0))),
+    expand_left: Math.max(0, Math.min(2048, Math.round(options.expand_left || 0))),
+    expand_right: Math.max(0, Math.min(2048, Math.round(options.expand_right || 0))),
+    mode: options.mode || 'fast',
+    output_format: 'png',
+  }
+  try {
+    return await runFalQueue(
+      options.falKey,
+      'fal-ai/flux-2-pro/outpaint',
+      body,
+      FAL_OUTPAINT_TIMEOUT_MS,
+    )
+  } catch (primaryError) {
+    // 폴백: 사이드당 700px 제한인 경량 아웃페인트
+    const clamp = (n: number) => Math.max(0, Math.min(700, n))
+    try {
+      return await runFalQueue(
+        options.falKey,
+        'fal-ai/image-apps-v2/outpaint',
+        {
+          image_url: imageUrl,
+          expand_top: clamp(body.expand_top),
+          expand_bottom: clamp(body.expand_bottom),
+          expand_left: clamp(body.expand_left),
+          expand_right: clamp(body.expand_right),
+          output_format: 'png',
+        },
+        FAL_OUTPAINT_TIMEOUT_MS,
+      )
+    } catch (fallbackError) {
+      const a = primaryError instanceof Error ? primaryError.message : String(primaryError)
+      const b = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+      throw new Error(`outpaint_failed: ${a} / ${b}`)
+    }
+  }
+}
+
 /** 영역 수정(inpaint) — mask에서 흰 영역만 수정. mask는 data URI 또는 https. */
 export async function refineFalInpaint(options: {
   falKey: string
@@ -384,6 +565,8 @@ export async function refineFalInpaint(options: {
   /** Flux inpaint도 negative API 없음 — bakeConstraintsForFlux로 프롬프트에 흡수해서라도
    * 최소한의 억제 신호를 준다. 안 넘기면 예전처럼 순수 긍정 프롬프트만 사용. */
   negativePrompt?: string
+  /** 기본 0.85. 장신구처럼 작은 추가는 낮출수록 마스크·건물 발명이 줄어듦(실측). */
+  strength?: number
 }): Promise<{ imageUrl: string }> {
   let maskUrl = options.maskUrl
   if (maskUrl.startsWith('data:')) {
@@ -391,11 +574,16 @@ export async function refineFalInpaint(options: {
     maskUrl = await uploadDataUrlToFal(options.falKey, maskUrl, `mask-${Date.now()}.${ext}`)
   }
   const prompt = bakeConstraintsForFlux(options.prompt, options.negativePrompt)
+  const strength =
+    typeof options.strength === 'number' && Number.isFinite(options.strength)
+      ? Math.min(0.95, Math.max(0.35, options.strength))
+      : 0.85
 
-  // 빠른 lora inpaint 우선 (fill은 성인 화보에서 검은 화면을 자주 냄)
+  // lora 우선. 타임아웃이면 2차 모델도 같은 대기로 실패하고 서브요청만 태움 → 스킵
   const models = ['fal-ai/flux-lora/inpainting', 'fal-ai/flux-general/inpainting'] as const
   const errors: string[] = []
-  for (const model of models) {
+  for (let i = 0; i < models.length; i += 1) {
+    const model = models[i]
     try {
       return await runFalQueue(
         options.falKey,
@@ -404,7 +592,7 @@ export async function refineFalInpaint(options: {
           prompt,
           image_url: options.imageUrl,
           mask_url: maskUrl,
-          strength: 0.85,
+          strength,
           num_images: 1,
           output_format: 'png',
           enable_safety_checker: false,
@@ -412,7 +600,9 @@ export async function refineFalInpaint(options: {
         FAL_REFINE_TIMEOUT_MS,
       )
     } catch (error) {
-      errors.push(`${model}: ${error instanceof Error ? error.message : 'failed'}`)
+      const msg = error instanceof Error ? error.message : 'failed'
+      errors.push(`${model}: ${msg}`)
+      if (/fal_provider_timeout|Too many subrequests/i.test(msg)) break
     }
   }
   throw new Error(errors.join(' / ') || 'fal_inpaint_failed')

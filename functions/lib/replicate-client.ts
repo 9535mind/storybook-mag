@@ -151,7 +151,7 @@ async function pollPrediction(
     if (payload.status === 'failed' || payload.status === 'canceled') {
       throw new Error(extractReplicateError(payload) || `replicate_${payload.status}`)
     }
-    await sleep(attempt < 10 ? 500 : 1_500)
+    await sleep(attempt < 6 ? 900 : 1_600)
   }
   throw new Error('replicate_timeout')
 }
@@ -400,11 +400,14 @@ export function resolveWanI2vDuration(durationSec?: number): {
   frames_per_second: number
   approxSec: number
 } {
-  const raw = Math.round(Number(durationSec) || 8)
-  if (raw <= 8) return { num_frames: 121, frames_per_second: 15, approxSec: 8 }
+  // Wan fast: num_frames 최대 121 · fps 최소 5 → 단일 클립 최장 ≈24초(슬로 체감)
+  // 프레임 수는 항상 121, 길이는 fps만 낮춰 맞춤 (동작 ‘양’은 같고 재생만 늘어짐)
+  const raw = Math.round(Number(durationSec) || 15)
   if (raw <= 10) return { num_frames: 121, frames_per_second: 12, approxSec: 10 }
   if (raw <= 12) return { num_frames: 121, frames_per_second: 10, approxSec: 12 }
-  return { num_frames: 121, frames_per_second: 8, approxSec: 15 }
+  if (raw <= 15) return { num_frames: 121, frames_per_second: 8, approxSec: 15 }
+  if (raw <= 18) return { num_frames: 121, frames_per_second: 7, approxSec: 18 }
+  return { num_frames: 121, frames_per_second: 5, approxSec: 24 }
 }
 
 /** ReplicateVideoAspect(portrait/landscape/square) → Wan2.2 aspect_ratio 파라미터.
