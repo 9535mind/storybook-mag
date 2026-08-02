@@ -220,6 +220,7 @@ const animatePanel = document.getElementById('animate-panel')
 const acceptButton = document.getElementById('accept-button')
 const reviseToggleButton = document.getElementById('revise-toggle-button')
 const reviseAgainButton = document.getElementById('revise-again-button')
+const bodyProjectShortsButton = document.getElementById('body-project-shorts-button')
 const moveGalleryButton = document.getElementById('move-gallery-button')
 const reviseApplyButton = document.getElementById('revise-apply-button')
 const reviseCancelButton = document.getElementById('revise-cancel-button')
@@ -233,6 +234,11 @@ const regionToolbar = document.getElementById('region-toolbar')
 const regionUndoButton = document.getElementById('region-undo-button')
 const regionClearButton = document.getElementById('region-clear-button')
 const regionList = document.getElementById('region-list')
+const bodyLandmarkCanvas = document.getElementById('body-landmark-canvas')
+const bodyLandmarkToolbar = document.getElementById('body-landmark-toolbar')
+const bodyLandmarkAutoButton = document.getElementById('body-landmark-auto')
+const bodyLandmarkConfirmButton = document.getElementById('body-landmark-confirm')
+const bodyLandmarkCancelButton = document.getElementById('body-landmark-cancel')
 const pinToolbar = document.getElementById('pin-toolbar')
 const pinStatus = document.getElementById('pin-status')
 const reviseTextBlock = document.getElementById('revise-text-block')
@@ -290,9 +296,7 @@ function syncDualFrameUi(totalSec) {
     motionLabel.textContent = dual ? '전반 모션 (1프레임)' : '모션 힌트 (선택)'
   }
   if (motionField) {
-    motionField.placeholder = dual
-      ? '전반 예: 나체가 된다. 딥키스한다'
-      : '예: 나체가 된다. 딥키스한다'
+    motionField.placeholder = dual ? '전반 모션을 입력하세요' : '모션 힌트를 입력하세요'
   }
   if (dualFrameHint) {
     dualFrameHint.textContent = `${totalSec}초: 전반→후반 이어붙임. 탈의는 전반에서 와이드로 끝내고, 나체 전에 줌인하지 않음. 단일(10~18초)은 클로즈업·줌인 없음.`
@@ -321,7 +325,180 @@ function setSelectedVideoDuration(sec) {
 
 function setAnimateBusy(busy) {
   if (animateButton) animateButton.disabled = busy
+  if (bodyProjectShortsButton) {
+    if (bodyProjectUiMode === 'working') {
+      bodyProjectShortsButton.disabled = true
+    } else if (bodyProjectUiMode === 'landmark') {
+      bodyProjectShortsButton.disabled = false
+    } else {
+      bodyProjectShortsButton.disabled = busy
+    }
+  }
 }
+
+/** @type {'idle'|'landmark'|'working'} */
+let bodyProjectUiMode = 'idle'
+/** @type {null|(() => void)} */
+let stopBodyProjectButtonTimer = null
+
+function resetBodyProjectButtonUi() {
+  stopBodyProjectButtonTimer?.()
+  stopBodyProjectButtonTimer = null
+  bodyProjectUiMode = 'idle'
+  const btn = bodyProjectShortsButton || document.getElementById('body-project-shorts-button')
+  if (!btn) return
+  btn.classList.remove('is-active', 'is-working')
+  btn.textContent = '몸매 투영'
+  btn.disabled = false
+  btn.removeAttribute('aria-busy')
+  // 일반 쇼츠(키스/애무)가 「몸매 투영」문구에 가로채이지 않도록 모션칸 잔여 제거
+  if (motionField && /^\s*몸매\s*투영/u.test(motionField.value || '')) {
+    motionField.value = ''
+  }
+}
+
+/**
+ * 몸매 투영 버튼 활성/작업 UI.
+ * @param {'idle'|'landmark'|'working'} mode
+ */
+function setBodyProjectButtonUi(mode) {
+  const btn = bodyProjectShortsButton || document.getElementById('body-project-shorts-button')
+  if (!btn) return
+  stopBodyProjectButtonTimer?.()
+  stopBodyProjectButtonTimer = null
+  bodyProjectUiMode = mode
+  btn.classList.toggle('is-active', mode === 'landmark' || mode === 'working')
+  btn.classList.toggle('is-working', mode === 'working')
+  btn.setAttribute('aria-busy', mode === 'working' ? 'true' : 'false')
+
+  if (mode === 'idle') {
+    btn.textContent = '몸매 투영'
+    btn.disabled = false
+    return
+  }
+  if (mode === 'landmark') {
+    btn.textContent = '타점 조정 중'
+    btn.disabled = false
+    return
+  }
+  // working — 버튼에 경과 초 표시
+  btn.disabled = true
+  const startedAt = Date.now()
+  const tick = () => {
+    const seconds = Math.floor((Date.now() - startedAt) / 1000)
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    btn.textContent = m > 0 ? `투영 중 ${m}분 ${s}초` : `투영 중 ${s}초`
+  }
+  tick()
+  const timerId = window.setInterval(tick, 1000)
+  stopBodyProjectButtonTimer = () => {
+    window.clearInterval(timerId)
+  }
+}
+
+/** 기본 모션 예시 + 사용자가 저장한 예시 (로컬) */
+const MOTION_PRESET_KEY = 'storymag.motionPresets.v1'
+const BUILTIN_MOTION_PRESETS = []
+
+function loadCustomMotionPresets() {
+  try {
+    const raw = localStorage.getItem(MOTION_PRESET_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((s) => String(s || '').trim())
+      .filter((s) => s.length > 0 && s.length <= 400)
+      .slice(0, 24)
+  } catch {
+    return []
+  }
+}
+
+function saveCustomMotionPresets(list) {
+  localStorage.setItem(MOTION_PRESET_KEY, JSON.stringify(list.slice(0, 24)))
+}
+
+function getMotionPresetTarget() {
+  if (document.activeElement === motion2Field && motion2Field && !dualFrameFields?.hidden) {
+    return motion2Field
+  }
+  return motionField
+}
+
+function renderMotionPresets() {
+  const listEl = document.getElementById('motion-presets-list')
+  if (!listEl) return
+  const custom = loadCustomMotionPresets()
+  const seen = new Set()
+  const items = []
+  for (const text of [...BUILTIN_MOTION_PRESETS, ...custom]) {
+    const key = text.trim()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    items.push({ text: key, custom: !BUILTIN_MOTION_PRESETS.includes(key) })
+  }
+  listEl.replaceChildren()
+  items.forEach((item) => {
+    const chip = document.createElement('button')
+    chip.type = 'button'
+    chip.className = 'motion-preset-chip'
+    chip.title = item.text
+    const label = document.createElement('span')
+    label.className = 'motion-preset-chip__text'
+    label.textContent = item.text
+    chip.appendChild(label)
+    chip.addEventListener('click', () => {
+      const target = getMotionPresetTarget()
+      if (!target) return
+      target.value = item.text
+      target.focus()
+      setAnimateStatus('모션 예시를 넣었어요. 필요하면 고친 뒤 쇼츠를 만드세요.', false)
+    })
+    if (item.custom) {
+      const x = document.createElement('span')
+      x.className = 'motion-preset-chip__x'
+      x.setAttribute('role', 'button')
+      x.setAttribute('aria-label', '예시 삭제')
+      x.tabIndex = 0
+      x.textContent = '×'
+      const remove = (event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        const next = loadCustomMotionPresets().filter((s) => s !== item.text)
+        saveCustomMotionPresets(next)
+        renderMotionPresets()
+        setAnimateStatus('저장한 모션 예시를 지웠어요.', false)
+      }
+      x.addEventListener('click', remove)
+      x.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') remove(event)
+      })
+      chip.appendChild(x)
+    }
+    listEl.appendChild(chip)
+  })
+}
+
+document.getElementById('motion-preset-save')?.addEventListener('click', () => {
+  const target = getMotionPresetTarget()
+  const text = (target?.value || '').trim()
+  if (!text) {
+    setAnimateStatus('저장할 모션 문구를 먼저 입력하세요.', true)
+    return
+  }
+  if (BUILTIN_MOTION_PRESETS.includes(text)) {
+    setAnimateStatus('기본 예시라 따로 저장하지 않아도 됩니다.', false)
+    return
+  }
+  const next = [text, ...loadCustomMotionPresets().filter((s) => s !== text)].slice(0, 24)
+  saveCustomMotionPresets(next)
+  renderMotionPresets()
+  setAnimateStatus('모션 예시를 저장했어요. 다음에 칩을 눌러 바로 쓰세요.', false)
+})
+
+renderMotionPresets()
+
 
 function getSelectedVideoSpeed() {
   const v = videoSpeedGroup?.dataset?.speed || 'normal'
@@ -962,8 +1139,7 @@ function setReviseStatus(message, isError) {
 }
 
 function getSelectedReviseMode() {
-  const checked = document.querySelector('input[name="revise-mode"]:checked')
-  const v = checked?.value
+  const v = document.querySelector('input[name="revise-mode"]:checked')?.value || 'pin'
   if (v === 'region' || v === 'pin' || v === 'text') return v
   return 'pin'
 }
@@ -1591,6 +1767,620 @@ async function removeBackgroundFromCurrentResult() {
   }
 }
 removeBgButtons.forEach((btn) => btn.addEventListener('click', removeBackgroundFromCurrentResult))
+
+/**
+ * @typedef {{
+ *   moundL: {x:number,y:number},
+ *   moundR: {x:number,y:number},
+ *   nippleL: {x:number,y:number},
+ *   nippleR: {x:number,y:number},
+ *   breastRadius: number,
+ *   breastRadiusL: number,
+ *   breastRadiusR: number,
+ * }} BodyLandmarksClient
+ */
+
+/** 몸매 투영 타점 — 흰 원(유방 중심)과 빨간 점(유두)을 분리 */
+const bodyLandmarkState = {
+  open: false,
+  /** @type {BodyLandmarksClient} */
+  landmarks: {
+    moundL: { x: 0.34, y: 0.46 },
+    moundR: { x: 0.46, y: 0.46 },
+    nippleL: { x: 0.34, y: 0.48 },
+    nippleR: { x: 0.46, y: 0.48 },
+    breastRadius: 0.075,
+    breastRadiusL: 0.075,
+    breastRadiusR: 0.075,
+  },
+  /** @type {'L'|'R'} */
+  selected: 'L',
+  /** @type {null|'moundL'|'moundR'|'nippleL'|'nippleR'|'radiusL'|'radiusR'} */
+  drag: null,
+  pointerId: null,
+}
+
+const BODY_PROJECT_MOTION =
+  '몸매 투영: 벨트·바지·흰팬티·이중팬티 전부 삭제 후 완전 나체. 타점 유방·유두 유지. 벨트/팬티 잔존 실패'
+
+function defaultBodyLandmarks() {
+  return {
+    moundL: { x: 0.34, y: 0.46 },
+    moundR: { x: 0.46, y: 0.46 },
+    // 기본도 유두를 원 중심보다 살짝 아래 — 실제 체형에 가깝게
+    nippleL: { x: 0.34, y: 0.485 },
+    nippleR: { x: 0.46, y: 0.485 },
+    breastRadius: 0.075,
+    breastRadiusL: 0.075,
+    breastRadiusR: 0.075,
+  }
+}
+
+function clampLandmarkRadius(n) {
+  const v = Number(n)
+  if (!Number.isFinite(v)) return 0.075
+  return Math.min(0.22, Math.max(0.035, v))
+}
+
+function clamp01(n) {
+  return Math.min(1, Math.max(0, Number(n) || 0))
+}
+
+function syncBodyLandmarkCanvasSize() {
+  if (!bodyLandmarkCanvas || !resultImage) return
+  const width = Math.max(1, Math.round(resultImage.clientWidth || resultImage.getBoundingClientRect().width))
+  const height = Math.max(1, Math.round(resultImage.clientHeight || resultImage.getBoundingClientRect().height))
+  bodyLandmarkCanvas.style.width = `${width}px`
+  bodyLandmarkCanvas.style.height = `${height}px`
+  bodyLandmarkCanvas.style.left = '0'
+  bodyLandmarkCanvas.style.top = '0'
+  if (bodyLandmarkCanvas.width !== width || bodyLandmarkCanvas.height !== height) {
+    bodyLandmarkCanvas.width = width
+    bodyLandmarkCanvas.height = height
+  }
+}
+
+function updateBodyLandmarkReadout() {
+  const el = document.getElementById('body-landmark-readout')
+  if (!el) return
+  const lm = bodyLandmarkState.landmarks
+  const sel = bodyLandmarkState.selected === 'R' ? 'R' : 'L'
+  const mound = sel === 'L' ? lm.moundL : lm.moundR
+  const nip = sel === 'L' ? lm.nippleL : lm.nippleR
+  const r = sel === 'L' ? lm.breastRadiusL : lm.breastRadiusR
+  const name = sel === 'L' ? '왼' : '오른'
+  el.textContent =
+    `${name} 유방 중심 ${ (mound.x * 100).toFixed(1) }%,${ (mound.y * 100).toFixed(1) }%` +
+    ` · 유두 ${ (nip.x * 100).toFixed(1) }%,${ (nip.y * 100).toFixed(1) }%` +
+    ` · 크기 ${(r * 100).toFixed(1)}%`
+}
+
+function syncBodyLandmarkSelectButtons() {
+  document.querySelectorAll('[data-lm-select]').forEach((btn) => {
+    if (!(btn instanceof HTMLElement)) return
+    btn.classList.toggle('is-selected', btn.getAttribute('data-lm-select') === bodyLandmarkState.selected)
+  })
+  updateBodyLandmarkReadout()
+}
+
+function setBodyLandmarkSelected(id) {
+  if (id !== 'L' && id !== 'R') return
+  bodyLandmarkState.selected = id
+  syncBodyLandmarkSelectButtons()
+  drawBodyLandmarkOverlay()
+}
+
+function nudgeBodyLandmark(dir) {
+  const step = 0.012
+  const lm = bodyLandmarkState.landmarks
+  const sel = bodyLandmarkState.selected === 'R' ? 'R' : 'L'
+  // 선택된 쪽: 유두를 미세 이동 (흰 원은 상대 오프셋 유지하려면 둘 다 이동)
+  const moundKey = sel === 'L' ? 'moundL' : 'moundR'
+  const nipKey = sel === 'L' ? 'nippleL' : 'nippleR'
+  let dx = 0
+  let dy = 0
+  if (dir === 'left') dx = -step
+  else if (dir === 'right') dx = step
+  else if (dir === 'up') dy = -step
+  else if (dir === 'down') dy = step
+  lm[moundKey] = { x: clamp01(lm[moundKey].x + dx), y: clamp01(lm[moundKey].y + dy) }
+  lm[nipKey] = { x: clamp01(lm[nipKey].x + dx), y: clamp01(lm[nipKey].y + dy) }
+  drawBodyLandmarkOverlay()
+  updateBodyLandmarkReadout()
+}
+
+function resizeSelectedBreast(delta) {
+  const sel = bodyLandmarkState.selected
+  if (sel !== 'L' && sel !== 'R') return
+  const lm = bodyLandmarkState.landmarks
+  const key = sel === 'L' ? 'breastRadiusL' : 'breastRadiusR'
+  lm[key] = clampLandmarkRadius(lm[key] + delta * 0.01)
+  lm.breastRadius = (lm.breastRadiusL + lm.breastRadiusR) / 2
+  drawBodyLandmarkOverlay()
+  updateBodyLandmarkReadout()
+}
+
+function drawBodyLandmarkOverlay() {
+  if (!bodyLandmarkCanvas || bodyLandmarkCanvas.hidden) return
+  syncBodyLandmarkCanvasSize()
+  const ctx = bodyLandmarkCanvas.getContext('2d')
+  if (!ctx) return
+  const w = bodyLandmarkCanvas.width
+  const h = bodyLandmarkCanvas.height
+  const lm = bodyLandmarkState.landmarks
+  const minSide = Math.min(w, h)
+  ctx.clearRect(0, 0, w, h)
+
+  const drawSide = (mound, nipple, radiusNorm, id, label) => {
+    const mx = mound.x * w
+    const my = mound.y * h
+    const nx = nipple.x * w
+    const ny = nipple.y * h
+    const r = Math.max(14, (radiusNorm || 0.075) * minSide)
+    const selected = bodyLandmarkState.selected === id
+    // 흰 원 = 유방
+    ctx.beginPath()
+    ctx.arc(mx, my, r, 0, Math.PI * 2)
+    ctx.fillStyle = selected ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.18)'
+    ctx.fill()
+    ctx.lineWidth = selected ? Math.max(3, r * 0.08) : Math.max(2, r * 0.055)
+    ctx.strokeStyle = selected ? 'rgba(169, 139, 255, 0.98)' : 'rgba(255, 255, 255, 0.95)'
+    ctx.stroke()
+    // 크기 핸들
+    ctx.beginPath()
+    ctx.arc(mx + r, my, Math.max(5, r * 0.16), 0, Math.PI * 2)
+    ctx.fillStyle = selected ? 'rgba(169, 139, 255, 0.95)' : 'rgba(255, 255, 255, 0.85)'
+    ctx.fill()
+    ctx.strokeStyle = 'rgba(20, 16, 28, 0.55)'
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+    // 유두가 원 중심과 다르면 얇은 가이드 선
+    if (Math.hypot(nx - mx, ny - my) > 2) {
+      ctx.beginPath()
+      ctx.moveTo(mx, my)
+      ctx.lineTo(nx, ny)
+      ctx.strokeStyle = 'rgba(220, 40, 40, 0.35)'
+      ctx.lineWidth = 1
+      ctx.stroke()
+    }
+    // 빨간 점 = 유두 (독립 위치)
+    const dot = Math.max(4.5, r * 0.16)
+    ctx.beginPath()
+    ctx.arc(nx, ny, dot, 0, Math.PI * 2)
+    ctx.fillStyle = 'rgba(220, 40, 40, 0.95)'
+    ctx.fill()
+    ctx.lineWidth = 2
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)'
+    ctx.stroke()
+    ctx.font = `600 ${Math.max(11, Math.round(minSide * 0.028))}px sans-serif`
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
+    ctx.lineWidth = 3
+    ctx.strokeText(label, mx + r * 0.35, my - r * 0.75)
+    ctx.fillText(label, mx + r * 0.35, my - r * 0.75)
+  }
+
+  drawSide(lm.moundL, lm.nippleL, lm.breastRadiusL, 'L', 'L')
+  drawSide(lm.moundR, lm.nippleR, lm.breastRadiusR, 'R', 'R')
+  updateBodyLandmarkReadout()
+}
+
+function hitBodyLandmark(clientX, clientY) {
+  if (!bodyLandmarkCanvas) return null
+  const rect = bodyLandmarkCanvas.getBoundingClientRect()
+  const x = ((clientX - rect.left) / Math.max(1, rect.width)) * bodyLandmarkCanvas.width
+  const y = ((clientY - rect.top) / Math.max(1, rect.height)) * bodyLandmarkCanvas.height
+  const w = bodyLandmarkCanvas.width
+  const h = bodyLandmarkCanvas.height
+  const lm = bodyLandmarkState.landmarks
+  const minSide = Math.min(w, h)
+  const rL = Math.max(14, (lm.breastRadiusL || 0.075) * minSide)
+  const rR = Math.max(14, (lm.breastRadiusR || 0.075) * minSide)
+  const mlx = lm.moundL.x * w
+  const mly = lm.moundL.y * h
+  const mrx = lm.moundR.x * w
+  const mry = lm.moundR.y * h
+  const nlx = lm.nippleL.x * w
+  const nly = lm.nippleL.y * h
+  const nrx = lm.nippleR.x * w
+  const nry = lm.nippleR.y * h
+  const nipHit = Math.max(14, minSide * 0.028)
+
+  // 1) 빨간 유두 점 우선
+  if (Math.hypot(x - nlx, y - nly) <= nipHit) return 'nippleL'
+  if (Math.hypot(x - nrx, y - nry) <= nipHit) return 'nippleR'
+  // 2) 크기 핸들
+  if (Math.hypot(x - (mlx + rL), y - mly) <= Math.max(12, rL * 0.28)) return 'radiusL'
+  if (Math.hypot(x - (mrx + rR), y - mry) <= Math.max(12, rR * 0.28)) return 'radiusR'
+  // 3) 흰 원(유방 중심) 이동
+  const hits = [
+    { id: 'moundL', x: mlx, y: mly, hitR: rL },
+    { id: 'moundR', x: mrx, y: mry, hitR: rR },
+  ]
+  let best = null
+  let bestD = Infinity
+  for (const hit of hits) {
+    const d = Math.hypot(x - hit.x, y - hit.y)
+    if (d <= hit.hitR && d < bestD) {
+      best = hit.id
+      bestD = d
+    }
+  }
+  return best
+}
+
+function onBodyLandmarkPointerDown(event) {
+  if (!bodyLandmarkState.open || !bodyLandmarkCanvas) return
+  const hit = hitBodyLandmark(event.clientX, event.clientY)
+  if (!hit) return
+  event.preventDefault()
+  event.stopPropagation()
+  bodyLandmarkState.drag = hit
+  bodyLandmarkState.pointerId = event.pointerId
+  if (hit === 'moundL' || hit === 'nippleL' || hit === 'radiusL') setBodyLandmarkSelected('L')
+  else if (hit === 'moundR' || hit === 'nippleR' || hit === 'radiusR') setBodyLandmarkSelected('R')
+  bodyLandmarkCanvas.setPointerCapture?.(event.pointerId)
+  bodyLandmarkCanvas.classList.add('is-dragging')
+}
+
+function onBodyLandmarkPointerMove(event) {
+  if (!bodyLandmarkState.open || bodyLandmarkState.drag == null) return
+  if (bodyLandmarkState.pointerId != null && event.pointerId !== bodyLandmarkState.pointerId) return
+  event.preventDefault()
+  const rect = bodyLandmarkCanvas.getBoundingClientRect()
+  const nx = clamp01((event.clientX - rect.left) / Math.max(1, rect.width))
+  const ny = clamp01((event.clientY - rect.top) / Math.max(1, rect.height))
+  const lm = bodyLandmarkState.landmarks
+  const drag = bodyLandmarkState.drag
+  if (drag === 'nippleL') {
+    lm.nippleL = { x: nx, y: ny }
+  } else if (drag === 'nippleR') {
+    lm.nippleR = { x: nx, y: ny }
+  } else if (drag === 'moundL') {
+    const dx = nx - lm.moundL.x
+    const dy = ny - lm.moundL.y
+    lm.moundL = { x: nx, y: ny }
+    // 원 이동 시 유두 상대 위치 유지
+    lm.nippleL = { x: clamp01(lm.nippleL.x + dx), y: clamp01(lm.nippleL.y + dy) }
+  } else if (drag === 'moundR') {
+    const dx = nx - lm.moundR.x
+    const dy = ny - lm.moundR.y
+    lm.moundR = { x: nx, y: ny }
+    lm.nippleR = { x: clamp01(lm.nippleR.x + dx), y: clamp01(lm.nippleR.y + dy) }
+  } else if (drag === 'radiusL' || drag === 'radiusR') {
+    const cx = drag === 'radiusL' ? lm.moundL.x : lm.moundR.x
+    const cy = drag === 'radiusL' ? lm.moundL.y : lm.moundR.y
+    const minSide = Math.min(bodyLandmarkCanvas.width, bodyLandmarkCanvas.height)
+    const dist = Math.hypot((nx - cx) * bodyLandmarkCanvas.width, (ny - cy) * bodyLandmarkCanvas.height)
+    const r = clampLandmarkRadius(dist / Math.max(1, minSide))
+    if (drag === 'radiusL') lm.breastRadiusL = r
+    else lm.breastRadiusR = r
+    lm.breastRadius = (lm.breastRadiusL + lm.breastRadiusR) / 2
+  }
+  drawBodyLandmarkOverlay()
+}
+
+function onBodyLandmarkPointerUp(event) {
+  if (bodyLandmarkState.pointerId != null && event.pointerId !== bodyLandmarkState.pointerId) return
+  bodyLandmarkState.drag = null
+  bodyLandmarkState.pointerId = null
+  bodyLandmarkCanvas?.classList.remove('is-dragging')
+  updateBodyLandmarkReadout()
+}
+
+function closeBodyLandmarkEditor() {
+  bodyLandmarkState.open = false
+  bodyLandmarkState.drag = null
+  bodyLandmarkState.pointerId = null
+  if (bodyLandmarkCanvas) {
+    bodyLandmarkCanvas.hidden = true
+    bodyLandmarkCanvas.classList.remove('is-dragging')
+  }
+  if (bodyLandmarkToolbar) bodyLandmarkToolbar.hidden = true
+  resultStage?.classList.remove('result__stage--landmarks')
+}
+
+/**
+ * 서버(Claude Vision)가 이미지를 보고 유방 중심·유두 타점을 추정.
+ * @returns {Promise<BodyLandmarksClient|null>}
+ */
+async function detectBodyLandmarksFromAi() {
+  if (!currentResult.imageUrl && !currentResult.imageDataUrl) return null
+  try {
+    if (!currentResult.imageDataUrl && currentResult.imageUrl) {
+      await cacheImageForAnimate(currentResult.imageUrl)
+    }
+    const response = await fetch('/api/body-landmarks', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({
+        imageUrl: currentResult.imageUrl || undefined,
+        imageDataUrl: currentResult.imageDataUrl || undefined,
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!data?.ok || !data.landmarks) return null
+    const raw = data.landmarks
+    if (!raw.nippleL || !raw.nippleR) return null
+    const rL = clampLandmarkRadius(raw.breastRadiusL ?? raw.breastRadius ?? 0.08)
+    const rR = clampLandmarkRadius(raw.breastRadiusR ?? raw.breastRadius ?? 0.08)
+    const nippleL = { x: clamp01(raw.nippleL.x), y: clamp01(raw.nippleL.y) }
+    const nippleR = { x: clamp01(raw.nippleR.x), y: clamp01(raw.nippleR.y) }
+    const moundL = raw.moundL
+      ? { x: clamp01(raw.moundL.x), y: clamp01(raw.moundL.y) }
+      : { x: nippleL.x, y: clamp01(nippleL.y - 0.015) }
+    const moundR = raw.moundR
+      ? { x: clamp01(raw.moundR.x), y: clamp01(raw.moundR.y) }
+      : { x: nippleR.x, y: clamp01(nippleR.y - 0.015) }
+    return {
+      moundL,
+      moundR,
+      nippleL,
+      nippleR,
+      breastRadiusL: rL,
+      breastRadiusR: rR,
+      breastRadius: (rL + rR) / 2,
+    }
+  } catch {
+    return null
+  }
+}
+
+function applyBodyLandmarksClient(lm) {
+  if (!lm) return
+  bodyLandmarkState.landmarks = {
+    moundL: { ...lm.moundL },
+    moundR: { ...lm.moundR },
+    nippleL: { ...lm.nippleL },
+    nippleR: { ...lm.nippleR },
+    breastRadiusL: lm.breastRadiusL,
+    breastRadiusR: lm.breastRadiusR,
+    breastRadius: lm.breastRadius ?? (lm.breastRadiusL + lm.breastRadiusR) / 2,
+  }
+  drawBodyLandmarkOverlay()
+  updateBodyLandmarkReadout()
+}
+
+function openBodyLandmarkEditor() {
+  if (!resultImage?.src || !currentResult.imageUrl) {
+    setAnimateStatus('먼저 이미지를 생성하거나 불러와 주세요.', true)
+    return false
+  }
+  try {
+    setRegionDrawEnabled?.(false)
+    setPinDrawEnabled?.(false)
+  } catch {
+    /* ignore */
+  }
+  if (regionCanvas) regionCanvas.hidden = true
+  bodyLandmarkState.open = true
+  bodyLandmarkState.landmarks = defaultBodyLandmarks()
+  bodyLandmarkState.selected = 'L'
+  if (bodyLandmarkCanvas) bodyLandmarkCanvas.hidden = false
+  const toolbar = bodyLandmarkToolbar || document.getElementById('body-landmark-toolbar')
+  if (toolbar) {
+    toolbar.hidden = false
+    toolbar.style.pointerEvents = 'auto'
+  }
+  resultStage?.classList.add('result__stage--landmarks')
+  syncBodyLandmarkSelectButtons()
+  resultSection?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  toolbar?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  const ready = () => {
+    drawBodyLandmarkOverlay()
+  }
+  if (resultImage.complete && resultImage.naturalWidth > 0) ready()
+  else resultImage.addEventListener('load', ready, { once: true })
+  requestAnimationFrame(ready)
+  setAnimateStatus('AI가 유방 원·유두 점을 체형에 맞게 잡는 중…', false)
+  void (async () => {
+    const aiLm = await detectBodyLandmarksFromAi()
+    if (!bodyLandmarkState.open) return
+    if (aiLm) {
+      applyBodyLandmarksClient(aiLm)
+      setAnimateStatus(
+        'AI 제시 완료. 흰 원=유방 이동 · 빨간 점=유두만 이동 · 가장자리=크기. 수정 후 투영하세요.',
+        false,
+      )
+    } else {
+      setAnimateStatus('AI 타점 실패 — 기본 위치입니다. 원과 점을 직접 맞춰 주세요.', true)
+    }
+  })()
+  return true
+}
+
+/**
+ * 「몸매 투영 쇼츠」— 먼저 타점 UI, 확인 후 I2V.
+ */
+function startBodyProjectShorts() {
+  const btn = bodyProjectShortsButton || document.getElementById('body-project-shorts-button')
+  if (btn?.disabled && bodyProjectUiMode === 'working') return
+
+  if (!currentResult.imageUrl) {
+    setAnimateStatus('먼저 이미지를 생성하거나 불러와 주세요.', true)
+    return
+  }
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+  if (comparingPrevious) exitComparePreview()
+  if (animatePanel) {
+    animatePanel.hidden = false
+    animatePanel.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }
+  if (motionField) motionField.value = BODY_PROJECT_MOTION
+  setBodyProjectButtonUi('landmark')
+  if (!openBodyLandmarkEditor()) {
+    resetBodyProjectButtonUi()
+    return
+  }
+  animateStatus?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+}
+
+async function confirmBodyLandmarkAndAnimate() {
+  if (!bodyLandmarkState.open) return
+  const lm = bodyLandmarkState.landmarks
+  const landmarks = {
+    moundL: { ...lm.moundL },
+    moundR: { ...lm.moundR },
+    nippleL: { ...lm.nippleL },
+    nippleR: { ...lm.nippleR },
+    breastRadius: (lm.breastRadiusL + lm.breastRadiusR) / 2,
+    breastRadiusL: lm.breastRadiusL,
+    breastRadiusR: lm.breastRadiusR,
+  }
+  closeBodyLandmarkEditor()
+
+  if (motionField) motionField.value = BODY_PROJECT_MOTION
+  setBodyProjectButtonUi('working')
+  setAnimateStatus(
+    `타점 고정 투영… 유두 L(${(landmarks.nippleL.x * 100).toFixed(0)},${(landmarks.nippleL.y * 100).toFixed(0)}) R(${(landmarks.nippleR.x * 100).toFixed(0)},${(landmarks.nippleR.y * 100).toFixed(0)})`,
+    false,
+  )
+  animateStatus?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+
+  const dur = getSelectedVideoDuration()
+  try {
+    if (isDualFrameDuration(dur)) {
+      if (motion2Field && !(motion2Field.value || '').trim()) {
+        motion2Field.value = '이미 나체 유지하며 자연스럽게 숨 쉬고 살짝 미소한다'
+      }
+      syncDualFrameUi(dur)
+      await requestDualFrameShorts(dur, {
+        bodyProjectFirst: true,
+        landmarks,
+      })
+      return
+    }
+
+    await requestAnimate({
+      motionOverride: BODY_PROJECT_MOTION,
+      bodyProject: true,
+      statusPrefix: '몸매 투영',
+      landmarks,
+    })
+  } catch (error) {
+    setAnimateBusy(false)
+    resetBodyProjectButtonUi()
+    setAnimateStatus(
+      `몸매 투영 쇼츠 실패: ${error instanceof Error ? error.message : String(error)}`,
+      true,
+    )
+  }
+}
+
+bodyLandmarkCanvas?.addEventListener('pointerdown', onBodyLandmarkPointerDown)
+bodyLandmarkCanvas?.addEventListener('pointermove', onBodyLandmarkPointerMove)
+bodyLandmarkCanvas?.addEventListener('pointerup', onBodyLandmarkPointerUp)
+bodyLandmarkCanvas?.addEventListener('pointercancel', onBodyLandmarkPointerUp)
+
+// 위임 — 선택/미세이동/크기/확정 버튼
+function onBodyLandmarkToolbarClick(event) {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  if (!target.closest('#body-landmark-toolbar')) return
+
+  const selectBtn = target.closest('[data-lm-select]')
+  if (selectBtn instanceof HTMLElement) {
+    event.preventDefault()
+    event.stopPropagation()
+    setBodyLandmarkSelected(selectBtn.getAttribute('data-lm-select') || 'L')
+    return
+  }
+  const nudgeBtn = target.closest('[data-lm-nudge]')
+  if (nudgeBtn instanceof HTMLElement) {
+    event.preventDefault()
+    event.stopPropagation()
+    nudgeBodyLandmark(nudgeBtn.getAttribute('data-lm-nudge') || '')
+    return
+  }
+  const sizeBtn = target.closest('[data-lm-size]')
+  if (sizeBtn instanceof HTMLElement) {
+    event.preventDefault()
+    event.stopPropagation()
+    resizeSelectedBreast(Number(sizeBtn.getAttribute('data-lm-size')) || 0)
+    return
+  }
+
+  const auto = target.closest('#body-landmark-auto')
+  const confirm = target.closest('#body-landmark-confirm')
+  const cancel = target.closest('#body-landmark-cancel')
+  if (!auto && !confirm && !cancel) return
+  event.preventDefault()
+  event.stopPropagation()
+  if (auto) {
+    setAnimateStatus('AI가 그림을 보고 타점을 다시 잡는 중…', false)
+    void (async () => {
+      const aiLm = await detectBodyLandmarksFromAi()
+      if (!bodyLandmarkState.open) return
+      if (aiLm) {
+        applyBodyLandmarksClient(aiLm)
+        bodyLandmarkState.selected = 'L'
+        syncBodyLandmarkSelectButtons()
+        setAnimateStatus('AI 타점 다시 제시됨. 흰 원·빨간 점을 각각 수정한 뒤 투영하세요.', false)
+      } else {
+        bodyLandmarkState.landmarks = defaultBodyLandmarks()
+        bodyLandmarkState.selected = 'L'
+        syncBodyLandmarkSelectButtons()
+        drawBodyLandmarkOverlay()
+        setAnimateStatus('AI 타점 실패 — 기본 위치로 되돌렸습니다.', true)
+      }
+    })()
+    return
+  }
+  if (confirm) {
+    void confirmBodyLandmarkAndAnimate()
+    return
+  }
+  if (cancel) {
+    closeBodyLandmarkEditor()
+    resetBodyProjectButtonUi()
+    setAnimateStatus('몸매 투영 타점을 취소했어요.', false)
+  }
+}
+document.getElementById('result-section')?.addEventListener('click', onBodyLandmarkToolbarClick)
+
+window.addEventListener('resize', () => {
+  if (bodyLandmarkState.open) drawBodyLandmarkOverlay()
+})
+window.addEventListener('keydown', (event) => {
+  if (!bodyLandmarkState.open) return
+  const tag = (event.target instanceof HTMLElement ? event.target.tagName : '').toLowerCase()
+  if (tag === 'input' || tag === 'textarea' || tag === 'select') return
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault()
+    nudgeBodyLandmark('left')
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault()
+    nudgeBodyLandmark('right')
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    nudgeBodyLandmark('up')
+  } else if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    nudgeBodyLandmark('down')
+  } else if (event.key === '+' || event.key === '=') {
+    event.preventDefault()
+    resizeSelectedBreast(1)
+  } else if (event.key === '-' || event.key === '_') {
+    event.preventDefault()
+    resizeSelectedBreast(-1)
+  } else if (event.key === '1') setBodyLandmarkSelected('L')
+  else if (event.key === '2') setBodyLandmarkSelected('R')
+  else if (event.key === '3') setBodyLandmarkSelected('N')
+})
+
+// 클릭 위임 — 캐시·재렌더 후에도 동작하도록 actions 컨테이너에 연결
+document.getElementById('animate-panel')?.addEventListener('click', (event) => {
+  const target = event.target
+  if (!(target instanceof Element)) return
+  const btn = target.closest('#body-project-shorts-button')
+  if (!btn) return
+  event.preventDefault()
+  event.stopPropagation()
+  startBodyProjectShorts()
+})
 
 /** 이미지 URL이 만료되기 전에 서버로 바이트를 읽어 메모리에 보관 */
 async function cacheImageForAnimate(imageUrl) {
@@ -2421,7 +3211,7 @@ function wantsUndressActionClient(text) {
 }
 
 /**
- * @param {{ motionOverride?: string, durationSec?: number, skipHide?: boolean, statusPrefix?: string, persist?: boolean, clipRole?: 'single'|'dual-a'|'dual-b' }} [options]
+ * @param {{ motionOverride?: string, durationSec?: number, skipHide?: boolean, statusPrefix?: string, persist?: boolean, keepBusy?: boolean, bodyProject?: boolean, clipRole?: 'single'|'dual-a'|'dual-b', landmarks?: BodyLandmarksClient, guideImageDataUrl?: string }} [options]
  * @returns {Promise<{ ok: boolean, videoUrl?: string }>}
  */
 async function requestAnimate(options = {}) {
@@ -2465,20 +3255,28 @@ async function requestAnimate(options = {}) {
   const speedHint = speedConflict ? '' : VIDEO_MOTION_HINTS[speedKey] || ''
   const motion = [motionBase, speedHint].filter(Boolean).join('. ')
   const speedLabel = speedKey === 'slow' ? '느리게' : speedKey === 'fast' ? '빠르게' : '보통'
-  const undressMotion = wantsUndressActionClient(motionBase)
+  const bodyProject = options.bodyProject === true
+  const undressMotion = bodyProject || wantsUndressActionClient(motionBase)
+  const landmarks = options.landmarks && typeof options.landmarks === 'object' ? options.landmarks : undefined
+  const guideImageDataUrl =
+    typeof options.guideImageDataUrl === 'string' && options.guideImageDataUrl.startsWith('data:image/')
+      ? options.guideImageDataUrl
+      : undefined
   const prefix = options.statusPrefix ? `${options.statusPrefix} ` : ''
   const motionPreview = motionBase
     ? ` (모션: "${motionBase.slice(0, 60)}${motionBase.length > 60 ? '…' : ''}")`
     : ' (모션 힌트 없음)'
   const stopTimer = startProgressTimer(
     setAnimateStatus,
-    undressMotion
-      ? `${prefix}탈의·누드 쇼츠(약 ${durationSec}초)…${motionPreview}`
-      : `${prefix}쇼츠(약 ${durationSec}초 · ${speedLabel})…${motionPreview}`,
+    bodyProject
+      ? `${prefix}몸매 투영 쇼츠(약 ${durationSec}초)…${motionPreview}`
+      : undressMotion
+        ? `${prefix}탈의·누드 쇼츠(약 ${durationSec}초)…${motionPreview}`
+        : `${prefix}쇼츠(약 ${durationSec}초 · ${speedLabel})…${motionPreview}`,
   )
 
   try {
-    if (!currentResult.imageDataUrl && currentResult.imageUrl) {
+    if (!guideImageDataUrl && !currentResult.imageDataUrl && currentResult.imageUrl) {
       await cacheImageForAnimate(currentResult.imageUrl)
     }
 
@@ -2486,12 +3284,14 @@ async function requestAnimate(options = {}) {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
-        imageUrl: currentResult.imageUrl,
-        imageDataUrl: currentResult.imageDataUrl || undefined,
+        imageUrl: guideImageDataUrl ? undefined : currentResult.imageUrl,
+        imageDataUrl: guideImageDataUrl || currentResult.imageDataUrl || undefined,
         prompt: currentResult.prompt,
         motion,
         size: currentResult.size,
         durationSec,
+        bodyProject: bodyProject || undefined,
+        landmarks: bodyProject && landmarks ? landmarks : undefined,
         clipRole: options.clipRole === 'dual-a' || options.clipRole === 'dual-b' ? options.clipRole : 'single',
       }),
     })
@@ -2527,7 +3327,9 @@ async function requestAnimate(options = {}) {
     let finalData = data
     if (data.pending && data.predictionId) {
       setAnimateStatus(
-        `${prefix}영상 렌더링 중(약 ${durationSec}초 · ${speedLabel})… 1~2분 걸릴 수 있어요`,
+        bodyProject
+          ? `${prefix}몸매 투영 렌더링 중(약 ${durationSec}초)… 1~2분 걸릴 수 있어요`
+          : `${prefix}영상 렌더링 중(약 ${durationSec}초 · ${speedLabel})… 1~2분 걸릴 수 있어요`,
         false,
       )
       finalData = await pollAnimateUntilDone(
@@ -2536,7 +3338,9 @@ async function requestAnimate(options = {}) {
         speedLabel,
         (elapsedSec) => {
           setAnimateStatus(
-            `${prefix}영상 렌더링 중… ${elapsedSec}초 경과 (약 ${durationSec}초 · ${speedLabel})`,
+            bodyProject
+              ? `${prefix}몸매 투영 렌더링 중… ${elapsedSec}초 경과 (약 ${durationSec}초)`
+              : `${prefix}영상 렌더링 중… ${elapsedSec}초 경과 (약 ${durationSec}초 · ${speedLabel})`,
             false,
           )
         },
@@ -2591,7 +3395,10 @@ async function requestAnimate(options = {}) {
     return { ok: false }
   } finally {
     stopTimer()
-    if (!options.keepBusy) setAnimateBusy(false)
+    if (!options.keepBusy) {
+      setAnimateBusy(false)
+      if (options.bodyProject === true) resetBodyProjectButtonUi()
+    }
   }
 }
 
@@ -2654,8 +3461,9 @@ async function mergeShortsVideos(videoUrls) {
  * 두 프레임 연속 쇼츠.
  * UI 이름: 24초 / 30초 — 내부만 12+12 / 15+15 후 병합.
  * @param {number} [totalSec]
+ * @param {{ bodyProjectFirst?: boolean, landmarks?: BodyLandmarksClient, guideImageDataUrl?: string }} [opts]
  */
-async function requestDualFrameShorts(totalSec) {
+async function requestDualFrameShorts(totalSec, opts = {}) {
   const total = isDualFrameDuration(totalSec) ? Number(totalSec) : getSelectedVideoDuration()
   if (!isDualFrameDuration(total)) {
     setAnimateStatus('24초 또는 30초를 선택한 뒤 다시 눌러 주세요.', true)
@@ -2681,16 +3489,27 @@ async function requestDualFrameShorts(totalSec) {
   const savedImageUrl = currentResult.imageUrl
   const savedImageDataUrl = currentResult.imageDataUrl
   const savedPrompt = currentResult.prompt
+  const bodyProjectFirst = opts.bodyProjectFirst === true
+  const landmarks = opts.landmarks
+  const guideImageDataUrl = opts.guideImageDataUrl
 
   try {
-    setAnimateStatus(`${total}초 쇼츠: 전반(1/2) 생성…`, false)
+    setAnimateStatus(
+      bodyProjectFirst
+        ? `${total}초 몸매 투영 쇼츠: 전반(1/2) 생성…`
+        : `${total}초 쇼츠: 전반(1/2) 생성…`,
+      false,
+    )
     const clip1 = await requestAnimate({
       motionOverride: motion1,
+      bodyProject: bodyProjectFirst,
       durationSec: clipSec,
-      statusPrefix: `[${total}초 · 1/2]`,
+      statusPrefix: bodyProjectFirst ? `[몸매 투영 · 1/2]` : `[${total}초 · 1/2]`,
       persist: false,
       keepBusy: true,
       clipRole: 'dual-a',
+      landmarks: bodyProjectFirst ? landmarks : undefined,
+      guideImageDataUrl: bodyProjectFirst ? guideImageDataUrl : undefined,
     })
     if (!clip1.ok || !clip1.videoUrl) return
 
@@ -2774,6 +3593,7 @@ async function requestDualFrameShorts(totalSec) {
     }
   } finally {
     setAnimateBusy(false)
+    if (bodyProjectFirst) resetBodyProjectButtonUi()
     setSelectedVideoDuration(total)
   }
 }
@@ -3306,6 +4126,9 @@ function isStudioImageLoadContext() {
 
 // 화보/관리자: Ctrl+V 캡처·이미지 붙여넣기 → 수정 대상으로 불러오기
 document.addEventListener('paste', (event) => {
+  // 합성 패널이 열려 있으면 admin-fuse가 처리
+  const fusePanel = document.getElementById('admin-fuse-panel')
+  if (fusePanel && !fusePanel.hidden) return
   if (!isStudioImageLoadContext()) return
   // 텍스트만 붙여넣는 경우는 가로채지 않음 (설명 칸 등)
   const file = pickImageFileFromDataTransfer(event.clipboardData)
@@ -3628,7 +4451,7 @@ reviseApplyButton.addEventListener('click', async () => {
     setReviseStatus('찍어서 붙이기 모드입니다. 소품을 고른 뒤 사진 위를 클릭하세요. (수정 적용 버튼 없음)', true)
     return
   }
-  const revision = polishConceptText(revisionText.value || '')
+  let revision = polishConceptText(revisionText.value || '')
   if (revision && revision !== (revisionText.value || '').trim()) {
     revisionText.value = revision
   }
@@ -3766,12 +4589,19 @@ reviseApplyButton.addEventListener('click', async () => {
     // 탈의·의상 수정도 structuralRegen=false(img2img)라서, 예전엔 prompt를 안 갱신했음 →
     // 쇼츠가 옛 "가운/옷 입은" 서술만 보고 나체 이미지에 다시 옷을 입히는 회귀(실측).
     // 수정 지시는 항상 누적한다. 나체 요청이면 판별용 마커를 한 줄 더 붙인다.
+    // 몸매 투영 원문을 base에 누적하면 고착 → 마커만 남김.
+    const nudeBecomes = /몸매\s*투영|나체가\s*된다\.|나체가된다\./i.test(revision)
     const nudeRev =
+      nudeBecomes ||
       /누드|나체|전라|유두|유방|젖꼭지|탈의|벗기|벗겨|벗어|벗는|nude|naked|undress|bare\s*breast|topless/i.test(
         revision,
       )
     const nextPrompt = polishConceptText(
-      [currentResult.prompt, revision, nudeRev ? '현재 나체(옷 없음, 유두 보임)' : '']
+      [
+        currentResult.prompt,
+        nudeBecomes ? '나체 수정 요청됨(몸매 투영)' : revision,
+        nudeRev && !nudeBecomes ? '나체 수정 요청됨(쇼츠는 탈의 전환으로 처리)' : '',
+      ]
         .filter(Boolean)
         .join('. '),
     )
@@ -4364,6 +5194,17 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
 if (window.StorymagAdminFuse?.init) {
   window.StorymagAdminFuse.init({
     getCurrentResult: () => currentResult,
+    getGalleryItems: () => {
+      try {
+        const items = readGallery().filter((it) => it?.imageUrl || it?.imageDataUrl)
+        // 관리자 화보 갤러리를 앞에, 그다음 내 갤러리
+        const admin = items.filter((it) => it.genMode === 'fashion')
+        const free = items.filter((it) => it.genMode !== 'fashion')
+        return [...admin, ...free]
+      } catch {
+        return []
+      }
+    },
     showResult,
     setAdminPanel,
     setFormStatus,

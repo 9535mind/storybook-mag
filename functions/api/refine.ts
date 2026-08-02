@@ -22,6 +22,10 @@ import {
   buildSplitCompositeFixPrompt,
   buildWristAndNecklaceRefinePrompt,
   buildWristWatchRefinePrompt,
+  BODY_PROJECT_REVISION,
+  buildNudeBecomesDefinitionLock,
+  buildNudeIdentityRefinePrompt,
+  isBodyProjectRequest,
   stripDefaultContinuityEchoes,
   wantsFullNude,
   wantsJewelryAccessoryRefine,
@@ -104,6 +108,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     imageUrl?: string
     baseDescription?: string
     revision?: string
+    /** 「몸매 투영」버튼 — 문구 규칙 없이 체형 유지 탈의 경로 */
+    bodyProject?: boolean
     maskDataUrl?: string
     mood?: string
     size?: string
@@ -115,6 +121,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonResponse({ ok: false, error: 'invalid_json_body' }, 400)
   }
 
+  const bodyProjectFlag = body.bodyProject === true
   const mode = body.mode === 'region' ? 'region' : 'text'
   // 화보 모드는 아래의 화보 전용 img2img/재생성 경로를 타야 하므로, genMode='fashion'이면
   // 자유 장면 재생성 블록을 건너뛰게 한다(예전엔 여기서 무조건 'free'로 강제해서, 화보
@@ -134,7 +141,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const baseDescription = polishKoreanPromptText(body.baseDescription ?? '')
   // 「같은 얼굴 유지」「한 명만」은 프롬프트 조립(buildIroncladIdentityLock 등)이 기본 적용 —
   // 사용자 입력에서 제거해 변경 지시만 남긴다.
-  const revision = stripDefaultContinuityEchoes(body.revision ?? '')
+  // 몸매 투영 버튼은 고정 revision — 매직 문구(나체가 된다.) 불필요.
+  const revision = bodyProjectFlag
+    ? BODY_PROJECT_REVISION
+    : stripDefaultContinuityEchoes(body.revision ?? '')
   const attempts: Array<{ engine: string; error: string }> = []
 
   const urlErr = mediaUrlError(imageUrl)
@@ -513,14 +523,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     translateDescriptionForImagePrompt(baseDescription, env),
     translateDescriptionForImagePrompt(revision, env),
   ])
-  let prompt = buildRefinePrompt({
-    baseDescription: baseDescriptionForPrompt,
-    revision: revisionForPrompt,
-    mode,
-    // 위에서 원문 한국어로 이미 판별한 animalSubject를 그대로 강제 반영한다(번역이 "말"을
-    // 애매하게 옮겨서 buildRefinePrompt 내부의 자체 재판별이 놓치는 경우를 방지).
-    genMode: genMode === 'fashion' && animalSubject ? 'free' : genMode,
-  })
+  // 몸매 투영은 번역문에서 의미가 흐려질 수 있어 원문/플래그로 전용 프롬프트를 쓴다.
+  const nudeBecomesHit = isBodyProjectRequest(revision, bodyProjectFlag)
+  let prompt =
+    nudeBecomesHit && mode === 'text' && genMode === 'fashion' && !animalSubject
+      ? buildNudeIdentityRefinePrompt(revision, baseDescription)
+      : buildRefinePrompt({
+          baseDescription: baseDescriptionForPrompt,
+          revision: revisionForPrompt,
+          mode,
+          // 위에서 원문 한국어로 이미 판별한 animalSubject를 그대로 강제 반영한다(번역이 "말"을
+          // 애매하게 옮겨서 buildRefinePrompt 내부의 자체 재판별이 놓치는 경우를 방지).
+          genMode: genMode === 'fashion' && animalSubject ? 'free' : genMode,
+        })
   if (framingExtendRevision) {
     prompt = `${prompt} ${buildFramingExtendRefineAddon(revision, baseDescription)}`
   }
@@ -715,8 +730,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
   }
 
-  // ── 화보 모드: 탈의/나체는 Replicate 정밀 img2img를 먼저 (성인 반영 실측↑).
-  // Flux 자동 inpaint를 먼저 쓰면 검열·착의로 "성공" 응답만 오고 나체가 안 나오는 회귀가 있었음.
+  // ── 화보 모드: 탈의/나체
+  // 몸매 투영은 Flux inpaint 1순위 금지 — 착의+웃음만 바꾸고 성공으로 끝나는
+  // 회귀가 있었음 → Replicate 정밀 img2img를 먼저, Flux는 폴백.
   const autoUndressInpaint =
     mode === 'text' &&
     genMode === 'fashion' &&
@@ -946,7 +962,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const framingExtendBoost = framingExtendRevision && !nudeRevision
       const fullNudeOutcome = structuralFallbackClothing && wantsFullNude(revision, baseDescription)
       const usePrecision = structuralFallbackClothing || framingExtendBoost
-      // 탈의는 SDXL 정밀이 Flux보다 나체 반영이 안정적(실측) — strength 0.58
+      // 탈의는 SDXL 정밀이 Flux보다 나체 반영이 안정적(실측) — strength 0.74
+      // (0.62에서도 완전 착의→나체가 "변화 없음"인 경우가 있어 상향; 얼굴은 짧은 나체 전용 프롬프트로 유지)
       // 체모만: 얼굴 보존 위해 strength↓·정밀모드
       // 세로 갈라짐 수리는 구도 재통합이 필요해 strength·정밀↑
       // 장신구: strength 0.42 additive는 인물 치환 실측 → 0.2로 최소화
@@ -958,17 +975,25 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             ? 0.38
             : framingExtendBoost
               ? 0.48
-              : structuralFallbackClothing && fullNudeOutcome
-                ? 0.58
-                : structural
-                  ? structuralFallbackClothing
-                    ? 0.52
-                    : 0.42
-                  : additive
-                    ? 0.3
-                    : 0.24
+              : nudeBecomesHit
+                ? 0.72
+                : structuralFallbackClothing && fullNudeOutcome
+                  ? 0.72
+                  : structural
+                    ? structuralFallbackClothing
+                      ? 0.52
+                      : 0.42
+                    : additive
+                      ? 0.3
+                      : 0.24
       // 장신구 폴백은 Lightning+저강도 — 정밀 SDXL은 인물 재생성 편향이 큼
-      const usePrecisionForRun = usePrecision || pubicHairOnly || splitCompositeFix
+      // 몸매 투영 inpaint 실패 시에만 여기로 — 체형 유지를 위해 strength 과고(0.85+) 금지
+      const usePrecisionForRun =
+        usePrecision || pubicHairOnly || splitCompositeFix || nudeBecomesHit || fullNudeOutcome
+      const nudePrompt =
+        nudeBecomesHit || fullNudeOutcome
+          ? buildNudeIdentityRefinePrompt(revision, baseDescription)
+          : prompt
       const { imageUrl: nextUrl } = await refineReplicateImageToImage({
         apiToken: env.REPLICATE_API_TOKEN,
         modelOwner: usePrecisionForRun
@@ -981,24 +1006,26 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           ? env.REPLICATE_PRECISION_MODEL_VERSION
           : env.REPLICATE_MODEL_VERSION,
         imageUrl,
-        prompt,
+        prompt: nudePrompt,
         negativePrompt: jewelryOnly
           ? `${negativePrompt}, different person, new face, studio headshot, changed haircut, changed outfit, changed background`
           : pubicHairOnly
             ? `${negativePrompt}, male pubic trail, happy trail to navel, jet black pubic blob`
-            : negativePrompt,
+            : fullNudeOutcome || nudeBecomesHit
+          ? `${negativePrompt}, panties, thong, briefs, bikini bottom, underwear on crotch, lingerie bottoms, clothes, dressed, different body shape, slimmed body, barbie body`
+          : negativePrompt,
         width: dims.width,
         height: dims.height,
         strength,
-        numInferenceSteps: usePrecisionForRun ? 30 : undefined,
-        guidanceScale: usePrecisionForRun ? 7.5 : undefined,
+        numInferenceSteps: usePrecisionForRun ? 32 : undefined,
+        guidanceScale: usePrecisionForRun ? 8 : undefined,
         disableSafetyChecker: true,
       })
       return jsonResponse(
         {
           ok: true,
           imageUrl: nextUrl,
-          prompt,
+          prompt: nudePrompt,
           mode,
           genMode,
           structuralRegen: false,
@@ -1011,7 +1038,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 ? 'Replicate · Img2Img (체모·음모만 · 정밀모드)'
                 : framingExtendBoost
                   ? 'Replicate · Img2Img (전신·프레이밍 확장 · 동일 인물)'
-                  : structuralFallbackClothing
+                  : nudeBecomesHit
+                    ? 'Replicate · Img2Img (몸매 투영)'
+                    : structuralFallbackClothing
                     ? fullNudeOutcome
                       ? 'Replicate · Img2Img (누드 요청 · 얼굴 보존 · 정밀모드)'
                       : 'Replicate · Img2Img (의상 변경 · 얼굴 보존 · 정밀모드)'
@@ -1029,7 +1058,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 ? '체모·음모만 손봤어요. 쇼츠에 반영하려면 이 이미지로 쇼츠를 다시 만들어 주세요.'
                 : framingExtendBoost
                   ? '같은 사람을 유지한 채 무릎·발목까지 보이도록 구도를 넓혔어요. 부족하면 「이전과 비교」후 한 번 더 다듬어 보세요.'
-                  : structuralFallbackClothing
+                  : nudeBecomesHit
+                    ? '몸매 투영: 옷을 약하게 남긴 채 페이드로 녹여 같은 체형을 드러냈어요. 옷이 남으면 「몸매 투영」을 한 번 더 눌러 보세요.'
+                    : structuralFallbackClothing
                     ? fullNudeOutcome
                       ? '탈의·나체는 Replicate 정밀 모드로 처리했어요. 얼굴이 어긋나면 「이전과 비교」→「이 버전에서 다시 수정」후 다시 적용해 보세요.'
                       : '원본 인물의 얼굴을 자동 보존해 처리했어요. 의상 변경이 약하면 바꿀 내용만 다시 적어 수정해 주세요.'
@@ -1059,21 +1090,31 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         faceKeepRatio: size === 'landscape' ? 0.36 : 0.33,
       })
       // Flux용은 짧은 탈의 지시만 — 긴 음모/검열 문구가 착의 회피를 유발(실측)
-      const inpaintPrompt = [
-        'Local edit: ONLY change the masked white body area.',
-        'Remove clothing from the torso. Bare adult breasts with visible nipples. No bra, no robe, no sweater.',
-        'Keep the unmasked face pixels exactly. Same woman. Photorealistic.',
-        revisionForPrompt ? `User request: ${revisionForPrompt}.` : '',
-      ]
-        .filter(Boolean)
-        .join(' ')
+      // 상의만 벗기면 팬티가 남는 회귀 → 하반신·속옷 제거를 같은 문장에 명시
+      const inpaintPrompt = nudeBecomesHit
+        ? [
+            buildNudeBecomesDefinitionLock(),
+            'Local edit: melt clothing on the masked body to transparency — same body projection, fully nude.',
+            'Bare breasts with nipples, bare crotch. Face outside mask stays exact. No smile-only result.',
+            'Keep other people in frame. Photorealistic.',
+          ].join(' ')
+        : [
+            'Local edit: ONLY change the masked white body area.',
+            'FULL NUDE: remove ALL clothes from torso AND hips — blouse, bra, robe, sweater, pants, skirt, panties, thong, briefs.',
+            'Bare adult breasts with visible nipples AND bare crotch — no underwear fabric left on.',
+            'Keep the unmasked face pixels exactly. Same woman. Keep any other person outside/near the mask.',
+            'Photorealistic.',
+            revisionForPrompt ? `User request: ${revisionForPrompt}.` : '',
+          ]
+            .filter(Boolean)
+            .join(' ')
       const { imageUrl: nextUrl } = await refineFalInpaint({
         falKey: env.FAL_KEY,
         imageUrl,
         maskUrl: maskDataUrl,
         prompt: inpaintPrompt,
         negativePrompt:
-          'clothes, robe, sweater, bra, panties, censored, mosaic, different face, two people',
+          'clothes, robe, sweater, bra, panties, thong, briefs, underwear, bikini bottom, censored, mosaic, different face, two people',
       })
       return jsonResponse(
         {
@@ -1083,11 +1124,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           mode,
           genMode,
           engine: 'fal',
-          engineLabel: 'fal.ai · Flux Inpaint (탈의 폴백 · 얼굴 보존)',
+          engineLabel: nudeBecomesHit
+            ? 'fal.ai · 몸매 투영 폴백 (얼굴보존 inpaint)'
+            : 'fal.ai · Flux Inpaint (탈의 폴백 · 얼굴 보존)',
           autoFacePreserveMask: true,
           fallbackUsed: true,
-          message:
-            'Replicate 탈의 경로 실패 후 Flux로 몸통만 수정했어요. 부족하면 다시 수정해 보세요.',
+          message: nudeBecomesHit
+            ? '몸매 투영 보조 경로로 옷을 녹여 봤어요. 부족하면 「몸매 투영」을 다시 눌러 주세요.'
+            : 'Replicate 탈의 경로 실패 후 Flux로 몸통만 수정했어요. 부족하면 다시 수정해 보세요.',
           attempts: attempts.length ? attempts : undefined,
         },
         200,
@@ -1106,7 +1150,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         falKey: env.FAL_KEY,
         imageUrl,
         prompt,
-        strength: autoUndressInpaint ? 0.45 : structural ? 0.28 : additive ? 0.4 : 0.22,
+        strength: autoUndressInpaint ? 0.62 : structural ? 0.28 : additive ? 0.4 : 0.22,
       })
       return jsonResponse(
         {

@@ -1,4 +1,4 @@
-import { requireAuth } from '../lib/auth'
+import { isAdminEmail, requireAuth } from '../lib/auth'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 import { checkReplicateVideo } from '../lib/replicate-client'
 
@@ -21,7 +21,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const auth = await requireAuth(request, env)
   if (auth instanceof Response) return auth
 
-  const limited = await enforceRateLimit(env, 'animate-status', rateLimitIdentity(auth), 120, 3600)
+  // 폴링이 3초마다라 클립 몇 번이면 120을 쉽게 넘김 — 상태 조회 한도를 넉넉히
+  const statusLimit = isAdminEmail(auth.user.email) ? 4000 : 800
+  const limited = await enforceRateLimit(
+    env,
+    'animate-status',
+    rateLimitIdentity(auth),
+    statusLimit,
+    3600,
+  )
   if (limited) return limited
 
   if (!env.REPLICATE_API_TOKEN?.trim()) {

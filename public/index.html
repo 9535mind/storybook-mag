@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag · 자유 일러스트</title>
-  <link rel="stylesheet" href="/style.css?v=20260802align" />
+  <link rel="stylesheet" href="/style.css?v=20260802nipoff" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -317,6 +317,33 @@
           draggable="false"
         />
         <canvas id="region-canvas" class="region-canvas" hidden></canvas>
+        <canvas id="body-landmark-canvas" class="body-landmark-canvas" hidden></canvas>
+      </div>
+      <div id="body-landmark-toolbar" class="body-landmark-toolbar" hidden>
+        <p class="body-landmark-toolbar__hint">
+          <strong>점을 드래그</strong>해 이동 · 흰 원 <strong>가장자리</strong>를 끌면 유방 크기.
+          흰 원(유방)과 빨간 점(유두)은 따로 움직입니다. 왼쪽/오른쪽을 골라 높이·크기도 맞추세요. (원본·영상에는 그려지지 않음)
+        </p>
+        <div class="body-landmark-toolbar__row body-landmark-toolbar__row--select" role="group" aria-label="타점 선택">
+          <button type="button" class="body-landmark-toolbar__btn is-selected" data-lm-select="L">왼 유방</button>
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-select="R">오른 유방</button>
+        </div>
+        <div class="body-landmark-toolbar__row body-landmark-toolbar__row--nudge" role="group" aria-label="미세 이동">
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-nudge="left" title="왼쪽">←</button>
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-nudge="up" title="위로">↑</button>
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-nudge="down" title="아래로">↓</button>
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-nudge="right" title="오른쪽">→</button>
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-size="-1" title="유방 작게">크기−</button>
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-size="1" title="유방 크게">크기+</button>
+        </div>
+        <p id="body-landmark-readout" class="body-landmark-toolbar__readout" aria-live="polite"></p>
+        <div class="body-landmark-toolbar__row">
+          <button type="button" id="body-landmark-auto" class="body-landmark-toolbar__btn">AI 타점 다시</button>
+          <button type="button" id="body-landmark-confirm" class="body-landmark-toolbar__btn body-landmark-toolbar__btn--primary">
+            이 타점으로 투영
+          </button>
+          <button type="button" id="body-landmark-cancel" class="body-landmark-toolbar__btn">취소</button>
+        </div>
       </div>
 
       <div id="review-panel" class="review-panel" hidden>
@@ -348,8 +375,8 @@
             </label>
           </div>
           <p class="review-panel__hint">
-            텍스트 수정은 <strong>Flux Kontext(지시 편집)</strong> 엔진을 씁니다.
-            위치가 애매한 시계·귀걸이는 「찍어서 붙이기」로 클릭 합성, 지우기·부분만은 「올가미」.
+            시계·귀걸이는 「찍어서 붙이기」, 옷·구도는 「텍스트」, 부분만은 「올가미」.
+            체형 유지 탈의 영상은 아래 「몸매 투영 쇼츠」를 쓰세요.
           </p>
 
           <div id="pin-toolbar" class="pin-toolbar" hidden>
@@ -392,9 +419,12 @@
             class="form__textarea"
             rows="3"
             maxlength="800"
-            placeholder="예: 옷 색 하나로 통일. 한 사람만 / 상반신으로 / 목걸이 제거(올가미)"
+            placeholder="예: 옷 색 하나로 통일 / 목걸이 제거 / 나체가 되어"
           ></textarea>
-          <p class="review-panel__hint">얼굴·1인물·한 프레임 자동 유지. <strong>진짜 두 칸(경계선으로 완전히 나뉜 이중 패널)</strong>만 아래 자르기 버튼을 쓰세요. 한 장인데 옷 색이 세로로 갈라진 경우는 자르지 말고 「옷 색 하나로 통일. 한 사람만」처럼 텍스트 수정하세요.</p>
+          <p class="review-panel__hint">
+            일반 나체는 「누드」「나체가 되어」등. 체형 유지 탈의 영상은 「몸매 투영 쇼츠」.
+            <strong>진짜 두 칸</strong>만 아래 자르기.
+          </p>
           </div>
 
           <div class="revise-panel__footer revise-panel__footer--wrap">
@@ -428,8 +458,17 @@
           class="form__select"
           type="text"
           maxlength="400"
-          placeholder="예: 나체가 된다. 딥키스한다"
+          placeholder="모션 힌트를 입력하세요"
         />
+        <div class="motion-presets" id="motion-presets" aria-label="모션 힌트 예시">
+          <div class="motion-presets__row" id="motion-presets-list"></div>
+          <div class="motion-presets__actions">
+            <button type="button" id="motion-preset-save" class="review-panel__secondary">
+              현재 문구 저장
+            </button>
+            <span class="form__hint motion-presets__hint">클릭하면 입력 · 저장한 예시는 ×로 삭제</span>
+          </div>
+        </div>
         <div class="form__field" style="margin-top: 0.75rem">
           <span class="form__label" id="video-duration-label">영상 길이</span>
           <div
@@ -478,7 +517,21 @@
             <button type="button" class="video-duration__btn" data-speed="fast">빠르게</button>
           </div>
         </div>
-        <button id="animate-button" class="form__submit animate-panel__button" type="button">쇼츠 비디오 만들기</button>
+        <div class="animate-panel__actions">
+          <button
+            id="body-project-shorts-button"
+            class="animate-panel__body-project"
+            type="button"
+            title="타점(유두)을 먼저 맞춘 뒤, 그 자리에 유방을 그리고 옷만 약하게 녹이는 쇼츠"
+          >
+            몸매 투영
+          </button>
+          <button id="animate-button" class="form__submit animate-panel__main" type="button">쇼츠 비디오 만들기</button>
+        </div>
+        <p class="form__hint" style="margin-top: 6px">
+          <strong>몸매 투영 쇼츠</strong> = 편집 화면에서만 타점을 보고, 실제 옷 위 가슴에 정확히 맞춘 뒤
+          그 좌표로 유방·유두를 그리고 옷만 약하게 녹여 드러냅니다. 점·원은 원본·영상에 그려지지 않습니다.
+        </p>
         <p id="animate-status" class="form__status" hidden></p>
 
         <div id="video-result" class="video-result" hidden>
@@ -599,10 +652,17 @@
     <section id="admin-fuse-panel" class="admin-fuse-panel" hidden>
       <h2 class="admin-fuse-panel__title">합성 · 배치 · 머리 교체</h2>
       <p class="admin-fuse-panel__lead">
-        관리자 전용. 슬롯에 그림을 올리고 배치한 뒤, 올가미로 잘라 붙이거나 머리를 바꿉니다.
-        위치는 「포인트 맞춤」으로 대응점 2개를 찍으면 크기·각도까지 맞춥니다.
-        「픽셀로 확정」은 AI 비용 없이 합칩니다. 가장자리는 살짝 부드럽게 처리됩니다.
+        관리자 전용. 장면·사진을 불러와 배치한 뒤, 올가미로 잘라 붙이거나 머리를 바꿉니다.
+        「파일 / 붙여넣기 / 끌어다 놓기 / 결과·카메라 스냅샷」으로 재료를 넣을 수 있습니다.
+        「픽셀로 확정」은 AI 비용 없이 합칩니다.
       </p>
+      <div class="admin-fuse-import" role="toolbar" aria-label="장면 가져오기">
+        <button type="button" id="admin-fuse-load-file" class="admin-subnav__btn">파일 불러오기</button>
+        <button type="button" id="admin-fuse-paste" class="admin-subnav__btn">붙여넣기</button>
+        <button type="button" id="admin-fuse-from-result" class="admin-subnav__btn">결과 스냅샷</button>
+        <button type="button" id="admin-fuse-from-gallery" class="admin-subnav__btn">갤러리에서</button>
+        <button type="button" id="admin-fuse-camera" class="admin-subnav__btn">카메라 스냅샷</button>
+      </div>
       <div class="admin-fuse-tray" aria-label="합성 재료">
         <button type="button" class="admin-fuse-slot" data-fuse-slot="0" title="몸/배경">
           <span class="admin-fuse-slot__label">1 몸/배경</span>
@@ -614,7 +674,7 @@
           <span class="admin-fuse-slot__label">3</span>
         </button>
       </div>
-      <input id="admin-fuse-file-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+      <input id="admin-fuse-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
       <div class="admin-fuse-toolrow" role="toolbar" aria-label="합성 도구">
         <button type="button" class="admin-subnav__btn admin-subnav__btn--active" data-fuse-tool="move" aria-pressed="true">이동</button>
         <button type="button" class="admin-subnav__btn" data-fuse-tool="align" aria-pressed="false">포인트 맞춤</button>
@@ -622,21 +682,42 @@
         <button type="button" id="admin-fuse-cut" class="admin-subnav__btn">잘라 새 레이어</button>
         <button type="button" id="admin-fuse-copy" class="admin-subnav__btn">복사 새 레이어</button>
         <button type="button" id="admin-fuse-punch" class="admin-subnav__btn">구멍 뚫기</button>
+        <button type="button" id="admin-fuse-sharpen" class="admin-subnav__btn" title="선택한 레이어를 선명하게 (AI 없음)">선명하게</button>
         <button type="button" id="admin-fuse-head-help" class="admin-subnav__btn">머리 교체 도우미</button>
       </div>
-      <div class="admin-fuse-canvas-wrap">
+      <div class="admin-fuse-canvas-wrap" id="admin-fuse-dropzone">
         <canvas id="admin-fuse-canvas" class="admin-fuse-canvas" width="720" height="960"></canvas>
         <canvas id="admin-fuse-lasso" class="admin-fuse-lasso" width="720" height="960"></canvas>
+        <div class="admin-fuse-drop-overlay" id="admin-fuse-drop-overlay" hidden>
+          여기에 사진·그림을 놓으세요
+        </div>
       </div>
       <p class="form__hint">
-        이동: 드래그·휠·우클릭 · 포인트 맞춤: 옮길 레이어 선택 → 그 위에 점 2개 → 목표 위치에 대응점 2개 ·
-        올가미: 점찍기 → Enter → 자르기/구멍.
+        가져오기: 파일 · Ctrl+V 붙여넣기 · 캔버스에 끌어다 놓기 · 결과/갤러리/카메라 스냅샷.
+        이동: 드래그·휠·우클릭 · 포인트 맞춤 · 올가미 · 「선명하게」(선택 레이어, AI 없음).
+        더 고화질이 필요하면 확정 후 화보 「다듬기」로 이어가세요.
       </p>
       <div class="admin-fuse-actions">
-        <button type="button" id="admin-fuse-from-result" class="review-panel__secondary">현재 결과를 슬롯에</button>
         <button type="button" id="admin-fuse-commit" class="form__submit">픽셀로 확정</button>
       </div>
       <p id="admin-fuse-status" class="form__status" hidden></p>
+      <dialog id="admin-fuse-gallery-dialog" class="admin-fuse-gallery-dialog">
+        <form method="dialog" class="admin-fuse-gallery-dialog__inner">
+          <h3 class="admin-fuse-gallery-dialog__title">갤러리에서 가져오기</h3>
+          <div id="admin-fuse-gallery-grid" class="admin-fuse-gallery-grid"></div>
+          <button type="submit" class="review-panel__secondary">닫기</button>
+        </form>
+      </dialog>
+      <dialog id="admin-fuse-camera-dialog" class="admin-fuse-gallery-dialog">
+        <div class="admin-fuse-gallery-dialog__inner">
+          <h3 class="admin-fuse-gallery-dialog__title">카메라 스냅샷</h3>
+          <video id="admin-fuse-camera-video" class="admin-fuse-camera-video" playsinline autoplay muted></video>
+          <div class="admin-fuse-actions" style="margin-top: 8px">
+            <button type="button" id="admin-fuse-camera-shot" class="form__submit">촬영해 슬롯에</button>
+            <button type="button" id="admin-fuse-camera-close" class="review-panel__secondary">닫기</button>
+          </div>
+        </div>
+      </dialog>
     </section>
 
     <section id="admin-gallery" class="gallery gallery--admin" hidden>
@@ -1219,7 +1300,7 @@
   <script src="/tale-layout.js?v=20260720d"></script>
   <script src="/observe.js?v=20260722b"></script>
   <script src="/poly-lasso.js?v=20260801textfirst"></script>
-  <script src="/admin-fuse.js?v=20260802align"></script>
-  <script src="/app.js?v=20260801splitfix"></script>
+  <script src="/admin-fuse.js?v=20260802fusesharpen"></script>
+  <script src="/app.js?v=20260802nipoff"></script>
 </body>
 </html>

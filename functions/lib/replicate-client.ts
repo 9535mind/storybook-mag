@@ -423,8 +423,14 @@ function buildWanVideoInput(options: {
   aspect?: ReplicateVideoAspect
   durationSec?: number
   goFast?: boolean
+  /** Higher = more deviation from source pixels (helps belt/panty melt). Wan range ~1–20. */
+  sampleShift?: number
 }): { fullInput: Record<string, unknown>; minimalInput: Record<string, unknown>; approxSec: number } {
   const { num_frames, frames_per_second, approxSec } = resolveWanI2vDuration(options.durationSec)
+  const sampleShift =
+    typeof options.sampleShift === 'number' && Number.isFinite(options.sampleShift)
+      ? Math.min(20, Math.max(1, options.sampleShift))
+      : undefined
   const fullInput: Record<string, unknown> = {
     image: options.imageUrl,
     prompt: options.prompt,
@@ -440,6 +446,7 @@ function buildWanVideoInput(options: {
     // 성인 화보 모션이 안전필터에 걸려 빈 실패로 떨어지는 경우 완화
     disable_safety_checker: true,
   }
+  if (sampleShift != null) fullInput.sample_shift = sampleShift
   // fullInput이 스키마 문제로 거부될 때만 쓰는 최소 재시도 입력(다른 I2V 모델로 교체됐을 때의
   // 안전판이라 Wan 전용 필드는 최소화한다) — 그래도 사용자가 실제로 고른 옵션이 조용히
   // 무시되는 걸 막기 위해 go_fast·num_frames·frames_per_second·aspect_ratio는 반드시 남긴다.
@@ -582,6 +589,7 @@ export async function startReplicateVideo(options: {
   aspect?: ReplicateVideoAspect
   durationSec?: number
   goFast?: boolean
+  sampleShift?: number
 }): Promise<{
   status: 'succeeded' | 'processing'
   predictionId: string

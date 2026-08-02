@@ -3,6 +3,10 @@ import {
   buildAnimationPrompt,
   ensureNudeHoldMotionPhrase,
   evaluateContentPolicy,
+  isBodyProjectRequest,
+  normalizeBodyLandmarks,
+  resolveNudeIntent,
+  stripNudeBecomesPhrase,
   wantsNudeOrUndress,
   wantsUndressAction,
 } from '../lib/content-policy'
@@ -63,8 +67,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const auth = await requireAuth(request, env)
   if (auth instanceof Response) return auth
 
-  // 디버깅·재시도가 잦은 쇼츠: admin은 넉넉히, 일반은 시간당 20회
-  const animateLimit = isAdminEmail(auth.user.email) ? 80 : 20
+  // 디버깅·재시도가 잦은 쇼츠: admin은 넉넉히(24/30초는 클립 2회라 한도를 빨리 씀)
+  const animateLimit = isAdminEmail(auth.user.email) ? 400 : 30
   const limited = await enforceRateLimit(
     env,
     'animate',
@@ -85,6 +89,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     motion?: string
     size?: string
     durationSec?: number
+    /** 「몸매 투영 쇼츠」버튼 — 이미지 refine이 아니라 I2V 체형유지 탈의 */
+    bodyProject?: boolean
+    /** User-placed 타점 (nippleL/R, navel, breastRadius) — normalized 0–1 */
+    landmarks?: unknown
     /** single | dual-a | dual-b — 줌 연출은 dual만 */
     clipRole?: string
   }
@@ -107,23 +115,40 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const originalPrompt = truncatePromptAtBoundary((body.prompt ?? '').trim(), ANIMATE_PROMPT_MAX_CHARS)
+  const bodyProjectFlag = body.bodyProject === true
 
   let motion = (body.motion ?? '').trim()
   if (motion.length > 400) {
     return jsonResponse({ ok: false, error: 'motion_too_long' }, 400)
   }
 
-  // 「나체로」등 전환 요청이면 누적 프롬프트의 옛 나체 단어로 "이미 나체" 오판하지 않음
-  const motionForceBecomeNude =
-    /나체로|누드로|올\s*누드|완전\s*나체|옷을\s*벗겨|옷을\s*벗기|탈의하|undress|strip|get(?:s|ting)?\s*(?:fully\s*)?naked/i.test(
-      motion,
-    )
+  // 「몸매 투영 쇼츠」버튼 — 이미지 수정 없이 I2V에서 체형 유지 탈의 전환
+  if (bodyProjectFlag) {
+    if (!isBodyProjectRequest(motion)) {
+      motion = motion
+        ? `몸매 투영. ${motion}`
+        : '몸매 투영: 얼굴·체형 그대로. 어깨·팔뚝·팔꿈치로 유두 높이를 읽고, 가슴은 옷에 볼륨이 있으면 C컵 반~D컵·처진 실루엣 가능. 배꼽·치부 기점 고정 후 상의·바지·벨트·팬티 전부 녹여 완전 나체. 가슴 아래 벨트/띠 잔상·바지/팬티 잔존·빈유 과소평가 실패'
+    }
+  }
+  // NOTE: refine 마커만으로 motion='몸매 투영'을 주입하지 않음.
+  // 일반 쇼츠(키스/애무)가 become 조기 return으로 새는 회귀를 막는다. 몸매 투영은 bodyProject 버튼만.
+
+  const nudeIntent = resolveNudeIntent({
+    motion,
+    prompt: originalPrompt,
+    base: originalPrompt,
+    bodyProject: bodyProjectFlag,
+  })
+  const motionForceBecomeNude = nudeIntent.mode === 'become' || bodyProjectFlag
+  const continuity = stripNudeBecomesPhrase(originalPrompt)
   const sourceNudeHold =
-    !motionForceBecomeNude &&
-    (/현재\s*나체|옷\s*없음/.test(originalPrompt) ||
-      /fully\s*nude|already\s*(fully\s*)?nude/i.test(originalPrompt))
-  // 나체/누드 요청이면 소스 상태에 맞는 유지·전환 문구를 서버에서 자동 부착
-  motion = ensureNudeHoldMotionPhrase(motion, { sourceAlreadyNude: sourceNudeHold })
+    nudeIntent.mode === 'hold' ||
+    (!motionForceBecomeNude &&
+      (/현재\s*나체|옷\s*없음/.test(continuity) ||
+        /fully\s*nude|already\s*(fully\s*)?nude/i.test(continuity)))
+  motion = ensureNudeHoldMotionPhrase(motion, {
+    sourceAlreadyNude: sourceNudeHold && !motionForceBecomeNude,
+  })
   if (motion.length > 480) {
     motion = motion.slice(0, 480).trim()
   }
@@ -152,18 +177,42 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const clipRoleRaw = (body.clipRole ?? '').trim().toLowerCase()
   const clipRole =
     clipRoleRaw === 'dual-a' || clipRoleRaw === 'dual-b' ? clipRoleRaw : ('single' as const)
-  // 판별은 한글+영문, Wan에는 영어 모션을 앞에 둬 키스/나체 순응도를 높임
-  const prompt = buildAnimationPrompt({
-    prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
-    motion: [motionForVideo, motion].filter(Boolean).join('\n'),
-    clipRole,
-  })
+  const landmarks = bodyProjectFlag ? normalizeBodyLandmarks(body.landmarks) : null
+  // 몸매 투영: 긴 화보 설명(블라우스·벨트·바지)이 I2V에 다시 옷을 먹이는 걸 막기 위해
+  // 원문 프롬프트는 넣지 않고, 짧은 become 비트 + 타점만 사용.
+  // 타점 %를 motion 문자열에도 넣어 프롬프트 경로가 달라도 좌표가 빠지지 않게 한다.
+  const landmarkMotion = landmarks
+    ? [
+        '몸매 투영 full nude reveal.',
+        `LEFT mound x=${((landmarks.moundL ?? landmarks.nippleL).x * 100).toFixed(1)}% y=${((landmarks.moundL ?? landmarks.nippleL).y * 100).toFixed(1)}%.`,
+        `LEFT nipple x=${(landmarks.nippleL.x * 100).toFixed(1)}% y=${(landmarks.nippleL.y * 100).toFixed(1)}% (may be off-center).`,
+        `RIGHT mound x=${((landmarks.moundR ?? landmarks.nippleR).x * 100).toFixed(1)}% y=${((landmarks.moundR ?? landmarks.nippleR).y * 100).toFixed(1)}%.`,
+        `RIGHT nipple x=${(landmarks.nippleR.x * 100).toFixed(1)}% y=${(landmarks.nippleR.y * 100).toFixed(1)}% (may be off-center).`,
+        'Remove bra, brown waist belt, pants, and all panties (including double layers).',
+      ].join(' ')
+    : '몸매 투영 full nude reveal. Remove bra, brown waist belt, pants, and all panties.'
+  const prompt = bodyProjectFlag
+    ? buildAnimationPrompt({
+        prompt: '',
+        motion: landmarkMotion,
+        clipRole,
+        landmarks,
+        bodyProject: true,
+      })
+    : buildAnimationPrompt({
+        prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
+        motion: [motionForVideo, motion].filter(Boolean).join('\n'),
+        clipRole,
+        landmarks,
+      })
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
   const requested =
     typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 15
   const { approxSec } = resolveWanI2vDuration(requested)
   const nudeOrUndress =
+    bodyProjectFlag ||
+    nudeIntent.nudeBecomes ||
     wantsUndressAction(motion) ||
     wantsNudeOrUndress(motion) ||
     wantsUndressAction(motionForVideo) ||
@@ -186,8 +235,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       prompt,
       aspect: resolveReplicateVideoAspect(body.size),
       durationSec: requested,
-      // 모션·나체/탈의면 go_fast OFF — 켜면 중반에 팬티·브라·남자 발명이 잦음(실측)
-      goFast: !(motion || nudeOrUndress || sourceNudeHold),
+      // 모션·나체/탈의·몸매 투영이면 go_fast OFF — 켜면 중반에 팬티·브라·남자 발명이 잦음(실측)
+      goFast: !(motion || nudeOrUndress || sourceNudeHold || bodyProjectFlag),
+      // 몸매 투영: 원본 벨트/바지 픽셀에 달라붙는 회귀 → sample_shift를 올려 옷 용해 여유
+      sampleShift: bodyProjectFlag ? 18 : undefined,
     })
 
     if (started.status === 'succeeded' && started.videoUrl) {

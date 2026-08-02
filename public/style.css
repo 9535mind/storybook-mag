@@ -1298,6 +1298,122 @@ body {
   background: rgba(124, 92, 255, 0.02);
 }
 
+.body-landmark-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 6;
+  display: block;
+  border-radius: 12px;
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  background: transparent;
+}
+
+.body-landmark-canvas.is-dragging {
+  cursor: grabbing;
+}
+
+/* 이미지 아래 별도 패널 — 캔버스와 겹치지 않아 클릭이 먹힘 */
+.body-landmark-toolbar {
+  position: relative;
+  z-index: 8;
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(169, 139, 255, 0.45);
+  background: rgba(18, 16, 22, 0.92);
+  color: #f4f0ea;
+  pointer-events: auto;
+}
+
+.body-landmark-toolbar[hidden] {
+  display: none !important;
+}
+
+.body-landmark-toolbar__hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(244, 240, 234, 0.92);
+}
+
+.body-landmark-toolbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.body-landmark-toolbar__btn {
+  flex: 1 1 auto;
+  min-width: 96px;
+  min-height: 2.6rem;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f0ea;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(124, 92, 255, 0.35);
+}
+
+.body-landmark-toolbar__btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.body-landmark-toolbar__btn--primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, #7c5cff, #a98bff);
+  color: #120f1a;
+}
+
+.body-landmark-toolbar__btn--primary:hover {
+  filter: brightness(1.05);
+}
+
+.body-landmark-toolbar__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.body-landmark-toolbar__btn.is-selected {
+  border-color: #a98bff;
+  background: rgba(124, 92, 255, 0.35);
+  box-shadow: 0 0 0 1px rgba(169, 139, 255, 0.5);
+}
+
+.body-landmark-toolbar__row--nudge .body-landmark-toolbar__btn {
+  flex: 0 1 auto;
+  min-width: 2.6rem;
+  font-size: 15px;
+}
+
+.body-landmark-toolbar__readout {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: rgba(244, 240, 234, 0.75);
+  font-variant-numeric: tabular-nums;
+}
+
+.result__stage--landmarks {
+  outline: 1px dashed rgba(255, 214, 102, 0.85);
+  outline-offset: 2px;
+}
+
+.result__stage--landmarks .result__image {
+  pointer-events: none;
+}
+
 .region-list {
   margin: 0 0 10px;
   font-size: 12px;
@@ -1539,7 +1655,79 @@ body {
   margin-bottom: 12px;
 }
 
-.animate-panel__button {
+.animate-panel__actions {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  align-items: stretch;
+  margin-top: 4px;
+  width: 100%;
+}
+
+.animate-panel__actions #body-project-shorts-button,
+.animate-panel__body-project {
+  flex: 0 0 calc(30% - 4px);
+  width: calc(30% - 4px);
+  max-width: calc(30% - 4px);
+  min-height: 2.75rem;
+  padding: 12px 8px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.animate-panel__actions #body-project-shorts-button:hover,
+.animate-panel__body-project:hover {
+  border-color: var(--accent-strong);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* 클릭·타점 편집 중 — 메인 버튼과 비슷하게 밝게 */
+.animate-panel__actions #body-project-shorts-button.is-active,
+.animate-panel__body-project.is-active {
+  border-color: transparent;
+  background: linear-gradient(135deg, #7c5cff, #a98bff);
+  color: #120f1a;
+  box-shadow: 0 0 0 1px rgba(169, 139, 255, 0.45);
+}
+
+/* 생성 진행 중 — 활성색 유지 + 경과 초 표시 */
+.animate-panel__actions #body-project-shorts-button.is-working,
+.animate-panel__body-project.is-working {
+  border-color: transparent;
+  background: linear-gradient(135deg, #5b3fd4, #8f6bff);
+  color: #f7f4ff;
+  box-shadow: 0 0 0 2px rgba(124, 92, 255, 0.55);
+  opacity: 1;
+  cursor: wait;
+}
+
+.animate-panel__actions #body-project-shorts-button:disabled:not(.is-working):not(.is-active),
+.animate-panel__body-project:disabled:not(.is-working):not(.is-active) {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.animate-panel__actions #body-project-shorts-button:disabled.is-working,
+.animate-panel__actions #body-project-shorts-button:disabled.is-active,
+.animate-panel__body-project:disabled.is-working,
+.animate-panel__body-project:disabled.is-active {
+  opacity: 1;
+  cursor: wait;
+}
+
+.animate-panel__actions #animate-button,
+.animate-panel__main {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  min-height: 2.75rem;
   background: linear-gradient(135deg, #7c5cff, #a98bff);
 }
 
@@ -1700,6 +1888,13 @@ body {
   color: #94a3b8;
 }
 
+.admin-fuse-import {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
 .admin-fuse-tray {
   display: flex;
   flex-wrap: wrap;
@@ -1762,6 +1957,83 @@ body {
   background: #020617;
 }
 
+.admin-fuse-canvas-wrap.admin-fuse-canvas-wrap--drop {
+  border-color: rgba(250, 204, 21, 0.75);
+  box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.25);
+}
+
+.admin-fuse-drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 6, 23, 0.72);
+  color: #fef9c3;
+  font-size: 0.95rem;
+  font-weight: 600;
+  pointer-events: none;
+  z-index: 5;
+  text-align: center;
+  padding: 12px;
+}
+
+.admin-fuse-gallery-dialog {
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 12px;
+  padding: 0;
+  background: #0f172a;
+  color: #e2e8f0;
+  max-width: min(520px, 94vw);
+  width: 100%;
+}
+
+.admin-fuse-gallery-dialog::backdrop {
+  background: rgba(2, 6, 23, 0.65);
+}
+
+.admin-fuse-gallery-dialog__inner {
+  padding: 14px;
+}
+
+.admin-fuse-gallery-dialog__title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.admin-fuse-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  max-height: 50vh;
+  overflow: auto;
+  margin-bottom: 12px;
+}
+
+.admin-fuse-gallery-grid button {
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 8px;
+  padding: 0;
+  overflow: hidden;
+  background: #020617;
+  cursor: pointer;
+  aspect-ratio: 3 / 4;
+}
+
+.admin-fuse-gallery-grid button img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.admin-fuse-camera-video {
+  width: 100%;
+  max-height: 360px;
+  background: #000;
+  border-radius: 8px;
+}
+
 .admin-fuse-canvas {
   display: block;
   width: 100%;
@@ -1797,6 +2069,71 @@ body {
 .video-speed-bar .video-duration__btn {
   flex: 0 1 auto;
   min-width: 4rem;
+}
+
+.motion-presets {
+  margin: 8px 0 4px;
+}
+
+.motion-presets__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.motion-preset-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.55);
+  color: #e2e8f0;
+  font-size: 0.78rem;
+  line-height: 1.25;
+  cursor: pointer;
+  text-align: left;
+}
+
+.motion-preset-chip:hover {
+  border-color: rgba(250, 204, 21, 0.65);
+  color: #fef9c3;
+}
+
+.motion-preset-chip__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: min(280px, 70vw);
+}
+
+.motion-preset-chip__x {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.motion-preset-chip__x:hover {
+  color: #fca5a5;
+}
+
+.motion-presets__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.motion-presets__hint {
+  margin: 0;
 }
 
 .bgm-panel {
