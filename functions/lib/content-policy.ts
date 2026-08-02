@@ -1939,31 +1939,49 @@ export function amplifyAdultMotionForVideo(motion: string): {
     )
   }
 
-  // 키스·애무·만짐 (파트너 동작이 흔한 케이스)
+  // 가슴 만짐/애무 — 「만지면서」활용형·가슴+만지 조합을 명시적으로 (키스만 되고 손은 빠지는 실측)
+  const breastTouch =
+    /(?:가슴|젖|유방|젖가슴)\s*(?:을|를)?\s*(?:만지|주무르|애무|쓰다듬|문지르)|만지면서|주무르면서|애무하|caress(?:es|ing)?\s*(?:her\s*)?(?:breast|chest)|fondl(?:e|es|ing)\s*(?:her\s*)?(?:breast|chest)|hand(?:s)?\s*(?:on|cupping)\s*(?:her\s*)?(?:breast|chest|boob)/i.test(
+      t,
+    )
+  if (breastTouch) {
+    wantsPartner = true
+    wantsPoseChange = true
+    bits.push(
+      'BREAST TOUCH MUST BE VISIBLE: a hand clearly cups and strokes her bare breast — fingers on soft breast flesh, breast moves with the touch',
+      'not kissing only — the breast caress continues during the kiss; hand stays on the breast',
+      'FORBIDDEN: hands only on waist/back/face; frozen hands not touching breasts',
+    )
+  }
+
+  // 키스·기타 애무 (파트너 동작이 흔한 케이스)
   if (/딥\s*키스|키스|kiss(?:es|ing)?/i.test(t)) {
     wantsPartner = true
+    wantsPoseChange = true
     bits.push(
       'soft intimate kissing: faces turn toward each other, lips gently press and move — jaw soft, mouth NOT wide open',
-      'KISS MOUTH: lips press softly; a slight natural glimpse of teeth is OK when lips part — FORBIDDEN wide toothy Hollywood grin or mouth stretched so wide the face identity changes',
-      'FACE EXPRESSION LOCK: keep the same facial bone structure and Korean identity; soft pleasure or light shyness only — do NOT contort or rebuild the face',
+      'KISS MOUTH: lips press softly; a slight natural glimpse of teeth is OK when lips part — FORBIDDEN wide toothy Hollywood grin',
+      'FACE EXPRESSION LOCK: same Korean face identity; soft pleasure or light shyness — do NOT rebuild the face',
       buildSoftMouthFaceLock(),
+      'END POSE: finish still kissing (and still touching if requested) — FORBIDDEN snapping back to the original source standing pose',
     )
-    // 「나체로 키스」인데 팬티만 남는 패션/검열 편향 실측
     if (/나체|누드|nude|naked|전라|topless/i.test(t)) {
       bits.push(
-        'NUDE KISS: they kiss while FULLY nude — bare breasts with nipples and bare hips/crotch; ZERO panties, thong, briefs, or lingerie left on during the kiss',
-        'underwear must be gone before or as the kiss starts — not a lingerie tease, not half-dressed magazine pose',
+        'NUDE KISS: fully nude while kissing — bare breasts with nipples, bare hips/crotch; ZERO panties or lingerie',
       )
     }
   }
   if (
+    !breastTouch &&
     /애무|쓰다듬|주무르|만지|문지르|caress|fondl|grope|rub(?:s|bing)?\s*(?:her\s*)?(?:breast|body|chest)/i.test(
       t,
     )
   ) {
     if (!/스스로|혼자|self[\s-]?touch|masturbat/i.test(t)) wantsPartner = true
+    wantsPoseChange = true
     bits.push(
-      'hands actively caressing the body/breasts with continuous touching motion — fingers press and stroke, not a static hand pose',
+      'hands actively caressing the body/breasts with continuous touching — fingers press and stroke, not a static hand pose',
+      'END POSE: keep the intimate contact through the last frame — do not return to the source still pose',
     )
   }
 
@@ -2024,8 +2042,8 @@ export function buildAdultStructureLock(
 
   bits.push(
     opts?.allowPoseChange
-      ? 'Do NOT morph into a different woman or different face. Full-body pose MAY change as the motion requires (lie down, recline, mount, etc.).'
-      : 'Do NOT morph into a different woman, different face, or different body. Motion may move limbs/camera only.',
+      ? 'Do NOT morph into a different woman or different face. Pose MAY change for the motion (kiss lean-in, hand on breast, undress) and MUST STAY in that new pose at the end — FORBIDDEN returning to the exact source still pose.'
+      : 'Do NOT morph into a different woman, different face, or different body. Small natural motion is OK; do not hard-reset to a different identity.',
   )
   return bits.join('. ') + '.'
 }
@@ -2241,11 +2259,13 @@ export function buildAnimationPrompt(input: {
       'NEVER zoom-in before clothing is fully removed when undress was requested.',
     )
   }
-  // 얼굴·체형·나체·음모 — 눕기/올라타기면 포즈 변경 허용 (limbs-only 잠금이 동작을 죽이던 실측)
+  // 키스·애무·탈의도 포즈 변경 허용 — limbs-only면 원자세로 되돌아가는 실측
+  const allowPoseChange =
+    intimate.wantsPoseChange || intimate.wantsPartner || undressAction || staysNude
   parts.push(
     buildAdultStructureLock(structureCorpus, {
       forNudeHold: undressAction || staysNude,
-      allowPoseChange: intimate.wantsPoseChange,
+      allowPoseChange,
     }),
   )
   if (original) {
@@ -2261,12 +2281,10 @@ export function buildAnimationPrompt(input: {
   }
   if (undressAction) {
     parts.push(
-      'CRITICAL ADULT MOTION: garments / underwear / robe / jeans / skirt are removed while the camera stays WIDE showing hips and legs; hands pull pants/skirt/panties fully off so they leave her body.',
-      'ORDER LOCK: (1) undress to full nude while wide → (2) only then any later intimate action. Never close-up or zoom during step (1).',
-      'Then STAY fully nude with bare skin, visible nipples, and the same pubic/body-hair state as the source through the LAST frame.',
-      'Do NOT freeze clothed. Do NOT keep pants, jeans, skirt, bra, panties, lingerie, or bathrobe on through the end.',
-      'FORBIDDEN: clothes stuck at ankles; half-pulled panties; re-adding underwear; censored nipples or mosaic crotch; early zoom/close-up that hides the undress.',
-      'Smooth undressing, fabric sliding fully off, nude established, then continue the requested intimate action — no re-dressing.',
+      'TIMELINE (must all happen in this clip): (1) early — clothes/bra/panties come OFF to full nude; (2) mid-to-end — requested intimate action (kiss / breast touch) WHILE nude; (3) LAST FRAME still nude in that intimate pose.',
+      'CRITICAL: do not skip step (1). Do not only kiss while clothed. Bare breasts with nipples visible before/during the kiss.',
+      'If breast touch was requested: partner hand on her bare breast during the kiss — visible every second of the intimate part.',
+      'Do NOT freeze clothed. ZERO panties/bra/jeans at the end. FORBIDDEN: snap back to the original source standing pose in the last frames.',
     )
   } else if (dressAction) {
     parts.push(
@@ -2321,12 +2339,13 @@ export function buildAnimationPrompt(input: {
       parts.push(`ACTION REMINDER: ${intimate.addon}.`)
     }
   }
+  parts.push(
+    'FINAL POSE LOCK: the last frame keeps the intimate action pose (kiss lean-in, hands where requested) — FORBIDDEN resetting to the opening source still pose.',
+  )
   if (undressAction || staysNude) {
     parts.push(
-      'FINAL LOCK: last frame still fully nude — same face (frozen from source), same body landmarks, bare breasts and bare hips/crotch, ZERO bra, ZERO panties, ZERO thong. No one re-dressing her.',
-      'FINAL BODY: breast SIZE and breast POSITION (height on chest), waist, and navel match the source still — not barbie-flat, not enlarged, not a relocated bust.',
-      `FINAL FACE: ${buildSoftMouthFaceLock()}.`,
-      `FINAL PUBIC: ${buildAdultPubicHairLock(structureCorpus)}`,
+      'FINAL LOCK: last frame fully nude — bare breasts and bare hips/crotch, ZERO bra, ZERO panties. Same face identity, same breast size/placement as source silhouette.',
+      'FINAL FACE: soft natural mouth, slight teeth OK if parted.',
     )
   }
   return parts.join(' ')
