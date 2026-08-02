@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag · 자유 일러스트</title>
-  <link rel="stylesheet" href="/style.css?v=20260801diptych" />
+  <link rel="stylesheet" href="/style.css?v=20260802align" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -600,6 +600,7 @@
       <h2 class="admin-fuse-panel__title">합성 · 배치 · 머리 교체</h2>
       <p class="admin-fuse-panel__lead">
         관리자 전용. 슬롯에 그림을 올리고 배치한 뒤, 올가미로 잘라 붙이거나 머리를 바꿉니다.
+        위치는 「포인트 맞춤」으로 대응점 2개를 찍으면 크기·각도까지 맞춥니다.
         「픽셀로 확정」은 AI 비용 없이 합칩니다. 가장자리는 살짝 부드럽게 처리됩니다.
       </p>
       <div class="admin-fuse-tray" aria-label="합성 재료">
@@ -616,6 +617,7 @@
       <input id="admin-fuse-file-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
       <div class="admin-fuse-toolrow" role="toolbar" aria-label="합성 도구">
         <button type="button" class="admin-subnav__btn admin-subnav__btn--active" data-fuse-tool="move" aria-pressed="true">이동</button>
+        <button type="button" class="admin-subnav__btn" data-fuse-tool="align" aria-pressed="false">포인트 맞춤</button>
         <button type="button" class="admin-subnav__btn" data-fuse-tool="lasso" aria-pressed="false">올가미</button>
         <button type="button" id="admin-fuse-cut" class="admin-subnav__btn">잘라 새 레이어</button>
         <button type="button" id="admin-fuse-copy" class="admin-subnav__btn">복사 새 레이어</button>
@@ -627,7 +629,8 @@
         <canvas id="admin-fuse-lasso" class="admin-fuse-lasso" width="720" height="960"></canvas>
       </div>
       <p class="form__hint">
-        이동: 드래그·휠로 크기·우클릭 메뉴 · 올가미: 톡톡톡 점찍기 → Enter로 닫기 → 자르기/구멍.
+        이동: 드래그·휠·우클릭 · 포인트 맞춤: 옮길 레이어 선택 → 그 위에 점 2개 → 목표 위치에 대응점 2개 ·
+        올가미: 점찍기 → Enter → 자르기/구멍.
       </p>
       <div class="admin-fuse-actions">
         <button type="button" id="admin-fuse-from-result" class="review-panel__secondary">현재 결과를 슬롯에</button>
@@ -1216,7 +1219,7 @@
   <script src="/tale-layout.js?v=20260720d"></script>
   <script src="/observe.js?v=20260722b"></script>
   <script src="/poly-lasso.js?v=20260801textfirst"></script>
-  <script src="/admin-fuse.js?v=20260801textfirst"></script>
+  <script src="/admin-fuse.js?v=20260802align"></script>
   <script src="/app.js?v=20260801splitfix"></script>
 </body>
 </html>

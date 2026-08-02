@@ -307,6 +307,7 @@ export const DEFAULT_NEGATIVE_PROMPT = [
   // 증명사진·패널 콜라주만 금지 (한 장면 속 여러 인물/동물은 허용)
   'contact sheet, triptych, multiple panels, split screen collage, passport photos, ID photo strip, duplicated identical portraits side by side',
   IDENTITY_DRIFT_NEGATIVE,
+  'wide toothy grin, exaggerated teeth, Hollywood smile, dental smile, mouth stretched open, too many teeth showing',
 ].join(', ')
 
 const OUTFIT_FORCE_NEGATIVE =
@@ -740,6 +741,7 @@ export function buildIroncladIdentityLock(revision: string, baseDescription = ''
     'same lighting on face, no bleach, no darken',
     'exactly one woman, never invent a second person or side-by-side twin',
     buildKoreanTwentiesLookLock(`${baseDescription} ${rev}`),
+    buildSoftMouthFaceLock(),
   ].filter((v): v is string => Boolean(v))
   if (baseDescription && !revisionTargetsSkinTone) {
     bits.push('match source photo colorimetry')
@@ -790,6 +792,7 @@ export function buildFashionNegativePrompt(descriptionOrBase: string, revision?:
       'pasties, nipple tape, strategic covering, steam censor',
       // 탈의 img2img가 강할수록 얼굴 치환·복제 인물이 잘 생김
       'different face from source, new face, face morph, identity swap',
+      'wide toothy grin, exaggerated teeth, Hollywood smile, mouth stretched open',
     )
   } else if (wantsUnderwearLook(description)) {
     extras.push(
@@ -1392,6 +1395,41 @@ export function defaultEthnicitySentence(text: string): string {
 }
 
 /**
+ * 입·이빨 과장 억제 — 이빨을 과하게 드러내면 서양형/다른 사람으로 드리프트하는 실측.
+ * (입을 열었을 때 이빨이 전혀 안 보이면 어색 → 조금 보이는 정도는 허용)
+ */
+export function buildSoftMouthFaceLock(): string {
+  return [
+    'MOUTH LOCK: natural Korean mouth — soft closed smile, or lightly parted lips when speaking/kissing',
+    'teeth may show slightly when the mouth opens — a small natural glimpse only',
+    'FORBIDDEN: wide toothy Hollywood grin, rows of exaggerated teeth, mouth stretched open that changes identity',
+    'keep the same lip shape and mouth width as the source face — do not stretch the mouth',
+  ].join('. ')
+}
+
+/** 탈의/나체 시 얼굴 픽셀 동결 — 몸만 바꾸고 얼굴은 가져오기 */
+export function buildFaceFrozenLock(): string {
+  return [
+    'FACE FROZEN: copy the source face as-is — eyes, nose, mouth, brows, jaw, skin',
+    'Do NOT redraw, beautify, age, Westernize, or change the mouth for expression beyond a tiny soft smile',
+    buildSoftMouthFaceLock(),
+  ].join('. ')
+}
+
+/**
+ * 「나체가 된다」= 체형 기점(가슴·허리·배꼽·보지) 고정 후 옷만 투명/제거처럼 처리.
+ * (실제로는 가려진 피부를 추정 인페인트하지만, 모델에게는 기점 유지 지시로 전달)
+ */
+export function buildBodyLandmarkNudeRevealLock(): string {
+  return [
+    'NUDE REVEAL (body landmarks fixed): treat undress as removing clothing transparency over the SAME body — do not invent a new figure',
+    'ANCHOR points stay put: breast mound position, nipple height, waist pinch, navel, hip bones, pubic mound — redraw nude skin around those anchors',
+    'waist width and torso length match the clothed silhouette exactly',
+    'breasts keep the same size and the same place on the ribcage as implied by the clothes',
+  ].join('. ')
+}
+
+/**
  * 한국인 20대 얼굴 고정 — 쇼츠/수정에서 동남아·중국제 이목구비로 흔들리는 실측 억제.
  * 다른 국적·연령을 명시한 경우에는 넣지 않는다.
  */
@@ -1406,6 +1444,7 @@ export function buildKoreanTwentiesLookLock(text: string): string {
   return [
     'ETHNICITY LOCK: clearly a Korean woman — Korean facial features (눈·코·턱 비율), natural Korean beauty / K-beauty look',
     otherAge ? '' : 'AGE LOCK: looks like a woman in her twenties (20대) — not teen, not middle-aged',
+    buildSoftMouthFaceLock(),
     'FORBIDDEN: drifting into Southeast Asian or Chinese stereotype face, wrong ethnicity, Westernized face swap',
   ]
     .filter(Boolean)
@@ -1889,9 +1928,18 @@ export function amplifyAdultMotionForVideo(motion: string): {
   if (/딥\s*키스|키스|kiss(?:es|ing)?/i.test(t)) {
     wantsPartner = true
     bits.push(
-      'deep kissing: faces turn toward each other, strong visible mouth and cheek motion, lips pressing and moving, jaw soft — not a frozen face stamp',
-      'FACE EXPRESSION LOCK: keep the same facial bone structure and identity; expression stays a light smile, light shyness, or soft pleasure — do NOT contort, snarl, or rebuild the face into a different person for the kiss',
+      'soft intimate kissing: faces turn toward each other, lips gently press and move — jaw soft, mouth NOT wide open',
+      'KISS MOUTH: lips press softly; a slight natural glimpse of teeth is OK when lips part — FORBIDDEN wide toothy Hollywood grin or mouth stretched so wide the face identity changes',
+      'FACE EXPRESSION LOCK: keep the same facial bone structure and Korean identity; soft pleasure or light shyness only — do NOT contort or rebuild the face',
+      buildSoftMouthFaceLock(),
     )
+    // 「나체로 키스」인데 팬티만 남는 패션/검열 편향 실측
+    if (/나체|누드|nude|naked|전라|topless/i.test(t)) {
+      bits.push(
+        'NUDE KISS: they kiss while FULLY nude — bare breasts with nipples and bare hips/crotch; ZERO panties, thong, briefs, or lingerie left on during the kiss',
+        'underwear must be gone before or as the kiss starts — not a lingerie tease, not half-dressed magazine pose',
+      )
+    }
   }
   if (
     /애무|쓰다듬|주무르|만지|문지르|caress|fondl|grope|rub(?:s|bing)?\s*(?:her\s*)?(?:breast|body|chest)/i.test(
@@ -1940,6 +1988,10 @@ export function buildAdultStructureLock(
   } else if (/작은\s*가슴|빈유|small\s*breasts?/i.test(t)) {
     bits.push('same small breast size/shape as source')
   }
+  // 키스·파트너 등장 시 가슴이 커지거나 위치가 바뀌는 드리프트 실측
+  bits.push(
+    'BREAST PIXEL LOCK from source still: same breast volume, shape, cleavage spacing, and vertical placement on the ribcage — do not enlarge, shrink, lift to the collarbone, or drop toward the belly',
+  )
   if (/가는\s*허리|얇은\s*허리|잘록|개미\s*허리|slim\s*waist|narrow\s*waist|wasp\s*waist/i.test(t)) {
     bits.push('same slim narrow waist as source / clothed silhouette')
   }
@@ -1960,21 +2012,44 @@ export function buildAdultStructureLock(
   return bits.join('. ') + '.'
 }
 
-/** 나체/누드 요청 모션에 「이미 나체 유지」가 없으면 붙인다 (바지 재등장 완화). */
+/**
+ * 나체/누드 요청 모션에 팬티·의상 잔존 방지 문구를 붙인다.
+ * 중요: 소스가 아직 옷을 입은 상태인데 「이미 나체 유지」를 붙이면
+ * Wan이 탈의를 건너뛰고 팬티만 남긴 채 동작을 하는 실측이 있었음 → 소스 상태로 문구를 가른다.
+ */
 export function ensureNudeHoldMotionPhrase(motion: string, opts?: { sourceAlreadyNude?: boolean }): string {
   const t = polishKoreanPromptText(motion || '')
   if (!t) return t
-  if (/이미\s*(완전\s*)?나체\s*유지|나체\s*유지\s*\(|fully\s*nude\s*hold|already\s*(fully\s*)?nude/i.test(t)) {
-    return t
-  }
   const asksNude =
     wantsNudeOrUndress(t) ||
     wantsUndressAction(t) ||
     wantsFullNude(t) ||
     /누드|나체|nude|naked/i.test(t)
   if (!asksNude && !opts?.sourceAlreadyNude) return t
-  // 탈의 동작이어도 "벗은 뒤 = 이미 나체인 상태 유지"로 통일 (사용자 요청)
-  return `이미 완전 나체 유지(바지·브라·팬티 되살림 금지). ${t}`
+
+  const kissish = /키스|kiss|서로/i.test(t)
+  const pantyBan = kissish
+    ? '바지·치마·브라·팬티·끈팬티 완전 제거(팬티만 남기기 금지)'
+    : '바지·브라·팬티 완전 제거(되살림·잔존 금지)'
+
+  // 소스 이미 나체 → 유지. 소스 착의 → 「이미」금지, 「전환/제거」만.
+  if (opts?.sourceAlreadyNude) {
+    if (/이미\s*(완전\s*)?나체\s*유지|fully\s*nude\s*hold|already\s*(fully\s*)?nude/i.test(t)) {
+      return /팬티/.test(t) ? t : `${t} (${pantyBan})`
+    }
+    return `이미 완전 나체 유지(${pantyBan}). ${t}`
+  }
+
+  // 착의 소스: 「이미 나체」문구가 있으면 오히려 해로우니 제거·교체
+  let cleaned = t
+    .replace(/이미\s*(완전\s*)?나체\s*유지\s*(\([^)]*\))?\s*\.?\s*/gi, '')
+    .replace(/fully\s*nude\s*hold[^.]*\.?\s*/gi, '')
+    .replace(/already\s*(fully\s*)?nude[^.]*\.?\s*/gi, '')
+    .trim()
+  if (/완전\s*나체로\s*전환|옷을\s*벗겨\s*완전\s*나체|undress\s*to\s*full\s*nude/i.test(cleaned)) {
+    return cleaned
+  }
+  return `옷을 벗겨 완전 나체로 전환(${pantyBan}). ${cleaned}`
 }
 
 /** 모션에 「클로즈업으로 끝내」「줌인 유지」 등 — 2프레임 후반 줌아웃 대신 클로즈 종결 */
@@ -2056,13 +2131,26 @@ export function buildAnimationPrompt(input: {
   if (staysNude || undressAction) {
     parts.push(buildFemaleAdultAnatomyLock(structureCorpus))
   }
+  if (staysNude || undressAction) {
+    // 팬티 잔존이 최우선 실패 모드 — 얼굴/랜드마크보다 앞에 짧게 고정
+    parts.push(
+      'PANTY BAN: crotch stays bare — ZERO panties, ZERO thong, ZERO briefs, ZERO lingerie bottoms in every frame after undress begins.',
+    )
+    parts.push(buildFaceFrozenLock())
+    parts.push(buildBodyLandmarkNudeRevealLock())
+  }
   if (staysNude) {
     parts.push(
       'NUDE HOLD FIRST: source is already fully nude adult woman — bare female breasts with visible nipples, no clothing in any frame.',
+      'Keep the same body landmarks (breasts, waist, navel, hips) — only motion, not a new body.',
     )
   } else if (undressAction) {
     parts.push(
-      'UNDRESS FIRST: remove sweater/cardigan AND jeans/pants/underwear early; end as a nude adult woman with soft female breasts and visible nipples — no bra, no panties, no jeans left on.',
+      'UNDRESS = clothing removal over a remembered body: dissolve/remove fabric while FACE stays the source face untouched.',
+      'UNDRESS FIRST (while WIDE): early in the clip pull off sweater/cardigan AND jeans/pants/skirt AND panties/underwear completely — garments leave the body and exit the frame.',
+      'End state: fully nude adult woman with soft female breasts and visible nipples — ZERO bra, ZERO panties, ZERO jeans, ZERO skirt remaining on her (not at ankles, not bunched, not half-on).',
+      'Body form memory: waist, breast size/placement, navel height match the clothed source — redraw nude skin on those anchors only.',
+      'Do NOT interpret this as “already nude with panties still on” — panties must come off.',
     )
   }
   if (motion) {
@@ -2075,36 +2163,58 @@ export function buildAnimationPrompt(input: {
   } else {
     parts.push('Natural movement, soft hair and fabric motion, confident pose.')
   }
-  parts.push(
-    intimate.wantsPoseChange || intimate.wantsPartner
-      ? 'Cinematic lighting; subjects move within a slowly evolving frame.'
-      : 'Cinematic lighting, subtle camera motion.',
-  )
-  // 줌인/클로즈업 연출은 24·30초(2프레임 연속)에만. 단일 클립은 소스 구도 유지.
+  // "subtle camera motion"이 Wan에서 조기 줌인·클로즈업으로 해석되는 실측 → 잠금 구도일 때는 쓰지 않음
+  const lockCameraForUndress = undressAction || staysNude
+  if (clipRole === 'single' || (clipRole === 'dual-a' && undressAction)) {
+    parts.push('Cinematic lighting; LOCKED camera — subject moves, framing does not tighten.')
+  } else if (intimate.wantsPoseChange || intimate.wantsPartner) {
+    parts.push('Cinematic lighting; subjects move within a stable frame.')
+  } else {
+    parts.push('Cinematic lighting, very slight steadiness — no push-in.')
+  }
+  // 줌/클로즈업: 단일(1회)은 전면 금지. 탈의 중에는 나체 완료 전 줌인 금지.
   if (clipRole === 'single') {
     parts.push(
-      'CAMERA (single clip): hold the same framing and shot scale as the source still for the whole clip — no intentional zoom-in or zoom-out choreography.',
+      'CAMERA (single clip — NO CLOSE-UP): keep the EXACT same shot scale and crop as the source still for EVERY frame.',
+      'FORBIDDEN for the whole single clip: zoom-in, push-in, dolly-in, smash zoom, face close-up, bust-only crop, headshot crop, tightening the frame.',
+      'If the source shows hips/legs/full body, those areas MUST stay visible through the last frame — never crop them away.',
     )
-  } else if (clipRole === 'dual-a') {
-    parts.push(
-      'CAMERA (dual clip 1/2): hold wide source framing through most of this clip so actions (undress etc.) can finish.',
-      'Only in the LAST portion of THIS clip begin a SLOW gradual zoom-in toward a medium/close framing — bridging into clip 2. Never smash-zoom at the start.',
-    )
-    if (undressAction) {
+    if (lockCameraForUndress) {
       parts.push(
-        'Undress must finish BEFORE that late zoom begins — pants/panties fully off while still wide.',
+        'SEQUENCE: undress / nude action happens while the camera STAYS WIDE — never zoom before or during undressing.',
+      )
+    }
+  } else if (clipRole === 'dual-a') {
+    if (undressAction) {
+      // 전반은 탈의 완성에만 집중 — 줌은 후반(dual-b)으로 미룸 (나체 전 줌인 사고 방지)
+      parts.push(
+        'CAMERA (dual clip 1/2 — UNDRESS WIDE ONLY): hold the FULL source framing for the ENTIRE clip 1. Zero zoom-in, zero close-up, zero push-in.',
+        'This clip’s job is finishing undress while wide. Do NOT begin any zoom bridge here — zoom belongs only after she is already fully nude (clip 2).',
+        'Hips, legs, and crotch area stay in frame so pants/skirt/panties can be pulled fully off and leave the body.',
+      )
+    } else {
+      parts.push(
+        'CAMERA (dual clip 1/2): hold wide source framing through most of this clip.',
+        'Only in the LAST portion of THIS clip begin a SLOW gradual zoom-in toward a medium framing — bridging into clip 2. Never smash-zoom at the start.',
       )
     }
   } else {
     // dual-b
-    parts.push(
-      'CAMERA (dual clip 2/2): start already closer (continuing the late zoom-in from clip 1); early/mid portion stays in that closer intimate framing.',
-    )
-    if (endCloseUp) {
+    if (undressAction || staysNude) {
       parts.push(
-        'USER REQUEST: END ON CLOSE-UP — do NOT zoom out; finish the clip held in close-up / zoomed-in framing as requested.',
+        'CAMERA (dual clip 2/2): she should already be fully nude from clip 1 — keep framing wide enough at the start to confirm bare hips/breasts with no pants/skirt/panties left.',
+        'Do NOT zoom-in until nude is clearly established. Any zoom only in the late portion, slow and slight.',
       )
     } else {
+      parts.push(
+        'CAMERA (dual clip 2/2): may continue a closer intimate framing from clip 1; early/mid portion stays stable.',
+      )
+    }
+    if (endCloseUp) {
+      parts.push(
+        'USER REQUEST: END ON CLOSE-UP — only after nude/action is clear; do NOT zoom out; finish held in close-up as requested.',
+      )
+    } else if (!(undressAction || staysNude)) {
       parts.push(
         'In the FINAL portion of THIS clip, SLOWLY zoom back out to a wider closing frame (soft zoom-out ending). Do not smash cut.',
       )
@@ -2112,7 +2222,8 @@ export function buildAnimationPrompt(input: {
   }
   if (clipRole !== 'single') {
     parts.push(
-      'During any zoom: SAME face identity and SAME skin color/tone as the source — no face morph, no pale bleach, no muddy recolor.',
+      'If any zoom happens: SAME face identity and SAME skin color/tone as the source — no face morph, no pale bleach, no muddy recolor.',
+      'NEVER zoom-in before clothing is fully removed when undress was requested.',
     )
   }
   // 얼굴·체형·나체·음모 — 눕기/올라타기면 포즈 변경 허용 (limbs-only 잠금이 동작을 죽이던 실측)
@@ -2123,17 +2234,24 @@ export function buildAnimationPrompt(input: {
     }),
   )
   if (original) {
-    parts.push(
-      `Subject/appearance continuity from source image (identity/outfit reference only — the motion instruction above always takes priority): ${original}`,
-    )
+    if (staysNude || undressAction) {
+      parts.push(
+        `Subject continuity from source (FACE + BODY SHAPE only — IGNORE any clothing/lingerie in this text; motion requires FULL nude, no panties): ${original}`,
+      )
+    } else {
+      parts.push(
+        `Subject/appearance continuity from source image (identity/outfit reference only — the motion instruction above always takes priority): ${original}`,
+      )
+    }
   }
   if (undressAction) {
     parts.push(
-      'CRITICAL ADULT MOTION: garments / underwear / robe are removed while the camera stays wide enough to show hips and legs; hands pull down pants/panties fully.',
+      'CRITICAL ADULT MOTION: garments / underwear / robe / jeans / skirt are removed while the camera stays WIDE showing hips and legs; hands pull pants/skirt/panties fully off so they leave her body.',
+      'ORDER LOCK: (1) undress to full nude while wide → (2) only then any later intimate action. Never close-up or zoom during step (1).',
       'Then STAY fully nude with bare skin, visible nipples, and the same pubic/body-hair state as the source through the LAST frame.',
-      'Do NOT freeze clothed. Do NOT keep or re-add bra, panties, lingerie, or bathrobe after undressing.',
-      'FORBIDDEN mid-clip: anyone putting bra/panties/clothes back on her; clothes returning after nude; censored nipples or mosaic crotch; zooming so early that undress cannot finish.',
-      'Smooth undressing, fabric sliding off, nude established, then continue the requested intimate action — no re-dressing.',
+      'Do NOT freeze clothed. Do NOT keep pants, jeans, skirt, bra, panties, lingerie, or bathrobe on through the end.',
+      'FORBIDDEN: clothes stuck at ankles; half-pulled panties; re-adding underwear; censored nipples or mosaic crotch; early zoom/close-up that hides the undress.',
+      'Smooth undressing, fabric sliding fully off, nude established, then continue the requested intimate action — no re-dressing.',
     )
   } else if (dressAction) {
     parts.push(
@@ -2163,6 +2281,19 @@ export function buildAnimationPrompt(input: {
       'CAST: a second consenting adult may appear only to perform the requested intimate action.',
       'IDENTITY LOCK: the woman from the source photo keeps the SAME face, same haircut, same body type and proportions — do NOT morph her into a more muscular, taller, or different-looking woman.',
       'FACE WHILE NUDE/KISS: while undressing and kissing, facial identity stays the same; only a light smile, light blushing shyness, or soft pleasure — never a distorted kissing grimace that changes who she is. Deep kiss = strong lips/mouth/cheek movement on that same face.',
+      'BODY WHILE PARTNER/KISS: her breast size and breast position on the torso stay identical to the source image — the partner must not cause a different bust size or relocated bust.',
+    )
+  }
+  if ((undressAction || staysNude) && intimate.wantsPartner) {
+    parts.push(
+      'NUDE COUPLE LOCK: while kissing or intimate, the woman stays fully nude — bare crotch, no panties/thong/underwear for a “tasteful fashion” look.',
+      'FORBIDDEN: keeping panties on during a nude kiss; sheer lingerie remnant; fashion-magazine underwear holdout.',
+      'BREAST LOCK DURING KISS: match source breast size AND placement height exactly — not bigger, not smaller, not higher, not lower than the source still.',
+    )
+  }
+  if (/패션|매거진|magazine|editorial|haute\s*couture|하이엔드/i.test(structureCorpus) && (undressAction || staysNude)) {
+    parts.push(
+      'Even if the brief says fashion-magazine style, when nude/undress is requested the end state is FULL nude — magazine lighting/mood only, NOT lingerie left on.',
     )
   }
   parts.push('Follow the source image identity, including adult content when requested — do not sanitize.')
@@ -2177,8 +2308,9 @@ export function buildAnimationPrompt(input: {
   }
   if (undressAction || staysNude) {
     parts.push(
-      'FINAL LOCK: last frame still fully nude — same face, same body type, bare breasts and bare hips/crotch, ZERO bra, ZERO panties. No one re-dressing her.',
-      'FINAL BODY: breast size and waist match the clothed silhouette from the source — not barbie-flat, not a different figure.',
+      'FINAL LOCK: last frame still fully nude — same face (frozen from source), same body landmarks, bare breasts and bare hips/crotch, ZERO bra, ZERO panties, ZERO thong. No one re-dressing her.',
+      'FINAL BODY: breast SIZE and breast POSITION (height on chest), waist, and navel match the source still — not barbie-flat, not enlarged, not a relocated bust.',
+      `FINAL FACE: ${buildSoftMouthFaceLock()}.`,
       `FINAL PUBIC: ${buildAdultPubicHairLock(structureCorpus)}`,
     )
   }

@@ -1,5 +1,5 @@
 /**
- * 관리자 합성 — 슬롯·배치·올가미 컷/구멍·머리 교체·픽셀 확정.
+ * 관리자 합성 — 슬롯·배치·포인트 맞춤·올가미 컷/구멍·머리 교체·픽셀 확정.
  * window.StorymagAdminFuse.init(deps)
  */
 ;(function (global) {
@@ -25,17 +25,22 @@
     if (!canvas || !fileInput || !lassoCanvas) return
 
     const ctx = canvas.getContext('2d')
-    /** @type {Array<{ id: number, slot: number, img: HTMLImageElement, x: number, y: number, w: number, h: number, flipX: boolean }>} */
+    /** @type {Array<{ id: number, slot: number, img: HTMLImageElement, x: number, y: number, w: number, h: number, flipX: boolean, rotation: number }>} */
     let layers = []
     let nextLayerId = 1
     let nextFreeSlot = 3
     let activeSlot = 0
     let drag = null
     let selectedId = null
-    /** @type {'move' | 'lasso'} */
+    /** @type {'move' | 'lasso' | 'align'} */
     let tool = 'move'
     let fuseLasso = null
     let headHelpStep = 0
+    /**
+     * 포인트 맞춤: 옮길 레이어 위 src 2점 → 목표 dst 2점
+     * @type {null | { layerId: number, src: Array<{x:number,y:number}>, dst: Array<{x:number,y:number}> }}
+     */
+    let alignSession = null
 
     function setFuseStatus(message, isError) {
       if (!statusEl) return
@@ -69,26 +74,97 @@
       })
     }
 
+    function layerCenter(layer) {
+      return { x: layer.x + layer.w / 2, y: layer.y + layer.h / 2 }
+    }
+
+    function drawLayer(layer) {
+      if (!ctx) return
+      const c = layerCenter(layer)
+      ctx.save()
+      ctx.translate(c.x, c.y)
+      ctx.rotate(layer.rotation || 0)
+      if (layer.flipX) ctx.scale(-1, 1)
+      ctx.drawImage(layer.img, -layer.w / 2, -layer.h / 2, layer.w, layer.h)
+      ctx.restore()
+    }
+
+    function strokeLayerBounds(layer) {
+      if (!ctx) return
+      const c = layerCenter(layer)
+      ctx.save()
+      ctx.translate(c.x, c.y)
+      ctx.rotate(layer.rotation || 0)
+      ctx.strokeStyle = '#facc15'
+      ctx.lineWidth = 2
+      ctx.strokeRect(-layer.w / 2 + 0.5, -layer.h / 2 + 0.5, layer.w - 1, layer.h - 1)
+      ctx.restore()
+    }
+
+    /** 캔버스 점 → 레이어 로컬(좌상단 기준, 표시 크기) */
+    function canvasToLayerLocal(layer, p) {
+      const c = layerCenter(layer)
+      let dx = p.x - c.x
+      let dy = p.y - c.y
+      const ang = -(layer.rotation || 0)
+      const cos = Math.cos(ang)
+      const sin = Math.sin(ang)
+      let lx = dx * cos - dy * sin
+      let ly = dx * sin + dy * cos
+      if (layer.flipX) lx = -lx
+      return { x: lx + layer.w / 2, y: ly + layer.h / 2 }
+    }
+
+    function pointInLayer(layer, p) {
+      const local = canvasToLayerLocal(layer, p)
+      return local.x >= 0 && local.y >= 0 && local.x <= layer.w && local.y <= layer.h
+    }
+
+    function drawAlignMarks() {
+      if (!ctx || !alignSession) return
+      const marks = [
+        ...alignSession.src.map((p, i) => ({ p, label: `A${i + 1}`, color: '#38bdf8' })),
+        ...alignSession.dst.map((p, i) => ({ p, label: `B${i + 1}`, color: '#f472b6' })),
+      ]
+      marks.forEach(({ p, label, color }) => {
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, 7, 0, Math.PI * 2)
+        ctx.fillStyle = color
+        ctx.fill()
+        ctx.lineWidth = 2
+        ctx.strokeStyle = '#fff'
+        ctx.stroke()
+        ctx.font = 'bold 12px sans-serif'
+        ctx.fillStyle = '#fff'
+        ctx.fillText(label, p.x + 10, p.y - 8)
+      })
+      if (alignSession.src.length === 2) {
+        ctx.beginPath()
+        ctx.moveTo(alignSession.src[0].x, alignSession.src[0].y)
+        ctx.lineTo(alignSession.src[1].x, alignSession.src[1].y)
+        ctx.strokeStyle = 'rgba(56, 189, 248, 0.85)'
+        ctx.lineWidth = 1.5
+        ctx.stroke()
+      }
+      if (alignSession.dst.length === 2) {
+        ctx.beginPath()
+        ctx.moveTo(alignSession.dst[0].x, alignSession.dst[0].y)
+        ctx.lineTo(alignSession.dst[1].x, alignSession.dst[1].y)
+        ctx.strokeStyle = 'rgba(244, 114, 182, 0.85)'
+        ctx.lineWidth = 1.5
+        ctx.stroke()
+      }
+    }
+
     function redrawFuse() {
       if (!ctx) return
       ctx.fillStyle = '#020617'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
       layers.forEach((layer) => {
-        ctx.save()
-        if (layer.flipX) {
-          ctx.translate(layer.x + layer.w, layer.y)
-          ctx.scale(-1, 1)
-          ctx.drawImage(layer.img, 0, 0, layer.w, layer.h)
-        } else {
-          ctx.drawImage(layer.img, layer.x, layer.y, layer.w, layer.h)
-        }
-        ctx.restore()
-        if (layer.id === selectedId) {
-          ctx.strokeStyle = '#facc15'
-          ctx.lineWidth = 2
-          ctx.strokeRect(layer.x + 0.5, layer.y + 0.5, layer.w - 1, layer.h - 1)
-        }
+        drawLayer(layer)
+        if (layer.id === selectedId) strokeLayerBounds(layer)
       })
+      if (tool === 'align') drawAlignMarks()
       if (fuseLasso && tool === 'lasso') {
         const lctx = lassoCanvas.getContext('2d')
         fuseLasso.draw(lctx)
@@ -96,9 +172,9 @@
     }
 
     function hitLayer(x, y) {
+      const p = { x, y }
       for (let i = layers.length - 1; i >= 0; i -= 1) {
-        const L = layers[i]
-        if (x >= L.x && x <= L.x + L.w && y >= L.y && y <= L.y + L.h) return L
+        if (pointInLayer(layers[i], p)) return layers[i]
       }
       return null
     }
@@ -123,12 +199,12 @@
 
     function canvasPointsToNatural(layer, points) {
       return points.map((p) => {
-        let lx = ((p.x - layer.x) / Math.max(1, layer.w)) * layer.img.naturalWidth
-        let ly = ((p.y - layer.y) / Math.max(1, layer.h)) * layer.img.naturalHeight
-        if (layer.flipX) lx = layer.img.naturalWidth - lx
+        const local = canvasToLayerLocal(layer, p)
+        const nx = (local.x / Math.max(1, layer.w)) * layer.img.naturalWidth
+        const ny = (local.y / Math.max(1, layer.h)) * layer.img.naturalHeight
         return {
-          x: Math.max(0, Math.min(layer.img.naturalWidth, lx)),
-          y: Math.max(0, Math.min(layer.img.naturalHeight, ly)),
+          x: Math.max(0, Math.min(layer.img.naturalWidth, nx)),
+          y: Math.max(0, Math.min(layer.img.naturalHeight, ny)),
         }
       })
     }
@@ -153,7 +229,17 @@
       const h = Math.max(40, Math.round(img.naturalHeight * scale))
       const x = slotIndex === 0 ? 0 : Math.round((canvas.width - w) / 2)
       const y = slotIndex === 0 ? 0 : Math.round((canvas.height - h) / 2)
-      const layer = { id: nextLayerId, slot: slotIndex, img, x, y, w, h, flipX: false }
+      const layer = {
+        id: nextLayerId,
+        slot: slotIndex,
+        img,
+        x,
+        y,
+        w,
+        h,
+        flipX: false,
+        rotation: 0,
+      }
       nextLayerId += 1
       if (slotIndex === 0) layers.unshift(layer)
       else layers.push(layer)
@@ -175,8 +261,113 @@
       return fuseLasso
     }
 
+    function clearAlignSession() {
+      alignSession = null
+    }
+
+    function alignStatusText() {
+      if (!alignSession) {
+        return '포인트 맞춤: 먼저 옮길 레이어를 클릭해 선택하세요. (머리 조각 등)'
+      }
+      const nSrc = alignSession.src.length
+      const nDst = alignSession.dst.length
+      if (nSrc < 2) {
+        return `포인트 맞춤 A${nSrc + 1}/2: 옮길 레이어 위에서 기준점 ${nSrc + 1}을 찍으세요. (예: 왼쪽 눈 → 오른쪽 눈, 또는 이마 → 턱)`
+      }
+      if (nDst < 2) {
+        return `포인트 맞춤 B${nDst + 1}/2: 목표 위치(몸/배경)에서 같은 순서의 대응점을 찍으세요.`
+      }
+      return '맞추는 중…'
+    }
+
+    function dist(a, b) {
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      return Math.hypot(dx, dy)
+    }
+
+    function applyAlignTransform() {
+      if (!alignSession || alignSession.src.length < 2 || alignSession.dst.length < 2) return
+      const layer = layers.find((l) => l.id === alignSession.layerId)
+      if (!layer) {
+        setFuseStatus('맞춤 대상 레이어를 찾을 수 없어요.', true)
+        clearAlignSession()
+        return
+      }
+      const [a1, a2] = alignSession.src
+      const [b1, b2] = alignSession.dst
+      const srcLen = dist(a1, a2)
+      const dstLen = dist(b1, b2)
+      if (srcLen < 4 || dstLen < 4) {
+        setFuseStatus('점이 너무 가깝습니다. 두 점을 더 멀리 찍어 다시 시도하세요.', true)
+        clearAlignSession()
+        redrawFuse()
+        return
+      }
+      const s = dstLen / srcLen
+      const dAngle =
+        Math.atan2(b2.y - b1.y, b2.x - b1.x) - Math.atan2(a2.y - a1.y, a2.x - a1.x)
+      const oldC = layerCenter(layer)
+      const dx = (oldC.x - a1.x) * s
+      const dy = (oldC.y - a1.y) * s
+      const cos = Math.cos(dAngle)
+      const sin = Math.sin(dAngle)
+      const newC = {
+        x: b1.x + dx * cos - dy * sin,
+        y: b1.y + dx * sin + dy * cos,
+      }
+      layer.w = Math.max(24, Math.round(layer.w * s))
+      layer.h = Math.max(24, Math.round(layer.h * s))
+      layer.rotation = (layer.rotation || 0) + dAngle
+      layer.x = Math.round(newC.x - layer.w / 2)
+      layer.y = Math.round(newC.y - layer.h / 2)
+      selectedId = layer.id
+      clearAlignSession()
+      setTool('move')
+      setFuseStatus('포인트를 맞춰 배치했어요. 미세 조정은 드래그·휠로.', false)
+    }
+
+    function beginAlignSession(layer) {
+      alignSession = { layerId: layer.id, src: [], dst: [] }
+      selectedId = layer.id
+      setFuseStatus(alignStatusText(), false)
+      redrawFuse()
+    }
+
+    function handleAlignClick(p) {
+      if (!alignSession) {
+        const hit = hitLayer(p.x, p.y)
+        if (!hit) {
+          setFuseStatus('옮길 레이어를 먼저 클릭해 선택하세요.', true)
+          return
+        }
+        beginAlignSession(hit)
+      }
+      if (!alignSession) return
+
+      if (alignSession.src.length < 2) {
+        const layer = layers.find((l) => l.id === alignSession.layerId)
+        if (!layer || !pointInLayer(layer, p)) {
+          setFuseStatus('A점은 선택한(옮길) 레이어 위에 찍어야 합니다.', true)
+          return
+        }
+        alignSession.src.push({ x: p.x, y: p.y })
+        setFuseStatus(alignStatusText(), false)
+        redrawFuse()
+        return
+      }
+
+      if (alignSession.dst.length < 2) {
+        alignSession.dst.push({ x: p.x, y: p.y })
+        setFuseStatus(alignStatusText(), false)
+        redrawFuse()
+        if (alignSession.dst.length === 2) applyAlignTransform()
+      }
+    }
+
     function setTool(next) {
-      tool = next === 'lasso' ? 'lasso' : 'move'
+      const prev = tool
+      tool = next === 'lasso' ? 'lasso' : next === 'align' ? 'align' : 'move'
       document.querySelectorAll('[data-fuse-tool]').forEach((btn) => {
         const on = btn.getAttribute('data-fuse-tool') === tool
         btn.classList.toggle('admin-subnav__btn--active', on)
@@ -184,7 +375,9 @@
       })
       syncLassoSize()
       const lasso = ensureFuseLasso()
+      canvas.classList.toggle('admin-fuse-canvas--align', tool === 'align')
       if (tool === 'lasso') {
+        clearAlignSession()
         lassoCanvas.classList.add('admin-fuse-lasso--active')
         lasso?.setEnabled(true)
         setFuseStatus(
@@ -196,7 +389,15 @@
         lasso?.setEnabled(false)
         const lctx = lassoCanvas.getContext('2d')
         if (lctx) lctx.clearRect(0, 0, lassoCanvas.width, lassoCanvas.height)
-        setFuseStatus('이동: 드래그로 배치 · 우클릭으로 레이어 조작.', false)
+        if (tool === 'align') {
+          if (prev !== 'align') clearAlignSession()
+          const layer = selectedLayer()
+          if (layer) beginAlignSession(layer)
+          else setFuseStatus(alignStatusText(), false)
+        } else {
+          clearAlignSession()
+          setFuseStatus('이동: 드래그로 배치 · 우클릭으로 레이어 조작.', false)
+        }
       }
       redrawFuse()
     }
@@ -271,11 +472,10 @@
       const scaleY = layer.h / layer.img.naturalHeight
       const dispW = Math.max(24, Math.round(outW * scaleX))
       const dispH = Math.max(24, Math.round(outH * scaleY))
-      let dispX = Math.round(layer.x + minX * scaleX)
-      let dispY = Math.round(layer.y + minY * scaleY)
-      if (layer.flipX) {
-        dispX = Math.round(layer.x + layer.w - (minX + outW) * scaleX)
-      }
+      // 회전된 레이어에서 잘린 조각은 축정렬 bbox로 올린다(회전은 리셋 후 포인트 맞춤으로 재배치).
+      const c = layerCenter(layer)
+      let dispX = Math.round(c.x - dispW / 2)
+      let dispY = Math.round(c.y - dispH / 2)
 
       if (punchSource) {
         await punchHoleInLayer(layer, points)
@@ -293,6 +493,7 @@
         w: dispW,
         h: dispH,
         flipX: false,
+        rotation: 0,
       }
       nextLayerId += 1
       layers.push(newLayer)
@@ -303,14 +504,14 @@
       setTool('move')
       setFuseStatus(
         punchSource
-          ? '잘라내 새 레이어로 올렸어요. 드래그로 위치를 맞추세요.'
+          ? '잘라내 새 레이어로 올렸어요. 「포인트 맞춤」또는 드래그로 위치를 맞추세요.'
           : '선택 부분을 새 레이어로 복사했어요. (원본은 그대로)',
         false,
       )
       if (headHelpStep === 2) {
         headHelpStep = 3
         setFuseStatus(
-          '머리 교체 ③: (선택) 몸 레이어를 고르고 옛 머리를 올가미 → 「구멍 뚫기」. 끝나면 「픽셀로 확정」.',
+          '머리 교체 ③: 「포인트 맞춤」으로 눈·턱을 맞추거나, (선택) 몸에서 옛 머리 「구멍 뚫기」 후 「픽셀로 확정」.',
           false,
         )
       }
@@ -367,12 +568,15 @@
     }
 
     function scaleLayer(layer, factor) {
-      const cx = layer.x + layer.w / 2
-      const cy = layer.y + layer.h / 2
+      const c = layerCenter(layer)
       layer.w = Math.max(24, Math.round(layer.w * factor))
       layer.h = Math.max(24, Math.round(layer.h * factor))
-      layer.x = Math.round(cx - layer.w / 2)
-      layer.y = Math.round(cy - layer.h / 2)
+      layer.x = Math.round(c.x - layer.w / 2)
+      layer.y = Math.round(c.y - layer.h / 2)
+    }
+
+    function rotateLayer(layer, deltaRad) {
+      layer.rotation = (layer.rotation || 0) + deltaRad
     }
 
     function showContextMenu(clientX, clientY, layer) {
@@ -404,6 +608,14 @@
           run: () => scaleLayer(layer, 1 / 1.08),
         },
         {
+          label: '조금 시계방향',
+          run: () => rotateLayer(layer, (5 * Math.PI) / 180),
+        },
+        {
+          label: '조금 반시계',
+          run: () => rotateLayer(layer, (-5 * Math.PI) / 180),
+        },
+        {
           label: '좌우 반전',
           run: () => {
             layer.flipX = !layer.flipX
@@ -414,6 +626,7 @@
           run: () => {
             layers = layers.filter((l) => l.id !== layer.id)
             selectedId = null
+            if (alignSession?.layerId === layer.id) clearAlignSession()
           },
         },
       ]
@@ -497,15 +710,22 @@
       headHelpStep = 1
       setTool('move')
       setFuseStatus(
-        '머리 교체 ①: 슬롯1에 몸/배경, 슬롯2에 머리 원본을 넣으세요. ② 슬롯2 선택 → 올가미로 머리 → 「잘라 새 레이어」.',
+        '머리 교체 ①: 슬롯1에 몸/배경, 슬롯2에 머리 원본 → ② 올가미로 머리 잘라 새 레이어 → ③ 「포인트 맞춤」으로 눈·턱 맞추기.',
         false,
       )
       headHelpStep = 2
     })
 
     canvas.addEventListener('pointerdown', (event) => {
-      if (tool !== 'move' || event.button !== 0) return
+      if (event.button !== 0) return
       const p = pointer(event, canvas)
+
+      if (tool === 'align') {
+        handleAlignClick(p)
+        return
+      }
+
+      if (tool !== 'move') return
       const hit = hitLayer(p.x, p.y)
       if (!hit) {
         selectedId = null
@@ -532,16 +752,33 @@
       drag = null
     })
 
-    canvas.addEventListener('wheel', (event) => {
-      if (tool !== 'move') return
-      const layer = selectedLayer()
-      if (!layer) return
-      event.preventDefault()
-      scaleLayer(layer, event.deltaY < 0 ? 1.05 : 1 / 1.05)
-      redrawFuse()
-    }, { passive: false })
+    canvas.addEventListener(
+      'wheel',
+      (event) => {
+        if (tool !== 'move') return
+        const layer = selectedLayer()
+        if (!layer) return
+        event.preventDefault()
+        if (event.shiftKey) {
+          rotateLayer(layer, ((event.deltaY < 0 ? 3 : -3) * Math.PI) / 180)
+        } else {
+          scaleLayer(layer, event.deltaY < 0 ? 1.05 : 1 / 1.05)
+        }
+        redrawFuse()
+      },
+      { passive: false },
+    )
 
     canvas.addEventListener('contextmenu', (event) => {
+      if (tool === 'align') {
+        event.preventDefault()
+        clearAlignSession()
+        const hit = hitLayer(pointer(event, canvas).x, pointer(event, canvas).y)
+        if (hit) beginAlignSession(hit)
+        else setFuseStatus(alignStatusText(), false)
+        redrawFuse()
+        return
+      }
       if (tool !== 'move') return
       event.preventDefault()
       const p = pointer(event, canvas)
@@ -555,12 +792,21 @@
       showContextMenu(event.clientX, event.clientY, layer)
     })
 
+    window.addEventListener('keydown', (event) => {
+      if (tool !== 'align') return
+      if (event.key === 'Escape') {
+        clearAlignSession()
+        setTool('move')
+        setFuseStatus('포인트 맞춤을 취소했어요.', false)
+      }
+    })
+
     commitBtn?.addEventListener('click', () => {
       if (!layers.length) {
         setFuseStatus('슬롯에 그림을 하나 이상 넣어 주세요.', true)
         return
       }
-      if (tool === 'lasso') setTool('move')
+      if (tool === 'lasso' || tool === 'align') setTool('move')
       redrawFuse()
       const dataUrl = canvas.toDataURL('image/png')
       const current = deps.getCurrentResult?.() || {}

@@ -1770,6 +1770,10 @@ body {
   touch-action: none;
 }
 
+.admin-fuse-canvas--align {
+  cursor: crosshair;
+}
+
 .admin-fuse-lasso {
   position: absolute;
   inset: 0;

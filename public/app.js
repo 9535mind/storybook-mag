@@ -295,7 +295,7 @@ function syncDualFrameUi(totalSec) {
       : '예: 나체가 된다. 딥키스한다'
   }
   if (dualFrameHint) {
-    dualFrameHint.textContent = `${totalSec}초: 전반→후반 이어붙임. 줌인(1회 후반~2회 초반) · 줌아웃 클로징(2회 후반). 클로즈업으로 끝내려면 후반에 「클로즈업으로 끝내」.`
+    dualFrameHint.textContent = `${totalSec}초: 전반→후반 이어붙임. 탈의는 전반에서 와이드로 끝내고, 나체 전에 줌인하지 않음. 단일(10~18초)은 클로즈업·줌인 없음.`
   }
   if (videoDurationHint) {
     videoDurationHint.innerHTML = dual
