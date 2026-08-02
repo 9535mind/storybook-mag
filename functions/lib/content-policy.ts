@@ -2014,8 +2014,11 @@ export function buildAdultStructureLock(
   if (opts?.forNudeHold || wantsFullNude(t) || /음모|치모|누드|나체|nude|naked/i.test(t)) {
     bits.push(
       buildFemaleAdultAnatomyLock(t),
-      'nude anatomy continuity: same woman, female breasts and hips/crotch — do not sanitize, censor, or redraw underwear over genitals',
-      buildAdultPubicHairLock(t),
+      'nude anatomy continuity: same woman, female breasts and bare hips/crotch — no underwear redrawn',
+      // I2V는 과도한 음모 장문이 안전필터·순응도 모두 해침 → 짧게
+      opts?.forNudeHold
+        ? 'adult nude crotch, natural adult pubic detail, no panties'
+        : buildAdultPubicHairLock(t),
     )
   }
 
@@ -2042,17 +2045,14 @@ export function ensureNudeHoldMotionPhrase(motion: string, opts?: { sourceAlread
     /누드|나체|nude|naked/i.test(t)
   if (!asksNude && !opts?.sourceAlreadyNude) return t
 
-  const kissish = /키스|kiss|서로/i.test(t)
-  const pantyBan = kissish
-    ? '바지·치마·브라·팬티·끈팬티 완전 제거(팬티만 남기기 금지)'
-    : '바지·브라·팬티 완전 제거(되살림·잔존 금지)'
+  const pantyBan = '브라·팬티·바지·치마 남기지 말 것'
 
   // 소스 이미 나체 → 유지. 소스 착의 → 「이미」금지, 「전환/제거」만.
   if (opts?.sourceAlreadyNude) {
     if (/이미\s*(완전\s*)?나체\s*유지|fully\s*nude\s*hold|already\s*(fully\s*)?nude/i.test(t)) {
-      return /팬티/.test(t) ? t : `${t} (${pantyBan})`
+      return /팬티/.test(t) ? t : `${t}. ${pantyBan}`
     }
-    return `이미 완전 나체 유지(${pantyBan}). ${t}`
+    return `이미 완전 나체 유지. ${pantyBan}. ${t}`
   }
 
   // 착의 소스: 「이미 나체」문구가 있으면 오히려 해로우니 제거·교체
@@ -2061,10 +2061,11 @@ export function ensureNudeHoldMotionPhrase(motion: string, opts?: { sourceAlread
     .replace(/fully\s*nude\s*hold[^.]*\.?\s*/gi, '')
     .replace(/already\s*(fully\s*)?nude[^.]*\.?\s*/gi, '')
     .trim()
-  if (/완전\s*나체로\s*전환|옷을\s*벗겨\s*완전\s*나체|undress\s*to\s*full\s*nude/i.test(cleaned)) {
+  if (/옷을\s*벗겨\s*완전\s*나체|완전\s*나체로\s*전환|undress\s*to\s*full\s*nude/i.test(cleaned)) {
     return cleaned
   }
-  return `옷을 벗겨 완전 나체로 전환(${pantyBan}). ${cleaned}`
+  // 「나체로 …」는 전환 요청 — 짧은 지시로 Wan 순응도 확보
+  return `옷을 벗겨 완전 나체가 된 뒤 동작. ${pantyBan}. ${cleaned}`
 }
 
 /** 모션에 「클로즈업으로 끝내」「줌인 유지」 등 — 2프레임 후반 줌아웃 대신 클로즈 종결 */
@@ -2091,27 +2092,26 @@ export function buildAnimationPrompt(input: {
   // "옷을 입은 상태"로 잘못 판정해 되레 옷을 입혀버리는 사고가 날 수 있다.
   const motion = polishKoreanPromptText(input.motion ?? '')
   const intimate = amplifyAdultMotionForVideo(motion)
-  // 소스 이미지 자체가 이미 누드/전라인지(상태)와, 이번 모션이 "옷을 벗는 전환 동작"을
-  // 실제로 요청했는지(동작)를 분리해서 판단한다. 이 둘을 하나로 합쳐서 판단하면,
-  // 이미 누드인 이미지에 단순 포즈/움직임만 요청해도 "옷이 벗겨지는 동작" 문구가 붙어서
-  // 영상이 "옷을 입은 상태에서 시작 → 벗는" 서사를 만들어내고, 그 결과 원본엔 없던
-  // 옷/속옷/드레스가 프레임에 나타나는 부작용이 있었다.
-  // wantsFullNude — 누적된 설명이 "바지를 벗기고 치마를 입혀라" 같은 옷 교체 지시를
-  // 담고 있을 때 wantsNudeOrUndress만 쓰면 현재 실제로는 치마를 입은 상태인데도 "소스가
-  // 누드"로 잘못 판정돼 이후 로직이 뒤틀리는 문제가 있었다.
-  // "현재 나체" 마커·유두/유방 누적 수정도 소스가 나체인 신호로 본다.
+  // 「나체로/누드로/옷을 벗겨」는 전환 요청 — 누적 프롬프트에 옛 "나체/유두" 단어가
+  // 남아 있어도 소스를 이미 나체로 오판하면 탈의가 스킵되고 옷·팬티가 남는 실측.
+  const forceBecomeNude =
+    /나체로|누드로|올\s*누드|완전\s*나체|옷을\s*벗겨|옷을\s*벗기|탈의하|undress(?:es|ing|ed)?|strip(?:s|ping|ped)?(?:\s+her)?|get(?:s|ting)?\s*(?:fully\s*)?naked/i.test(
+      motion,
+    )
+  // 신뢰 마커만으로 "이미 나체" 판정. wantsFullNude(누적문)는 과거 요청 잔여어에 속아
+  // 착의 이미지를 staysNude로 보내 버리는 경우가 많음.
   const sourceIsNude =
-    wantsFullNude(fullOriginal) ||
-    /현재\s*나체|옷\s*없음|fully\s*nude|bare\s*breasts?|visible\s*nipples?/i.test(fullOriginal)
-  // wantsUndressAction은 "벗다/제거/undress/strip" 같은 동작 동사만 잡는다. 그런데 "누드인
-  // 상태로 만들어라/누드로 바꿔줘"처럼 동작 동사 없이 '상태'만 요청하는 경우가 실측으로 흔했고,
-  // 이때 undressAction이 false로 판정되어 "탈의 동작" 지시가 전혀 안 붙어서 옷이 그대로
-  // 남는 사고가 있었다. 소스가 아직 옷을 입은 상태인데 모션이 누드 관련 단어를 언급하면,
-  // 그 자체로 "지금 상태(옷 입음) → 누드로 전환"을 뜻하므로 동작으로 취급한다.
-  const undressAction = wantsUndressAction(motion) || (wantsNudeOrUndress(motion) && !sourceIsNude)
-  // 반대 방향("옷을 입는 동작")도 별도로 감지한다. 예전엔 이게 전혀 없어서, 누드 소스에
-  // "옷을 입혀줘/걸쳐 입는다" 같은 착의 모션을 요청해도 undressAction=false → staysNude=true로
-  // 떨어져 "끝까지 누드 유지, 어떤 옷도 등장 금지"라는 정반대 지시가 강제로 붙는 사고가 있었다.
+    !forceBecomeNude &&
+    (/현재\s*나체|옷\s*없음/.test(fullOriginal) ||
+      (/fully\s*nude|already\s*(fully\s*)?nude|bare\s*breasts?\s*,\s*visible\s*nipples?/i.test(
+        fullOriginal,
+      ) &&
+        !NUDE_STATE_WORD_PATTERN.test(motion)))
+  // 모션이 나체·탈의를 말하면 전환(undress). forceBecomeNude면 무조건 탈의 경로.
+  const undressAction =
+    forceBecomeNude ||
+    wantsUndressAction(motion) ||
+    (wantsNudeOrUndress(motion) && !sourceIsNude)
   const dressAction = !undressAction && wantsDressAction(motion)
   const staysNude = sourceIsNude && !undressAction && !dressAction
   const structureCorpus = `${fullOriginal}\n${motion}`

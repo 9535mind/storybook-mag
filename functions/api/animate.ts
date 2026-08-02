@@ -3,7 +3,6 @@ import {
   buildAnimationPrompt,
   ensureNudeHoldMotionPhrase,
   evaluateContentPolicy,
-  wantsFullNude,
   wantsNudeOrUndress,
   wantsUndressAction,
 } from '../lib/content-policy'
@@ -114,11 +113,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonResponse({ ok: false, error: 'motion_too_long' }, 400)
   }
 
-  // 이미지 프롬프트에 나체 상태가 있으면(수정 누적·마커) 모션이 비어도 go_fast OFF
+  // 「나체로」등 전환 요청이면 누적 프롬프트의 옛 나체 단어로 "이미 나체" 오판하지 않음
+  const motionForceBecomeNude =
+    /나체로|누드로|올\s*누드|완전\s*나체|옷을\s*벗겨|옷을\s*벗기|탈의하|undress|strip|get(?:s|ting)?\s*(?:fully\s*)?naked/i.test(
+      motion,
+    )
   const sourceNudeHold =
-    wantsFullNude(originalPrompt) ||
-    /현재\s*나체|옷\s*없음|fully\s*nude|bare\s*breasts?|visible\s*nipples?/i.test(originalPrompt)
-  // 나체/누드 요청이면 「이미 나체 유지」를 서버에서 자동 부착
+    !motionForceBecomeNude &&
+    (/현재\s*나체|옷\s*없음/.test(originalPrompt) ||
+      /fully\s*nude|already\s*(fully\s*)?nude/i.test(originalPrompt))
+  // 나체/누드 요청이면 소스 상태에 맞는 유지·전환 문구를 서버에서 자동 부착
   motion = ensureNudeHoldMotionPhrase(motion, { sourceAlreadyNude: sourceNudeHold })
   if (motion.length > 480) {
     motion = motion.slice(0, 480).trim()
