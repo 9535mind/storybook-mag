@@ -1770,17 +1770,17 @@ removeBgButtons.forEach((btn) => btn.addEventListener('click', removeBackgroundF
 
 /**
  * @typedef {{
- *   moundL: {x:number,y:number},
- *   moundR: {x:number,y:number},
- *   nippleL: {x:number,y:number},
- *   nippleR: {x:number,y:number},
+ *   moundL: {x:number,y:number}|null,
+ *   moundR: {x:number,y:number}|null,
+ *   nippleL: {x:number,y:number}|null,
+ *   nippleR: {x:number,y:number}|null,
  *   breastRadius: number,
- *   breastRadiusL: number,
- *   breastRadiusR: number,
+ *   breastRadiusL: number|null,
+ *   breastRadiusR: number|null,
  * }} BodyLandmarksClient
  */
 
-/** 몸매 투영 타점 — 흰 원(유방 중심)과 빨간 점(유두)을 분리 */
+/** 몸매 투영 타점 — 흰 원(유방 중심)과 빨간 점(유두)을 분리 · 우클릭으로 쪽별 제거 */
 const bodyLandmarkState = {
   open: false,
   /** @type {BodyLandmarksClient} */
@@ -1840,31 +1840,60 @@ function syncBodyLandmarkCanvasSize() {
   }
 }
 
+function isBodyLandmarkSideActive(side) {
+  const lm = bodyLandmarkState.landmarks
+  if (side === 'R') return Boolean(lm.nippleR && lm.moundR)
+  return Boolean(lm.nippleL && lm.moundL)
+}
+
 function updateBodyLandmarkReadout() {
   const el = document.getElementById('body-landmark-readout')
   if (!el) return
   const lm = bodyLandmarkState.landmarks
   const sel = bodyLandmarkState.selected === 'R' ? 'R' : 'L'
+  const name = sel === 'L' ? '왼' : '오른'
+  if (!isBodyLandmarkSideActive(sel)) {
+    el.textContent = `${name} 유방 타점 제거됨 · 「${name} 복구」또는 AI 타점 다시`
+    return
+  }
   const mound = sel === 'L' ? lm.moundL : lm.moundR
   const nip = sel === 'L' ? lm.nippleL : lm.nippleR
   const r = sel === 'L' ? lm.breastRadiusL : lm.breastRadiusR
-  const name = sel === 'L' ? '왼' : '오른'
   el.textContent =
     `${name} 유방 중심 ${ (mound.x * 100).toFixed(1) }%,${ (mound.y * 100).toFixed(1) }%` +
     ` · 유두 ${ (nip.x * 100).toFixed(1) }%,${ (nip.y * 100).toFixed(1) }%` +
-    ` · 크기 ${(r * 100).toFixed(1)}%`
+    ` · 크기 ${(Number(r) * 100).toFixed(1)}%` +
+    ` · 우클릭=제거`
 }
 
 function syncBodyLandmarkSelectButtons() {
   document.querySelectorAll('[data-lm-select]').forEach((btn) => {
     if (!(btn instanceof HTMLElement)) return
-    btn.classList.toggle('is-selected', btn.getAttribute('data-lm-select') === bodyLandmarkState.selected)
+    const id = btn.getAttribute('data-lm-select')
+    const active = isBodyLandmarkSideActive(id)
+    btn.classList.toggle('is-selected', id === bodyLandmarkState.selected && active)
+    btn.classList.toggle('is-removed', !active)
+    btn.disabled = !active
+    if (id === 'L') btn.textContent = active ? '왼 유방' : '왼 (제거됨)'
+    if (id === 'R') btn.textContent = active ? '오른 유방' : '오른 (제거됨)'
+  })
+  document.querySelectorAll('[data-lm-restore]').forEach((btn) => {
+    if (!(btn instanceof HTMLElement)) return
+    const id = btn.getAttribute('data-lm-restore')
+    btn.hidden = isBodyLandmarkSideActive(id)
   })
   updateBodyLandmarkReadout()
 }
 
 function setBodyLandmarkSelected(id) {
   if (id !== 'L' && id !== 'R') return
+  if (!isBodyLandmarkSideActive(id)) {
+    setAnimateStatus(
+      `${id === 'L' ? '왼' : '오른'} 타점은 제거된 상태예요. 「${id === 'L' ? '왼' : '오른'} 복구」를 누르세요.`,
+      true,
+    )
+    return
+  }
   bodyLandmarkState.selected = id
   syncBodyLandmarkSelectButtons()
   drawBodyLandmarkOverlay()
@@ -1874,6 +1903,7 @@ function nudgeBodyLandmark(dir) {
   const step = 0.012
   const lm = bodyLandmarkState.landmarks
   const sel = bodyLandmarkState.selected === 'R' ? 'R' : 'L'
+  if (!isBodyLandmarkSideActive(sel)) return
   // 선택된 쪽: 유두를 미세 이동 (흰 원은 상대 오프셋 유지하려면 둘 다 이동)
   const moundKey = sel === 'L' ? 'moundL' : 'moundR'
   const nipKey = sel === 'L' ? 'nippleL' : 'nippleR'
@@ -1892,12 +1922,76 @@ function nudgeBodyLandmark(dir) {
 function resizeSelectedBreast(delta) {
   const sel = bodyLandmarkState.selected
   if (sel !== 'L' && sel !== 'R') return
+  if (!isBodyLandmarkSideActive(sel)) return
   const lm = bodyLandmarkState.landmarks
   const key = sel === 'L' ? 'breastRadiusL' : 'breastRadiusR'
-  lm[key] = clampLandmarkRadius(lm[key] + delta * 0.01)
-  lm.breastRadius = (lm.breastRadiusL + lm.breastRadiusR) / 2
+  lm[key] = clampLandmarkRadius(Number(lm[key]) + delta * 0.01)
+  const radii = [lm.breastRadiusL, lm.breastRadiusR].filter((n) => n != null && Number.isFinite(n))
+  lm.breastRadius = radii.length
+    ? radii.reduce((a, b) => a + b, 0) / radii.length
+    : 0.075
   drawBodyLandmarkOverlay()
   updateBodyLandmarkReadout()
+}
+
+/** 우클릭 등으로 한쪽 유방 크기·유두 타점 제거 */
+function removeBodyLandmarkSide(side) {
+  const id = side === 'R' ? 'R' : 'L'
+  if (!isBodyLandmarkSideActive(id)) return false
+  const other = id === 'L' ? 'R' : 'L'
+  if (!isBodyLandmarkSideActive(other)) {
+    setAnimateStatus('양쪽을 모두 제거할 수 없어요. 한쪽은 남겨 주세요.', true)
+    return false
+  }
+  const lm = bodyLandmarkState.landmarks
+  if (id === 'L') {
+    lm.moundL = null
+    lm.nippleL = null
+    lm.breastRadiusL = null
+  } else {
+    lm.moundR = null
+    lm.nippleR = null
+    lm.breastRadiusR = null
+  }
+  bodyLandmarkState.selected = other
+  bodyLandmarkState.drag = null
+  syncBodyLandmarkSelectButtons()
+  drawBodyLandmarkOverlay()
+  setAnimateStatus(
+    `${id === 'L' ? '왼' : '오른'} 유방 타점을 제거했어요. 「${id === 'L' ? '왼' : '오른'} 복구」로 다시 놓을 수 있어요.`,
+    false,
+  )
+  return true
+}
+
+function restoreBodyLandmarkSide(side) {
+  const id = side === 'R' ? 'R' : 'L'
+  if (isBodyLandmarkSideActive(id)) {
+    setBodyLandmarkSelected(id)
+    return
+  }
+  const lm = bodyLandmarkState.landmarks
+  const def = defaultBodyLandmarks()
+  if (id === 'L') {
+    lm.moundL = { ...def.moundL }
+    lm.nippleL = { ...def.nippleL }
+    lm.breastRadiusL = def.breastRadiusL
+  } else {
+    lm.moundR = { ...def.moundR }
+    lm.nippleR = { ...def.nippleR }
+    lm.breastRadiusR = def.breastRadiusR
+  }
+  const radii = [lm.breastRadiusL, lm.breastRadiusR].filter((n) => n != null && Number.isFinite(n))
+  lm.breastRadius = radii.length
+    ? radii.reduce((a, b) => a + b, 0) / radii.length
+    : 0.075
+  bodyLandmarkState.selected = id
+  syncBodyLandmarkSelectButtons()
+  drawBodyLandmarkOverlay()
+  setAnimateStatus(
+    `${id === 'L' ? '왼' : '오른'} 유방 타점을 다시 놓았어요. 위치·크기를 맞춰 주세요.`,
+    false,
+  )
 }
 
 function drawBodyLandmarkOverlay() {
@@ -1960,8 +2054,12 @@ function drawBodyLandmarkOverlay() {
     ctx.fillText(label, mx + r * 0.35, my - r * 0.75)
   }
 
-  drawSide(lm.moundL, lm.nippleL, lm.breastRadiusL, 'L', 'L')
-  drawSide(lm.moundR, lm.nippleR, lm.breastRadiusR, 'R', 'R')
+  if (lm.moundL && lm.nippleL) {
+    drawSide(lm.moundL, lm.nippleL, lm.breastRadiusL || 0.075, 'L', 'L')
+  }
+  if (lm.moundR && lm.nippleR) {
+    drawSide(lm.moundR, lm.nippleR, lm.breastRadiusR || 0.075, 'R', 'R')
+  }
   updateBodyLandmarkReadout()
 }
 
@@ -1974,29 +2072,35 @@ function hitBodyLandmark(clientX, clientY) {
   const h = bodyLandmarkCanvas.height
   const lm = bodyLandmarkState.landmarks
   const minSide = Math.min(w, h)
-  const rL = Math.max(14, (lm.breastRadiusL || 0.075) * minSide)
-  const rR = Math.max(14, (lm.breastRadiusR || 0.075) * minSide)
-  const mlx = lm.moundL.x * w
-  const mly = lm.moundL.y * h
-  const mrx = lm.moundR.x * w
-  const mry = lm.moundR.y * h
-  const nlx = lm.nippleL.x * w
-  const nly = lm.nippleL.y * h
-  const nrx = lm.nippleR.x * w
-  const nry = lm.nippleR.y * h
   const nipHit = Math.max(14, minSide * 0.028)
 
   // 1) 빨간 유두 점 우선
-  if (Math.hypot(x - nlx, y - nly) <= nipHit) return 'nippleL'
-  if (Math.hypot(x - nrx, y - nry) <= nipHit) return 'nippleR'
-  // 2) 크기 핸들
-  if (Math.hypot(x - (mlx + rL), y - mly) <= Math.max(12, rL * 0.28)) return 'radiusL'
-  if (Math.hypot(x - (mrx + rR), y - mry) <= Math.max(12, rR * 0.28)) return 'radiusR'
-  // 3) 흰 원(유방 중심) 이동
-  const hits = [
-    { id: 'moundL', x: mlx, y: mly, hitR: rL },
-    { id: 'moundR', x: mrx, y: mry, hitR: rR },
-  ]
+  if (lm.nippleL) {
+    const nlx = lm.nippleL.x * w
+    const nly = lm.nippleL.y * h
+    if (Math.hypot(x - nlx, y - nly) <= nipHit) return 'nippleL'
+  }
+  if (lm.nippleR) {
+    const nrx = lm.nippleR.x * w
+    const nry = lm.nippleR.y * h
+    if (Math.hypot(x - nrx, y - nry) <= nipHit) return 'nippleR'
+  }
+  // 2) 크기 핸들 · 3) 흰 원
+  const hits = []
+  if (lm.moundL) {
+    const rL = Math.max(14, (lm.breastRadiusL || 0.075) * minSide)
+    const mlx = lm.moundL.x * w
+    const mly = lm.moundL.y * h
+    if (Math.hypot(x - (mlx + rL), y - mly) <= Math.max(12, rL * 0.28)) return 'radiusL'
+    hits.push({ id: 'moundL', x: mlx, y: mly, hitR: rL })
+  }
+  if (lm.moundR) {
+    const rR = Math.max(14, (lm.breastRadiusR || 0.075) * minSide)
+    const mrx = lm.moundR.x * w
+    const mry = lm.moundR.y * h
+    if (Math.hypot(x - (mrx + rR), y - mry) <= Math.max(12, rR * 0.28)) return 'radiusR'
+    hits.push({ id: 'moundR', x: mrx, y: mry, hitR: rR })
+  }
   let best = null
   let bestD = Infinity
   for (const hit of hits) {
@@ -2009,8 +2113,30 @@ function hitBodyLandmark(clientX, clientY) {
   return best
 }
 
+function sideFromLandmarkHit(hit) {
+  if (!hit) return null
+  if (hit.endsWith('L') || hit === 'moundL' || hit === 'nippleL' || hit === 'radiusL') return 'L'
+  if (hit.endsWith('R') || hit === 'moundR' || hit === 'nippleR' || hit === 'radiusR') return 'R'
+  return null
+}
+
+function onBodyLandmarkContextMenu(event) {
+  if (!bodyLandmarkState.open || !bodyLandmarkCanvas) return
+  event.preventDefault()
+  event.stopPropagation()
+  const hit = hitBodyLandmark(event.clientX, event.clientY)
+  const side = sideFromLandmarkHit(hit)
+  if (!side) {
+    setAnimateStatus('제거할 타점 위(흰 원·빨간 점·크기 핸들)에서 우클릭하세요.', true)
+    return
+  }
+  removeBodyLandmarkSide(side)
+}
+
 function onBodyLandmarkPointerDown(event) {
   if (!bodyLandmarkState.open || !bodyLandmarkCanvas) return
+  // 우클릭은 contextmenu에서 제거 처리 — 드래그 시작 금지
+  if (event.button != null && event.button !== 0) return
   const hit = hitBodyLandmark(event.clientX, event.clientY)
   if (!hit) return
   event.preventDefault()
@@ -2032,22 +2158,22 @@ function onBodyLandmarkPointerMove(event) {
   const ny = clamp01((event.clientY - rect.top) / Math.max(1, rect.height))
   const lm = bodyLandmarkState.landmarks
   const drag = bodyLandmarkState.drag
-  if (drag === 'nippleL') {
+  if (drag === 'nippleL' && lm.nippleL) {
     lm.nippleL = { x: nx, y: ny }
-  } else if (drag === 'nippleR') {
+  } else if (drag === 'nippleR' && lm.nippleR) {
     lm.nippleR = { x: nx, y: ny }
-  } else if (drag === 'moundL') {
+  } else if (drag === 'moundL' && lm.moundL && lm.nippleL) {
     const dx = nx - lm.moundL.x
     const dy = ny - lm.moundL.y
     lm.moundL = { x: nx, y: ny }
     // 원 이동 시 유두 상대 위치 유지
     lm.nippleL = { x: clamp01(lm.nippleL.x + dx), y: clamp01(lm.nippleL.y + dy) }
-  } else if (drag === 'moundR') {
+  } else if (drag === 'moundR' && lm.moundR && lm.nippleR) {
     const dx = nx - lm.moundR.x
     const dy = ny - lm.moundR.y
     lm.moundR = { x: nx, y: ny }
     lm.nippleR = { x: clamp01(lm.nippleR.x + dx), y: clamp01(lm.nippleR.y + dy) }
-  } else if (drag === 'radiusL' || drag === 'radiusR') {
+  } else if ((drag === 'radiusL' && lm.moundL) || (drag === 'radiusR' && lm.moundR)) {
     const cx = drag === 'radiusL' ? lm.moundL.x : lm.moundR.x
     const cy = drag === 'radiusL' ? lm.moundL.y : lm.moundR.y
     const minSide = Math.min(bodyLandmarkCanvas.width, bodyLandmarkCanvas.height)
@@ -2055,7 +2181,10 @@ function onBodyLandmarkPointerMove(event) {
     const r = clampLandmarkRadius(dist / Math.max(1, minSide))
     if (drag === 'radiusL') lm.breastRadiusL = r
     else lm.breastRadiusR = r
-    lm.breastRadius = (lm.breastRadiusL + lm.breastRadiusR) / 2
+    const radii = [lm.breastRadiusL, lm.breastRadiusR].filter((n) => n != null && Number.isFinite(n))
+    lm.breastRadius = radii.length
+      ? radii.reduce((a, b) => a + b, 0) / radii.length
+      : r
   }
   drawBodyLandmarkOverlay()
 }
@@ -2129,14 +2258,20 @@ async function detectBodyLandmarksFromAi() {
 function applyBodyLandmarksClient(lm) {
   if (!lm) return
   bodyLandmarkState.landmarks = {
-    moundL: { ...lm.moundL },
-    moundR: { ...lm.moundR },
-    nippleL: { ...lm.nippleL },
-    nippleR: { ...lm.nippleR },
-    breastRadiusL: lm.breastRadiusL,
-    breastRadiusR: lm.breastRadiusR,
-    breastRadius: lm.breastRadius ?? (lm.breastRadiusL + lm.breastRadiusR) / 2,
+    moundL: lm.moundL ? { ...lm.moundL } : null,
+    moundR: lm.moundR ? { ...lm.moundR } : null,
+    nippleL: lm.nippleL ? { ...lm.nippleL } : null,
+    nippleR: lm.nippleR ? { ...lm.nippleR } : null,
+    breastRadiusL: lm.nippleL ? lm.breastRadiusL ?? 0.075 : null,
+    breastRadiusR: lm.nippleR ? lm.breastRadiusR ?? 0.075 : null,
+    breastRadius: lm.breastRadius ?? 0.075,
   }
+  if (!isBodyLandmarkSideActive('L') && isBodyLandmarkSideActive('R')) {
+    bodyLandmarkState.selected = 'R'
+  } else if (!isBodyLandmarkSideActive('R') && isBodyLandmarkSideActive('L')) {
+    bodyLandmarkState.selected = 'L'
+  }
+  syncBodyLandmarkSelectButtons()
   drawBodyLandmarkOverlay()
   updateBodyLandmarkReadout()
 }
@@ -2221,23 +2356,42 @@ function startBodyProjectShorts() {
 async function confirmBodyLandmarkAndAnimate() {
   if (!bodyLandmarkState.open) return
   const lm = bodyLandmarkState.landmarks
+  if (!isBodyLandmarkSideActive('L') && !isBodyLandmarkSideActive('R')) {
+    setAnimateStatus('유방 타점이 없어요. 복구하거나 AI 타점을 다시 잡으세요.', true)
+    return
+  }
   const landmarks = {
-    moundL: { ...lm.moundL },
-    moundR: { ...lm.moundR },
-    nippleL: { ...lm.nippleL },
-    nippleR: { ...lm.nippleR },
-    breastRadius: (lm.breastRadiusL + lm.breastRadiusR) / 2,
-    breastRadiusL: lm.breastRadiusL,
-    breastRadiusR: lm.breastRadiusR,
+    ...(lm.moundL && lm.nippleL
+      ? {
+          moundL: { ...lm.moundL },
+          nippleL: { ...lm.nippleL },
+          breastRadiusL: lm.breastRadiusL ?? 0.075,
+        }
+      : {}),
+    ...(lm.moundR && lm.nippleR
+      ? {
+          moundR: { ...lm.moundR },
+          nippleR: { ...lm.nippleR },
+          breastRadiusR: lm.breastRadiusR ?? 0.075,
+        }
+      : {}),
+    breastRadius: lm.breastRadius || 0.075,
+  }
+  const radii = [landmarks.breastRadiusL, landmarks.breastRadiusR].filter((n) => n != null)
+  if (radii.length) {
+    landmarks.breastRadius = radii.reduce((a, b) => a + b, 0) / radii.length
   }
   closeBodyLandmarkEditor()
 
   if (motionField) motionField.value = BODY_PROJECT_MOTION
   setBodyProjectButtonUi('working')
-  setAnimateStatus(
-    `타점 고정 투영… 유두 L(${(landmarks.nippleL.x * 100).toFixed(0)},${(landmarks.nippleL.y * 100).toFixed(0)}) R(${(landmarks.nippleR.x * 100).toFixed(0)},${(landmarks.nippleR.y * 100).toFixed(0)})`,
-    false,
-  )
+  const lTxt = landmarks.nippleL
+    ? `L(${(landmarks.nippleL.x * 100).toFixed(0)},${(landmarks.nippleL.y * 100).toFixed(0)})`
+    : 'L(제거)'
+  const rTxt = landmarks.nippleR
+    ? `R(${(landmarks.nippleR.x * 100).toFixed(0)},${(landmarks.nippleR.y * 100).toFixed(0)})`
+    : 'R(제거)'
+  setAnimateStatus(`타점 고정 투영… 유두 ${lTxt} ${rTxt}`, false)
   animateStatus?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
 
   const dur = getSelectedVideoDuration()
@@ -2274,6 +2428,7 @@ bodyLandmarkCanvas?.addEventListener('pointerdown', onBodyLandmarkPointerDown)
 bodyLandmarkCanvas?.addEventListener('pointermove', onBodyLandmarkPointerMove)
 bodyLandmarkCanvas?.addEventListener('pointerup', onBodyLandmarkPointerUp)
 bodyLandmarkCanvas?.addEventListener('pointercancel', onBodyLandmarkPointerUp)
+bodyLandmarkCanvas?.addEventListener('contextmenu', onBodyLandmarkContextMenu)
 
 // 위임 — 선택/미세이동/크기/확정 버튼
 function onBodyLandmarkToolbarClick(event) {
@@ -2281,6 +2436,13 @@ function onBodyLandmarkToolbarClick(event) {
   if (!(target instanceof Element)) return
   if (!target.closest('#body-landmark-toolbar')) return
 
+  const restoreBtn = target.closest('[data-lm-restore]')
+  if (restoreBtn instanceof HTMLElement) {
+    event.preventDefault()
+    event.stopPropagation()
+    restoreBodyLandmarkSide(restoreBtn.getAttribute('data-lm-restore') || 'L')
+    return
+  }
   const selectBtn = target.closest('[data-lm-select]')
   if (selectBtn instanceof HTMLElement) {
     event.preventDefault()
@@ -2433,7 +2595,13 @@ function showResult(imageUrl, engineLabel, fallbackUsed, options) {
     if (motionField) motionField.value = ''
   }
   currentResult.imageUrl = imageUrl
-  currentResult.imageDataUrl = null
+  // 합성·끝프레임 등은 data URL — null로 비우면 쇼츠가 image_url_not_allowed 로 실패함
+  if (typeof imageUrl === 'string' && imageUrl.startsWith('data:image/')) {
+    currentResult.imageDataUrl = imageUrl
+  } else {
+    currentResult.imageDataUrl = null
+    void cacheImageForAnimate(imageUrl)
+  }
   currentResult.prompt = prompt || ''
   currentResult.size = size
   currentResult.itemId = itemId
@@ -2446,7 +2614,6 @@ function showResult(imageUrl, engineLabel, fallbackUsed, options) {
   updateReviseButtonLabel()
   setAnimateStatus('', false)
   revisionText.value = ''
-  void cacheImageForAnimate(imageUrl)
 
   // 새 결과가 들어오면 이전 비교 미리보기는 항상 해제하고 버튼 상태를 새로 계산한다.
   comparingPrevious = false
@@ -3225,10 +3392,16 @@ async function requestAnimate(options = {}) {
   setAnimateBusy(true)
   if (!options.skipHide) hideVideoResult()
 
-  const motionBase =
+  let motionBase =
     typeof options.motionOverride === 'string'
       ? options.motionOverride.trim()
       : (motionField?.value || '').trim()
+  // 두 사람 체크박스: 모션 문구에 "두 명"/"커플" 같은 단어가 없으면 코드가 1인 사진으로
+  // 오판해 실제 커플 사진인데도 옷이 그대로 유지되는 사고가 있었다 — 체크박스로 명시.
+  if (document.getElementById('animate-two-people')?.checked) {
+    const suffix = ' (사진에는 두 사람이 함께 있다 — 커플)'
+    motionBase = (motionBase.slice(0, 400 - suffix.length) + suffix).trim()
+  }
   const fromMotion = motionBase.match(/(\d+)\s*초/)
   let durationSec =
     typeof options.durationSec === 'number' && Number.isFinite(options.durationSec)
@@ -3276,16 +3449,34 @@ async function requestAnimate(options = {}) {
   )
 
   try {
-    if (!guideImageDataUrl && !currentResult.imageDataUrl && currentResult.imageUrl) {
-      await cacheImageForAnimate(currentResult.imageUrl)
+    let imageDataUrl =
+      guideImageDataUrl ||
+      currentResult.imageDataUrl ||
+      (typeof currentResult.imageUrl === 'string' && currentResult.imageUrl.startsWith('data:image/')
+        ? currentResult.imageUrl
+        : undefined)
+    let imageUrl =
+      imageDataUrl || guideImageDataUrl
+        ? undefined
+        : currentResult.imageUrl || undefined
+
+    if (!imageDataUrl && imageUrl) {
+      await cacheImageForAnimate(imageUrl)
+      imageDataUrl = currentResult.imageDataUrl || undefined
+      if (imageDataUrl) imageUrl = undefined
+    }
+
+    if (!imageDataUrl && !imageUrl) {
+      setAnimateStatus('원본 이미지가 없어요. 이미지를 다시 열어 주세요.', true)
+      return { ok: false }
     }
 
     const response = await fetch('/api/animate', {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify({
-        imageUrl: guideImageDataUrl ? undefined : currentResult.imageUrl,
-        imageDataUrl: guideImageDataUrl || currentResult.imageDataUrl || undefined,
+        imageUrl,
+        imageDataUrl,
         prompt: currentResult.prompt,
         motion,
         size: currentResult.size,
@@ -4126,9 +4317,11 @@ function isStudioImageLoadContext() {
 
 // 화보/관리자: Ctrl+V 캡처·이미지 붙여넣기 → 수정 대상으로 불러오기
 document.addEventListener('paste', (event) => {
-  // 합성 패널이 열려 있으면 admin-fuse가 처리
+  // 합성/얼굴교체 패널이 열려 있으면 각자 자체 리스너가 처리
   const fusePanel = document.getElementById('admin-fuse-panel')
   if (fusePanel && !fusePanel.hidden) return
+  const faceswapPanel = document.getElementById('admin-faceswap-panel')
+  if (faceswapPanel && !faceswapPanel.hidden) return
   if (!isStudioImageLoadContext()) return
   // 텍스트만 붙여넣는 경우는 가로채지 않음 (설명 칸 등)
   const file = pickImageFileFromDataTransfer(event.clipboardData)
@@ -4509,7 +4702,12 @@ reviseApplyButton.addEventListener('click', async () => {
         // 화보로 만든 동물 그림이 자유 모드 경로로(또는 반대로) 잘못 흘러가는 사고가 있었다.
         genMode: currentResult.genMode || getGenMode(),
         imageUrl: currentResult.imageUrl,
-        baseDescription: currentResult.prompt || (descriptionField?.value || '').trim(),
+        // 두 사람 체크박스: 텍스트만으로 커플 여부를 추측하면(모션/설명에 "두 명" 같은
+        // 단어가 없으면) 1인 잠금(IRONCLAD 등)이 적용되어 실제로는 커플 사진인데도
+        // 옷이 그대로 유지되는 사고가 있었다 — 체크박스로 명시하면 텍스트 추측 없이 확실히 켜진다.
+        baseDescription:
+          (currentResult.prompt || (descriptionField?.value || '').trim()) +
+          (document.getElementById('revise-two-people')?.checked ? ' (사진에는 두 사람이 함께 있다 — 커플)' : ''),
         revision,
         maskDataUrl,
         mood: currentResult.mood,
@@ -5146,11 +5344,12 @@ const ADMIN_PANEL_KEY = 'storymag-admin-panel'
 
 function getAdminPanel() {
   const saved = localStorage.getItem(ADMIN_PANEL_KEY)
-  return saved === 'fuse' || saved === 'gallery' ? saved : 'fashion'
+  return saved === 'fuse' || saved === 'gallery' || saved === 'faceswap' ? saved : 'fashion'
 }
 
 function setAdminPanel(panel) {
-  const next = panel === 'fuse' || panel === 'gallery' ? panel : 'fashion'
+  const next =
+    panel === 'fuse' || panel === 'gallery' || panel === 'faceswap' ? panel : 'fashion'
   localStorage.setItem(ADMIN_PANEL_KEY, next)
   syncAdminWorkspaceUi()
 }
@@ -5160,6 +5359,7 @@ function syncAdminWorkspaceUi() {
   const panel = getAdminPanel()
   const subnav = document.getElementById('admin-subnav')
   const fusePanel = document.getElementById('admin-fuse-panel')
+  const faceswapPanel = document.getElementById('admin-faceswap-panel')
   const formPanel = document.getElementById('generate-form')?.closest('section.panel')
   const isAdminArea = area === 'admin'
 
@@ -5171,6 +5371,7 @@ function syncAdminWorkspaceUi() {
   })
 
   if (fusePanel) fusePanel.hidden = !(isAdminArea && panel === 'fuse')
+  if (faceswapPanel) faceswapPanel.hidden = !(isAdminArea && panel === 'faceswap')
   if (adminGallerySection) adminGallerySection.hidden = !(isAdminArea && panel === 'gallery')
 
   if (formPanel) {
@@ -5191,6 +5392,492 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   })
 })
 
+// ---- 얼굴 교체(간단 모드) — 올가미/맞추기 없이 한 번의 AI 호출로 얼굴만 교체 ----
+;(() => {
+  const targetSlot = document.getElementById('admin-faceswap-target-slot')
+  const face0Slot = document.getElementById('admin-faceswap-face0-slot')
+  const face1Slot = document.getElementById('admin-faceswap-face1-slot')
+  const targetInput = document.getElementById('admin-faceswap-target-input')
+  const targetClearBtn = document.getElementById('admin-faceswap-target-clear')
+  const face0Input = document.getElementById('admin-faceswap-face0-input')
+  const face1Input = document.getElementById('admin-faceswap-face1-input')
+  const gender0Select = document.getElementById('admin-faceswap-gender0')
+  const gender1Select = document.getElementById('admin-faceswap-gender1')
+  const face1ClearBtn = document.getElementById('admin-faceswap-face1-clear')
+  const workflowSelect = document.getElementById('admin-faceswap-workflow')
+  const upscaleCheckbox = document.getElementById('admin-faceswap-upscale')
+  const runBtn = document.getElementById('admin-faceswap-run')
+  const statusEl = document.getElementById('admin-faceswap-status')
+  const resultWrap = document.getElementById('admin-faceswap-result-wrap')
+  const resultPlaceholder = document.getElementById('admin-faceswap-result-placeholder')
+  const resultImg = document.getElementById('admin-faceswap-result-img')
+  const resultActions = document.getElementById('admin-faceswap-result-actions')
+  const resultDownload = document.getElementById('admin-faceswap-result-download')
+  const resultToMainBtn = document.getElementById('admin-faceswap-result-to-main')
+  if (!targetSlot || !face0Slot || !face1Slot || !runBtn) return
+
+  const state = { target: null, face0: null, face1: null }
+
+  function setStatus(msg, isError) {
+    if (!statusEl) return
+    statusEl.hidden = !msg
+    statusEl.textContent = msg || ''
+    statusEl.classList.toggle('form__status--error', Boolean(isError))
+  }
+
+  function setSlotPreview(slotEl, dataUrl) {
+    if (!slotEl) return
+    if (dataUrl) {
+      slotEl.style.backgroundImage = `url("${dataUrl}")`
+      slotEl.classList.remove('admin-fuse-slot--empty')
+      slotEl.classList.add('admin-faceswap-slot--filled')
+    } else {
+      slotEl.style.backgroundImage = ''
+      slotEl.classList.add('admin-fuse-slot--empty')
+      slotEl.classList.remove('admin-faceswap-slot--filled')
+    }
+  }
+
+  async function assignFile(key, slotEl, file) {
+    if (!file || !String(file.type || '').startsWith('image/')) {
+      setStatus('이미지 파일만 넣을 수 있어요 (PNG/JPEG/WEBP).', true)
+      return
+    }
+    try {
+      const dataUrl = await prepareImageDataUrl(file)
+      state[key] = dataUrl
+      setSlotPreview(slotEl, dataUrl)
+      setStatus('', false)
+    } catch (error) {
+      setStatus(`사진을 불러오지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
+    }
+  }
+
+  function wireSlot(key, slotEl, inputEl) {
+    slotEl.addEventListener('click', () => inputEl?.click())
+    slotEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        inputEl?.click()
+      }
+    })
+    inputEl?.addEventListener('change', () => {
+      const file = inputEl.files?.[0]
+      if (file) void assignFile(key, slotEl, file)
+      inputEl.value = ''
+    })
+    slotEl.addEventListener('dragover', (event) => {
+      event.preventDefault()
+      slotEl.classList.add('admin-fuse-slot--drag')
+    })
+    slotEl.addEventListener('dragleave', () => {
+      slotEl.classList.remove('admin-fuse-slot--drag')
+    })
+    slotEl.addEventListener('drop', (event) => {
+      event.preventDefault()
+      slotEl.classList.remove('admin-fuse-slot--drag')
+      const file = pickImageFileFromDataTransfer(event.dataTransfer)
+      if (file) void assignFile(key, slotEl, file)
+    })
+    slotEl.addEventListener('paste', (event) => {
+      const file = pickImageFileFromDataTransfer(event.clipboardData)
+      if (file) {
+        event.preventDefault()
+        void assignFile(key, slotEl, file)
+      }
+    })
+  }
+
+  wireSlot('target', targetSlot, targetInput)
+  wireSlot('face0', face0Slot, face0Input)
+  wireSlot('face1', face1Slot, face1Input)
+
+  face1ClearBtn?.addEventListener('click', () => {
+    state.face1 = null
+    setSlotPreview(face1Slot, null)
+  })
+
+  targetClearBtn?.addEventListener('click', () => {
+    state.target = null
+    setSlotPreview(targetSlot, null)
+    setStatus('', false)
+  })
+
+  async function sleep(ms) {
+    await new Promise((resolve) => window.setTimeout(resolve, ms))
+  }
+
+  // 얼굴 2장(특히 두 명 동시 교체, 또는 방금 새로 생성한 낯선 장면 위 교체)은 fal 처리가
+  // 몇 분씩 걸리는 경우가 실측됐다 — 서버는 submit만 하고 status/response URL을 돌려준 뒤
+  // 이 함수가 짧게 반복 조회한다(animate.ts의 predictionId 폴링과 동일한 이유 — Pages
+  // Function 벽시계 한도 회피). 90회(약 3.6분)는 2인 교체엔 너무 짧아 넉넉히 늘린다.
+  async function pollFaceSwapStatus(statusUrl, responseUrl, startedAt, label) {
+    const prefix = label ? `${label}: ` : ''
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
+      setStatus(
+        elapsedSec > 60
+          ? `${prefix}얼굴 교체 중… ${elapsedSec}초 (드물게 몇 분 걸릴 수 있어요, 기다려 주세요)`
+          : `${prefix}얼굴 교체 중… ${elapsedSec}초`,
+        false,
+      )
+      await sleep(attempt < 6 ? 1500 : 2500)
+      const response = await fetch('/api/face-swap-status', {
+        method: 'POST',
+        headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ statusUrl, responseUrl }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (response.status === 401) {
+        if (typeof clearAllAuth === 'function') clearAllAuth()
+        if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+        return null
+      }
+      if (data.status === 'succeeded' && data.imageUrl) return data.imageUrl
+      if (data.status === 'failed') {
+        setStatus(data.message || `얼굴 교체에 실패했어요: ${data.error || 'unknown_error'}`, true)
+        return null
+      }
+      // pending — 계속 대기
+    }
+    setStatus('얼굴 교체가 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.', true)
+    return null
+  }
+
+  // 1인 얼굴 교체 1회 호출(제출 + 필요 시 폴링). 2인 교체를 "빠른 1인 교체 2번"으로
+  // 체이닝할 때도, 평범한 1인 교체일 때도 이 함수 하나로 처리한다.
+  async function runSingleFaceSwap(opts) {
+    const payload = {
+      targetImage: opts.targetImage,
+      face0: opts.faceDataUrl,
+      gender0: opts.gender,
+      workflowType: opts.workflowType,
+      upscale: opts.upscale,
+    }
+    const response = await fetch('/api/face-swap', {
+      method: 'POST',
+      headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (response.status === 401) {
+      if (typeof clearAllAuth === 'function') clearAllAuth()
+      if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return null
+    }
+    if (response.status === 429) {
+      setStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
+      return null
+    }
+    if (data.ok && data.imageUrl) return data.imageUrl
+    if (data.ok && data.pending && data.statusUrl && data.responseUrl) {
+      return await pollFaceSwapStatus(data.statusUrl, data.responseUrl, Date.now(), opts.stepLabel)
+    }
+    const prefix = opts.stepLabel ? `${opts.stepLabel}: ` : ''
+    setStatus(
+      `${prefix}${
+        data.message ||
+        (data.error === 'fal_key_not_configured'
+          ? '얼굴 교체 기능이 서버에 아직 설정되지 않았어요 (FAL_KEY 필요).'
+          : `얼굴 교체에 실패했어요: ${data.error || response.status}`)
+      }`,
+      true,
+    )
+    return null
+  }
+
+  runBtn.addEventListener('click', async () => {
+    if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
+      if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
+      return
+    }
+    if (!state.target) {
+      setStatus('먼저 기본 사진(장면)을 넣어 주세요.', true)
+      return
+    }
+    if (!state.face0) {
+      setStatus('붙일 얼굴 사진(얼굴 1)을 넣어 주세요.', true)
+      return
+    }
+    runBtn.disabled = true
+    if (resultImg) resultImg.hidden = true
+    if (resultActions) resultActions.hidden = true
+    if (resultPlaceholder) resultPlaceholder.hidden = false
+    const startedAt = Date.now()
+    try {
+      const hasSecondFace = Boolean(state.face1)
+      let imageUrl
+      if (hasSecondFace) {
+        // fal의 easel-ai 모델은 "얼굴 2장 동시 교체"를 한 번에 처리하려 하면 내부적으로
+        // 훨씬 무거운 연산을 타서 몇 분씩 걸리고 가끔 타임아웃까지 나는 게 실측됐다 —
+        // 대신 "빠른 1인 교체(보통 10~30초)"를 두 번 연달아 체이닝하면 대개 훨씬 빠르고
+        // 안정적이다: 1단계 결과(얼굴1 합성 완료 사진)를 2단계의 새 기본 사진으로 넘긴다.
+        setStatus('1/2단계: 얼굴 1 교체 중…', false)
+        const step1 = await runSingleFaceSwap({
+          targetImage: state.target,
+          faceDataUrl: state.face0,
+          gender: gender0Select?.value || 'female',
+          workflowType: workflowSelect?.value || 'user_hair',
+          upscale: false, // 중간 단계는 업스케일 생략 — 2단계 이후 최종 결과만 업스케일
+          startedAt,
+          stepLabel: '1/2단계 (얼굴 1)',
+        })
+        if (!step1) return
+        setStatus('2/2단계: 얼굴 2 교체 중…', false)
+        imageUrl = await runSingleFaceSwap({
+          targetImage: step1,
+          faceDataUrl: state.face1,
+          gender: gender1Select?.value || 'male',
+          workflowType: workflowSelect?.value || 'user_hair',
+          upscale: Boolean(upscaleCheckbox?.checked),
+          startedAt,
+          stepLabel: '2/2단계 (얼굴 2)',
+        })
+        if (!imageUrl) return
+      } else {
+        setStatus('얼굴 교체 중… 0초', false)
+        imageUrl = await runSingleFaceSwap({
+          targetImage: state.target,
+          faceDataUrl: state.face0,
+          gender: gender0Select?.value || 'female',
+          workflowType: workflowSelect?.value || 'user_hair',
+          upscale: Boolean(upscaleCheckbox?.checked),
+          startedAt,
+          stepLabel: '',
+        })
+        if (!imageUrl) return
+      }
+      if (resultImg) {
+        resultImg.src = imageUrl
+        resultImg.hidden = false
+      }
+      if (resultDownload) resultDownload.href = imageUrl
+      if (resultActions) resultActions.hidden = false
+      if (resultPlaceholder) resultPlaceholder.hidden = true
+      if (resultWrap) resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setStatus('얼굴 교체 완료! 아래 4번 결과란을 확인하세요.', false)
+    } catch (error) {
+      setStatus(`얼굴 교체 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
+    } finally {
+      runBtn.disabled = false
+    }
+  })
+
+  // ---- 커플 씬 자동 생성 — 얼굴 사진 2장만 있으면 데이트/포옹/키스 장면을 AI가 새로 만들고
+  // 그 위에 바로 얼굴을 합성한다(기본 사진을 직접 찍거나 구할 필요가 없음). ----
+  const scenePresetSelect = document.getElementById('admin-faceswap-scene-preset')
+  const scenePhotorealBtn = document.getElementById('admin-faceswap-scene-photoreal')
+  const sceneGenerateBtn = document.getElementById('admin-faceswap-scene-generate')
+  const sceneAndSwapBtn = document.getElementById('admin-faceswap-scene-and-swap')
+
+  // "차렷 자세로 뻣뻣하게 서 있다"는 실측 실패 사례 — 팔짱/포옹/키스라는 단어만으로는
+  // 부족해서, 팔의 구체적 위치·몸의 기울임·체중 이동까지 명시하고 "차렷 자세 금지"를
+  // 직접 못박아야 자연스러운 커플 포즈가 나온다.
+  const SCENE_PRESET_DESCRIPTIONS = {
+    arm_in_arm:
+      '20대 남녀 커플이 도심 거리에서 팔짱을 끼고 나란히 걸으며 데이트하는 모습. 여자가 남자의 팔을 양손으로 감싸 팔짱을 끼고, 두 사람의 어깨와 상체가 서로 살짝 기울어 맞닿아 있다. 서로 마주보며 자연스럽게 웃는 표정, 캐주얼하고 단정한 옷차림, 낮 시간 배경, 두 사람의 얼굴이 또렷하게 보이는 정면 구도, 사진처럼 사실적인 화보. 뻣뻣하게 양팔을 몸통 옆에 붙이고 차렷 자세로 정면을 보고 서 있는 증명사진 같은 포즈는 절대 금지.',
+    hug: '20대 남녀 커플이 서로 마주 서서 다정하게 포옹하는 모습. 한 사람의 팔이 상대방의 등과 허리를 감싸 안고, 두 사람의 몸이 가깝게 밀착되어 있으며 고개는 서로의 어깨나 얼굴 쪽으로 살짝 기울어 있다. 캐주얼하고 단정한 옷차림, 실내 또는 거리 배경, 사진처럼 사실적인 화보. 뻣뻣하게 양팔을 몸통 옆에 붙이고 차렷 자세로 나란히 서 있는 증명사진 같은 포즈는 절대 금지.',
+    kiss: '20대 남녀 커플이 서로 마주 보고 다정하게 입맞춤하는 모습. 두 사람이 서로를 향해 몸을 기울이고, 한쪽 또는 양쪽 팔이 상대방의 허리나 얼굴을 감싸며 입술이 맞닿아 있다. 캐주얼하고 단정한 옷차림, 사진처럼 사실적인 화보. 뻣뻣하게 양팔을 몸통 옆에 붙이고 차렷 자세로 떨어져 서 있는 증명사진 같은 포즈는 절대 금지.',
+  }
+
+  async function generateCoupleScene() {
+    const description =
+      SCENE_PRESET_DESCRIPTIONS[scenePresetSelect?.value] || SCENE_PRESET_DESCRIPTIONS.arm_in_arm
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description, mood: 'clean', size: 'portrait', mode: 'fashion' }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (response.status === 401) {
+      if (typeof clearAllAuth === 'function') clearAllAuth()
+      if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return null
+    }
+    if (response.status === 429) {
+      setStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
+      return null
+    }
+    if (!data.ok || !data.imageUrl) {
+      setStatus(
+        data.message ||
+          (data.error === 'provider_content_blocked'
+            ? '장면 생성이 안전 필터에 걸렸어요. 다른 장면을 골라 다시 시도해 주세요.'
+            : `장면 생성에 실패했어요: ${data.error || response.status}`),
+        true,
+      )
+      return null
+    }
+    return data.imageUrl
+  }
+
+  // 이미 본인이 "1. 기본 사진"을 직접 넣어둔 상태에서 장면 생성 버튼을 누르면, 그 사진을
+  // 그대로 덮어써버려서 "엉뚱한 사진이 나왔다"는 혼란이 생긴다 — 기본 사진이 이미 있으면
+  // 확인 없이 진행하지 않고 안내만 하고 멈춘다.
+  function blockedByExistingTarget() {
+    if (!state.target) return false
+    setStatus(
+      '이미 "1. 기본 사진"이 채워져 있어요 — 이 버튼은 그 사진을 새로 만든 장면으로 덮어씁니다. 기존 사진을 그대로 쓰려면 "얼굴 바로 바꾸기"를 누르세요. 새 장면으로 바꾸려면 먼저 기본 사진 슬롯을 지우고(다시 클릭 후 다른 파일 선택 또는 새로고침) 다시 시도해 주세요.',
+      true,
+    )
+    return true
+  }
+
+  // 증명사진 2장을 참고 이미지로 그대로 Flux Kontext Multi에 넘겨서, "장면 생성 + 별도
+  // 얼굴교체" 2단계 대신 한 번의 생성으로 실제 얼굴을 유지한 전신 장면을 바로 만든다.
+  // face-swap보다 훨씬 빠르고(생성 1회), 얼굴이 원본과 다른 사람으로 나오는 사고도 줄어든다.
+  async function generateCoupleScenePhotoreal(face0DataUrl, face1DataUrl) {
+    const preset = SCENE_PRESET_DESCRIPTIONS[scenePresetSelect?.value] || SCENE_PRESET_DESCRIPTIONS.arm_in_arm
+    const description = `${preset} 두 사람 모두 전신이 보이는 구도. 첫 번째 참고 사진의 사람과 두 번째 참고 사진의 사람, 이 두 사람이 함께 있는 장면.`
+    const response = await fetch('/api/tale-scene', {
+      method: 'POST',
+      headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        images: [face0DataUrl, face1DataUrl],
+        description,
+        aspectRatio: '3:4',
+        photoreal: true,
+      }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (response.status === 401) {
+      if (typeof clearAllAuth === 'function') clearAllAuth()
+      if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return null
+    }
+    if (response.status === 429) {
+      setStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
+      return null
+    }
+    if (!data.ok || !data.imageUrl) {
+      setStatus(
+        data.message ||
+          (data.error === 'provider_content_blocked'
+            ? '장면 생성이 안전 필터에 걸렸어요. 다른 장면을 골라 다시 시도해 주세요.'
+            : `장면 생성에 실패했어요: ${data.error || response.status}`),
+        true,
+      )
+      return null
+    }
+    return data.imageUrl
+  }
+
+  scenePhotorealBtn?.addEventListener('click', async () => {
+    if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
+      if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
+      return
+    }
+    if (!state.face0) {
+      setStatus('얼굴 1(본인) 증명사진을 먼저 넣어 주세요.', true)
+      return
+    }
+    if (!state.face1) {
+      setStatus('얼굴 2(상대) 증명사진도 넣어야 커플 장면을 만들 수 있어요.', true)
+      return
+    }
+    scenePhotorealBtn.disabled = true
+    if (resultImg) resultImg.hidden = true
+    if (resultActions) resultActions.hidden = true
+    if (resultPlaceholder) resultPlaceholder.hidden = false
+    setStatus('두 사람의 얼굴을 유지한 채 장면을 만들고 있어요… (보통 20~40초)', false)
+    try {
+      const imageUrl = await generateCoupleScenePhotoreal(state.face0, state.face1)
+      if (!imageUrl) return
+      if (resultImg) {
+        resultImg.src = imageUrl
+        resultImg.hidden = false
+      }
+      if (resultDownload) resultDownload.href = imageUrl
+      if (resultActions) resultActions.hidden = false
+      if (resultPlaceholder) resultPlaceholder.hidden = true
+      if (resultWrap) resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      setStatus('완성! 아래 4번 결과란을 확인하세요. (얼굴이 조금 다르면 이 결과를 "기본 사진"으로 쓰고 「얼굴 바로 바꾸기」로 한 번 더 다듬을 수 있어요)', false)
+      state.target = imageUrl
+      setSlotPreview(targetSlot, imageUrl)
+    } catch (error) {
+      setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
+    } finally {
+      scenePhotorealBtn.disabled = false
+    }
+  })
+
+  sceneGenerateBtn?.addEventListener('click', async () => {
+    if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
+      if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
+      return
+    }
+    if (blockedByExistingTarget()) return
+    sceneGenerateBtn.disabled = true
+    setStatus('데이트 장면을 만들고 있어요…', false)
+    try {
+      const imageUrl = await generateCoupleScene()
+      if (!imageUrl) return
+      state.target = imageUrl
+      setSlotPreview(targetSlot, imageUrl)
+      setStatus('장면을 만들었어요. 얼굴 사진을 넣고 「얼굴 바로 바꾸기」를 눌러 주세요.', false)
+    } catch (error) {
+      setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
+    } finally {
+      sceneGenerateBtn.disabled = false
+    }
+  })
+
+  sceneAndSwapBtn?.addEventListener('click', async () => {
+    if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
+      if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
+      return
+    }
+    if (blockedByExistingTarget()) return
+    if (!state.face0) {
+      setStatus('얼굴 1(본인) 사진을 먼저 넣어 주세요.', true)
+      return
+    }
+    if (!state.face1) {
+      setStatus('얼굴 2(상대) 사진도 넣어야 커플 장면을 만들 수 있어요.', true)
+      return
+    }
+    sceneAndSwapBtn.disabled = true
+    setStatus('데이트 장면을 만들고 있어요…', false)
+    try {
+      const imageUrl = await generateCoupleScene()
+      if (!imageUrl) return
+      state.target = imageUrl
+      setSlotPreview(targetSlot, imageUrl)
+      runBtn.click()
+    } catch (error) {
+      setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
+    } finally {
+      sceneAndSwapBtn.disabled = false
+    }
+  })
+
+  resultToMainBtn?.addEventListener('click', () => {
+    const url = resultImg?.src
+    if (!url) {
+      // 예전엔 여기서 조용히 return만 해서 "클릭했는데 아무 반응 없다"는 혼란이 있었다.
+      setStatus('아직 결과 이미지가 없어요 — 먼저 위에서 얼굴 교체를 실행해 주세요.', true)
+      return
+    }
+    // 얼굴 교체(간단 모드)는 관리자 전용 패널에서만 접근 가능한 기능이라 항상 '화보(관리자)'
+    // 결과로 취급해야 한다. getGenMode()는 화면의 gen-mode 라디오 상태에 의존하는데, 그 라디오가
+    // 어떤 이유로든 'free'로 남아있으면 이 결과가 "내 갤러리"로 저장되어 버려서 사용자가 기대하는
+    // "관리자 전용 갤러리"에서 보이지 않는 회귀가 있었다 — 항상 'fashion'으로 고정한다.
+    if (typeof setAppArea === 'function') setAppArea('admin')
+    setAdminPanel('fashion')
+    showResult(url, '얼굴 교체(AI)', false, {
+      size: sizeField.value,
+      itemId: null,
+      prompt: '얼굴 교체(간단 모드) 결과',
+      accepted: false,
+      mood: moodField.value,
+      engine: 'face-swap',
+      genMode: 'fashion',
+      reviseRound: 0,
+    })
+    setFormStatus('얼굴 교체 결과를 메인 결과로 가져왔어요. 「이미지 수정」·「쇼츠」·갤러리 저장이 바로 가능해요.', false)
+  })
+})()
+
 if (window.StorymagAdminFuse?.init) {
   window.StorymagAdminFuse.init({
     getCurrentResult: () => currentResult,
@@ -5209,6 +5896,9 @@ if (window.StorymagAdminFuse?.init) {
     setAdminPanel,
     setFormStatus,
     moodField,
+    authHeaders,
+    isLoggedIn,
+    showPinGate,
   })
 }
 

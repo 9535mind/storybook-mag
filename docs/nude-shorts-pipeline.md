@@ -41,6 +41,13 @@
 - `functions/lib/replicate-client.ts` — Wan `go_fast` / `sample_shift`
 - `public/app.js` / `index.html` / `style.css` — 쇼츠 UI·타점 에디터
 
+## 카메라 / 클로즈업
+
+- **single (10~18초)**: 줌·얼굴 클로즈업·바스트 크롭 전면 금지. 소스와 동일 프레이밍.
+- **dual-a 탈의/몸매투영**: 전반 와이드만. 나체 전 줌인 금지.
+- **dual-b**: 나체 확인 후 후반에만 약한 줌. 「클로즈업으로 끝내」요청 시에만 클로즈 종결.
+- `buildShortsCameraLock`이 become / leanIntimate / 장문 경로에 공통 적용 (조기 return이 카메라 잠금을 건너뛰지 않음).
+
 ## 운영 메모
 
 - 몸매 투영과 키스/애무를 한 모션에 섞지 말 것 → 투영 후 별도 쇼츠로 동작

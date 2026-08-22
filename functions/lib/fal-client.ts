@@ -618,6 +618,9 @@ export async function generateFalKontextMultiImage(options: {
   prompt: string
   aspectRatio?: string
   timeoutMs?: number
+  /** 기본 3.5. 두 사람 합성처럼 "누구를 빼먹지 말라"는 지시를 강하게 지켜야 할 때 5~7로 올리면
+   * 프롬프트 순응도가 높아진다(실측: 기본값에서 두 번째 인물이 무시되는 사고 발생). */
+  guidanceScale?: number
 }): Promise<{ imageUrl: string }> {
   return runFalQueue(
     options.falKey,
@@ -629,9 +632,198 @@ export async function generateFalKontextMultiImage(options: {
       output_format: 'png',
       safety_tolerance: '5',
       ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+      ...(typeof options.guidanceScale === 'number' ? { guidance_scale: options.guidanceScale } : {}),
     },
     options.timeoutMs ?? FAL_WILDLIFE_TIMEOUT_MS,
   )
+}
+
+// 얼굴 1장 교체는 대개 30~40초면 끝나지만, 2인 동시 교체는 60~90초 이상 걸리는 사례가
+// 실측됨 — 45초로는 완료 전에 우리 쪽 폴링이 fal_provider_timeout을 던져버림.
+// merge-videos(90초)와 동일하게, Pages Function은 클라이언트가 붙어있는 동안
+// CPU 아닌 대기(fetch/sleep)는 30초 한도에 걸리지 않으므로 넉넉히 잡아도 안전하다.
+const FAL_FACE_SWAP_TIMEOUT_MS = 60_000
+const FAL_FACE_SWAP_TWO_FACE_TIMEOUT_MS = 110_000
+
+type FalFaceSwapResponse = {
+  image?: { url?: string }
+  detail?: string | Array<{ msg?: string }>
+  error?: string
+}
+
+export type FaceSwapGender = 'male' | 'female' | 'non-binary'
+
+/**
+ * 원클릭 얼굴 교체 — easel-ai/advanced-face-swap (fal.ai).
+ * 올가미로 자르고/지우고/맞추는 admin-fuse 수동 합성을 대신해, 얼굴 사진(1~2장) +
+ * 대상 사진만 넣으면 배경·포즈·조명을 그대로 유지한 채 얼굴만 자동으로 바꿔준다.
+ * 출력 스키마가 image{}(단일 객체)라 runFalQueue(images[] 전용)를 그대로 못 쓴다
+ * (removeFalBackground와 동일한 이유).
+ */
+export async function runAdvancedFaceSwap(options: {
+  falKey: string
+  targetImageUrl: string
+  face0ImageUrl: string
+  gender0: FaceSwapGender
+  face1ImageUrl?: string
+  gender1?: FaceSwapGender
+  /** user_hair = 얼굴 사진 쪽 헤어스타일 유지 · target_hair = 대상 사진 헤어스타일 유지 */
+  workflowType?: 'user_hair' | 'target_hair'
+  upscale?: boolean
+  timeoutMs?: number
+}): Promise<{ imageUrl: string }> {
+  const startedAt = Date.now()
+  const hasSecondFace = Boolean(options.face1ImageUrl && options.gender1)
+  const timeoutMs =
+    options.timeoutMs ?? (hasSecondFace ? FAL_FACE_SWAP_TWO_FACE_TIMEOUT_MS : FAL_FACE_SWAP_TIMEOUT_MS)
+  const endpoint = 'https://queue.fal.run/easel-ai/advanced-face-swap'
+
+  const body: Record<string, unknown> = {
+    face_image_0: options.face0ImageUrl,
+    gender_0: options.gender0,
+    target_image: options.targetImageUrl,
+    workflow_type: options.workflowType ?? 'user_hair',
+    upscale: options.upscale !== false,
+  }
+  if (hasSecondFace) {
+    body.face_image_1 = options.face1ImageUrl
+    body.gender_1 = options.gender1
+  }
+
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${options.falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+    Math.min(timeoutMs, 20_000),
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse
+  if (!submitResponse.ok) {
+    throw new Error(extractErrorMessage(submitPayload))
+  }
+
+  let resultPayload: FalFaceSwapResponse
+  if (submitPayload.status_url && submitPayload.response_url) {
+    resultPayload = await pollFalResult<FalFaceSwapResponse>(
+      options.falKey,
+      submitPayload.status_url,
+      submitPayload.response_url,
+      startedAt,
+      timeoutMs,
+    )
+  } else {
+    resultPayload = submitPayload as FalFaceSwapResponse
+  }
+
+  const imageUrl = resultPayload.image?.url?.trim()
+  if (!imageUrl) {
+    throw new Error(extractErrorMessage(resultPayload) || 'missing_image_url')
+  }
+  return { imageUrl }
+}
+
+/**
+ * 얼굴 2장(특히 두 명 동시 교체)은 fal 큐 처리가 45초를 넘기는 경우가 실측됐고,
+ * 이 함수가 끝날 때까지 기다리는 동기 방식은 Pages Function의 벽시계 한도에 걸려
+ * fal_provider_timeout으로 실패한다 — submit만 하고 status_url/response_url을
+ * 클라이언트에 돌려준 뒤, /api/face-swap-status가 짧게 한 번씩 조회하는 비동기
+ * 폴링 패턴(animate.ts/animate-status.ts와 동일한 이유)으로 바꾼다.
+ */
+export async function submitAdvancedFaceSwap(options: {
+  falKey: string
+  targetImageUrl: string
+  face0ImageUrl: string
+  gender0: FaceSwapGender
+  face1ImageUrl?: string
+  gender1?: FaceSwapGender
+  workflowType?: 'user_hair' | 'target_hair'
+  upscale?: boolean
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  const endpoint = 'https://queue.fal.run/easel-ai/advanced-face-swap'
+
+  const body: Record<string, unknown> = {
+    face_image_0: options.face0ImageUrl,
+    gender_0: options.gender0,
+    target_image: options.targetImageUrl,
+    workflow_type: options.workflowType ?? 'user_hair',
+    upscale: options.upscale !== false,
+  }
+  if (options.face1ImageUrl && options.gender1) {
+    body.face_image_1 = options.face1ImageUrl
+    body.gender_1 = options.gender1
+  }
+
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${options.falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+    20_000,
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse &
+    FalFaceSwapResponse
+  if (!submitResponse.ok) {
+    throw new Error(extractErrorMessage(submitPayload))
+  }
+
+  if (submitPayload.status_url && submitPayload.response_url) {
+    return { statusUrl: submitPayload.status_url, responseUrl: submitPayload.response_url }
+  }
+  const imageUrl = submitPayload.image?.url?.trim()
+  if (!imageUrl) {
+    throw new Error(extractErrorMessage(submitPayload) || 'missing_image_url')
+  }
+  return { imageUrl }
+}
+
+/** 위 submit이 돌려준 status_url/response_url을 한 번만 조회 — 짧은 폴링 루프는 호출부(status 엔드포인트)가 맡는다. */
+export async function checkAdvancedFaceSwap(options: {
+  falKey: string
+  statusUrl: string
+  responseUrl: string
+}): Promise<{ status: 'pending' | 'succeeded' | 'failed'; imageUrl?: string; error?: string }> {
+  const statusResponse = await fetchWithTimeout(
+    options.statusUrl,
+    { method: 'GET', headers: { Authorization: `Key ${options.falKey}` } },
+    15_000,
+  )
+  const statusPayload = (await statusResponse.json().catch(() => ({}))) as FalQueueStatusResponse
+  if (!statusResponse.ok) {
+    return { status: 'failed', error: extractErrorMessage(statusPayload) }
+  }
+
+  const status = statusPayload.status?.toUpperCase()
+  if (status === 'FAILED' || status === 'CANCELLED') {
+    return { status: 'failed', error: extractErrorMessage(statusPayload) || `fal_${status.toLowerCase()}` }
+  }
+  if (status !== 'COMPLETED') {
+    return { status: 'pending' }
+  }
+
+  const resultResponse = await fetchWithTimeout(
+    options.responseUrl,
+    { method: 'GET', headers: { Authorization: `Key ${options.falKey}` } },
+    15_000,
+  )
+  const resultPayload = (await resultResponse.json().catch(() => ({}))) as FalFaceSwapResponse
+  if (!resultResponse.ok) {
+    return { status: 'failed', error: extractErrorMessage(resultPayload) }
+  }
+  const imageUrl = resultPayload.image?.url?.trim()
+  if (!imageUrl) {
+    return { status: 'failed', error: extractErrorMessage(resultPayload) || 'missing_image_url' }
+  }
+  return { status: 'succeeded', imageUrl }
 }
 
 export function resolveFalImageSize(size: string | undefined): FalImageSize {

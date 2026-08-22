@@ -401,10 +401,13 @@ export function resolveWanI2vDuration(durationSec?: number): {
   approxSec: number
 } {
   // Wan fast: num_frames 최대 121 · fps 최소 5 → 단일 클립 최장 ≈24초(슬로 체감)
-  // 프레임 수는 항상 121, 길이는 fps만 낮춰 맞춤 (동작 ‘양’은 같고 재생만 늘어짐)
+  // Replicate 공식 스펙: "81 frames give the best results" — 얼굴/체형 드리프트를
+  // 줄이려고 10·12초처럼 81프레임+fps 조정으로 충분히 맞출 수 있는 길이는 81로 낮춘다.
+  // 15·18·24초는 fps 하한(5)에 걸려 81프레임으로는 목표 길이에 못 미치므로(예: 81/5=16.2초)
+  // 기존 121프레임을 그대로 유지 — 동결된 길이 옵션이 짧아지는 회귀를 막는다.
   const raw = Math.round(Number(durationSec) || 15)
-  if (raw <= 10) return { num_frames: 121, frames_per_second: 12, approxSec: 10 }
-  if (raw <= 12) return { num_frames: 121, frames_per_second: 10, approxSec: 12 }
+  if (raw <= 10) return { num_frames: 81, frames_per_second: 8, approxSec: 10 }
+  if (raw <= 12) return { num_frames: 81, frames_per_second: 7, approxSec: 12 }
   if (raw <= 15) return { num_frames: 121, frames_per_second: 8, approxSec: 15 }
   if (raw <= 18) return { num_frames: 121, frames_per_second: 7, approxSec: 18 }
   return { num_frames: 121, frames_per_second: 5, approxSec: 24 }

@@ -4,3 +4,7 @@ node_modules/
 demo-output/
 *.log
 .DS_Store
+tmp/
+_become.txt
+_lean.txt
+*.hwp

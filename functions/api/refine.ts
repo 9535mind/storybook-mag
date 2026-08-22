@@ -191,12 +191,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     !wantsNudeOrUndress(revision)
   ) {
     const { text: revisionForKontext } = await translateDescriptionForImagePrompt(revision, env)
+    const fuseSeamPolish =
+      /LOCAL head-swap|FINAL head-swap|head-swap seam|EDGE MATTE ONLY|lasso silhouette/i.test(
+        revision,
+      )
     const kontextPrompt = [
       'Edit this existing photo. Apply ONLY this change:',
       revisionForKontext || revision,
       'Keep the same person identity, face, body proportions, and camera framing unless the edit requires expanding the crop.',
       'Do not invent a different person. Photorealistic result.',
-    ].join(' ')
+      fuseSeamPolish
+        ? 'CRITICAL QUALITY: preserve the input photo sharpness and resolution. Do NOT re-render the whole image soft/muddy/low-res. Only local seam/neck/edge fixes. Keep fabric weave and facial micro-detail.'
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' ')
     try {
       const { imageUrl: nextUrl } = await refineFalKontextEdit({
         falKey: env.FAL_KEY,
@@ -588,19 +597,35 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     try {
       // 올가미+귀걸이: strength 0.85는 마스크·건물 발명을 자주 함(실측) → 전용 프롬프트·강도↓
       const regionJewelry = wantsJewelryAccessoryRefine(revision)
+      // 머리 제거·배경 메우기: 강도를 높여 흰 사각형/빈칸으로 남는 실패를 줄임
+      const regionBgFill =
+        /seamless continuation of the surrounding background|fill only the masked region|background fill|remove leftover head/i.test(
+          revision,
+        )
       const regionPrompt = regionJewelry
         ? buildJewelryAccessoryRefinePrompt(revisionForPrompt || revision)
-        : prompt
+        : regionBgFill
+          ? [
+              'Inpaint ONLY the white-masked area.',
+              'Continue the real room background behind the person (wall, furniture, window, floor) — photoreal match to neighbors.',
+              'No blank white rectangle, no empty patch, no solid color block.',
+              'Remove any leftover head, hair, cutout fringe inside the mask.',
+              'Do not change unmasked body, clothing, or other faces.',
+              revisionForPrompt || revision,
+            ].join(' ')
+          : prompt
       const regionNegative = regionJewelry
         ? `${negativePrompt}, surgical mask, face mask, medical mask, KF94, N95, covering mouth, new building, extra architecture, changed background, different face, no earring, missing earring`
-        : negativePrompt
+        : regionBgFill
+          ? `${negativePrompt}, blank white rectangle, solid white patch, empty hole, pure white fill, cutout fringe, leftover head, passport photo backdrop`
+          : negativePrompt
       const { imageUrl: nextUrl } = await refineFalInpaint({
         falKey: env.FAL_KEY,
         imageUrl,
         maskUrl: maskDataUrl,
         prompt: regionPrompt,
         negativePrompt: regionNegative,
-        strength: regionJewelry ? 0.62 : undefined,
+        strength: regionJewelry ? 0.62 : regionBgFill ? 0.92 : undefined,
       })
       return jsonResponse(
         {
@@ -670,25 +695,37 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           // baseDescription) 2-인자 버전을 써서 "이번 지시 우선, 없으면 이전 상태 승계"
           // 규칙으로 정확히 분리해서 판단한다.
           const fullNudeFallbackOutcome = bigClothingFallback && wantsFullNude(revision, baseDescription)
+          // 실측(2026-08-22): 정밀모델(stability-ai/sdxl)은 낮은 strength(0.48 이하)에서는
+          // 나체 요청을 거의 반영하지 못한다 — 위 구조적 재생성 분기와 동일하게 나체
+          // 결과만 기본 모델(Lightning)+고강도로 분리한다. 일반 의상 교체는 기존 그대로.
+          const nudeFallbackLightning = fullNudeFallbackOutcome
           // strength를 너무 올리면 수정 반복마다 얼굴이 하얗게/흑갈색으로 드리프트됨 — 얼굴 보존 우선
-          const fallbackStrength = bigClothingFallback ? 0.48 : 0.38
+          const fallbackStrength = nudeFallbackLightning ? 0.85 : bigClothingFallback ? 0.48 : 0.38
+          const usePrecisionForFallback = bigClothingFallback && !nudeFallbackLightning
+          // 실측(2026-08-22): 프롬프트에 "shells, jewels, veils, wraps" 같은 장식 명사를
+          // (제거 대상 예시로) 나열하면 SDXL류 모델이 그 명사를 오히려 새로 그려 넣는
+          // 사고가 있었다 — 긍정 프롬프트에서는 명사를 빼고, 여기 negative prompt에서
+          // 금지어로만 다룬다.
+          const nudeFallbackNegative = nudeFallbackLightning
+            ? `${negativePrompt}, jeweled wrap, decorative veil, shell bra, decorative belt over crotch, ornamental covering, fabric wrap over crotch, panties, thong, underwear`
+            : negativePrompt
           const { imageUrl: nextUrl } = await refineReplicateImageToImage({
             apiToken: env.REPLICATE_API_TOKEN,
-            modelOwner: bigClothingFallback
+            modelOwner: usePrecisionForFallback
               ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
               : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-            modelName: bigClothingFallback
+            modelName: usePrecisionForFallback
               ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
               : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-            modelVersion: bigClothingFallback ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
+            modelVersion: usePrecisionForFallback ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
             imageUrl,
             prompt: wholeImagePrompt,
-            negativePrompt,
+            negativePrompt: nudeFallbackNegative,
             width: dims.width,
             height: dims.height,
             strength: fallbackStrength,
-            numInferenceSteps: bigClothingFallback ? 30 : undefined,
-            guidanceScale: bigClothingFallback ? 7.5 : undefined,
+            numInferenceSteps: usePrecisionForFallback ? 30 : undefined,
+            guidanceScale: usePrecisionForFallback ? 7.5 : undefined,
             disableSafetyChecker: true,
           })
           return jsonResponse(
@@ -757,7 +794,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     genMode === 'fashion' &&
     wantsJewelryAccessoryRefine(revision) &&
     !splitCompositeFix &&
-    !wantsFullNude(revision, baseDescription)
+    !nudeRevision
   if (jewelryOnly && env.FAL_KEY?.trim()) {
     const wristAccessory = wantsWristAccessoryRefine(revision)
     const necklaceAccessory = wantsNecklaceRefine(revision)
@@ -854,13 +891,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   // ── 유두·유륜만 (가슴 밴드 inpaint) — 음모와 한 문장에 있으면 유두 먼저
+  // 주의: "나체로 만들어줘, 음모도 자연스럽게" 처럼 전신 탈의 요청에 유두/음모 단어가
+  // 같이 있으면, 예전엔 이 국소 inpaint(옷은 그대로 두고 마스크 부위만 살짝 손봄)로
+  // 잘못 가로채져서 "옷을 안 벗김" 회귀가 났다(jewelryOnly는 이미 이 가드가 있었는데
+  // 유두/음모 경로만 빠져 있었다) — nudeRevision(전신 탈의 의도)이 있으면 이 국소
+  // 경로를 건너뛰고 아래 일반 탈의 경로로 넘긴다.
   const nippleAreolaOnly =
     mode === 'text' &&
     genMode === 'fashion' &&
     !animalSubject &&
     wantsNippleAreolaRefine(revision) &&
     !splitCompositeFix &&
-    !jewelryOnly
+    !jewelryOnly &&
+    !nudeRevision
   // 유두+음모 한 문장이면 유두를 먼저 처리하고, 음모는 다음 수정으로 안내
   if (nippleAreolaOnly && env.FAL_KEY?.trim()) {
     try {
@@ -905,13 +948,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   // ── 체모·음모만 사실적으로 (쇼츠 엔진은 그대로 — 정지 이미지 국소 수정)
+  // nippleAreolaOnly와 동일한 이유로 nudeRevision(전신 탈의 의도) 가드 추가 —
+  // "나체로, 음모 자연스럽게" 같은 요청이 옷은 그대로 두고 음모 패치만 그리는
+  // 사고로 새지 않게 한다.
   const pubicHairOnly =
     mode === 'text' &&
     genMode === 'fashion' &&
     !animalSubject &&
     wantsPubicHairOnlyRefine(revision) &&
     !splitCompositeFix &&
-    !jewelryOnly
+    !jewelryOnly &&
+    !nudeRevision
   if (pubicHairOnly && env.FAL_KEY?.trim()) {
     try {
       const maskDataUrl = buildPubicRegionMaskDataUrl({
@@ -962,6 +1009,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const framingExtendBoost = framingExtendRevision && !nudeRevision
       const fullNudeOutcome = structuralFallbackClothing && wantsFullNude(revision, baseDescription)
       const usePrecision = structuralFallbackClothing || framingExtendBoost
+      // 실측(라이브 재현 테스트, 2026-08-22): "완전 나체" 결과만 놓고 보면 정밀 모델
+      // (stability-ai/sdxl, strength 0.72~0.95)은 같은 프롬프트로도 거의 항상 실패한다 —
+      // 옷이 그대로 남거나(strength 0.72) 상의만 벗겨지고 하의는 그대로 남는다(strength
+      // 0.95). 반대로 기본 모델(juggernaut-xl-lightning)은 strength 0.82~0.88·Lightning
+      // 기본 스텝(8)·기본 가이던스(2.2)에서 반복 테스트 전부 성공(상하의 모두 제거,
+      // 바비돌/속옷 잔존 없음) — "정밀모드가 나체에 더 안정적"이라던 예전 코멘트는 이번
+      // 재현 테스트로 뒤집혔다. 나체(fullNudeOutcome/nudeBecomesHit)만 골라 기본 모델+
+      // 고강도로 보내고, 그 외(장신구·체모·세로 갈라짐·프레이밍 확장·일반 의상 교체)는
+      // 기존 정밀모드 그대로 둔다(이 경로들은 이번에 재검증하지 않았음).
+      const nudeLightning = fullNudeOutcome || nudeBecomesHit
       // 탈의는 SDXL 정밀이 Flux보다 나체 반영이 안정적(실측) — strength 0.74
       // (0.62에서도 완전 착의→나체가 "변화 없음"인 경우가 있어 상향; 얼굴은 짧은 나체 전용 프롬프트로 유지)
       // 체모만: 얼굴 보존 위해 strength↓·정밀모드
@@ -975,11 +1032,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             ? 0.38
             : framingExtendBoost
               ? 0.48
-              : nudeBecomesHit
-                ? 0.72
-                : structuralFallbackClothing && fullNudeOutcome
-                  ? 0.72
-                  : structural
+              : nudeLightning
+                ? 0.85
+                : structural
                     ? structuralFallbackClothing
                       ? 0.52
                       : 0.42
@@ -989,7 +1044,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // 장신구 폴백은 Lightning+저강도 — 정밀 SDXL은 인물 재생성 편향이 큼
       // 몸매 투영 inpaint 실패 시에만 여기로 — 체형 유지를 위해 strength 과고(0.85+) 금지
       const usePrecisionForRun =
-        usePrecision || pubicHairOnly || splitCompositeFix || nudeBecomesHit || fullNudeOutcome
+        (usePrecision || pubicHairOnly || splitCompositeFix) && !nudeLightning
       const nudePrompt =
         nudeBecomesHit || fullNudeOutcome
           ? buildNudeIdentityRefinePrompt(revision, baseDescription)
@@ -1012,7 +1067,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           : pubicHairOnly
             ? `${negativePrompt}, male pubic trail, happy trail to navel, jet black pubic blob`
             : fullNudeOutcome || nudeBecomesHit
-          ? `${negativePrompt}, panties, thong, briefs, bikini bottom, underwear on crotch, lingerie bottoms, clothes, dressed, different body shape, slimmed body, barbie body`
+          ? `${negativePrompt}, panties, thong, briefs, bikini bottom, underwear on crotch, lingerie bottoms, clothes, dressed, different body shape, slimmed body, barbie body, jeweled wrap, decorative veil, shell bra, decorative belt over crotch, ornamental covering, fabric wrap over crotch`
           : negativePrompt,
         width: dims.width,
         height: dims.height,
@@ -1042,7 +1097,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                     ? 'Replicate · Img2Img (몸매 투영)'
                     : structuralFallbackClothing
                     ? fullNudeOutcome
-                      ? 'Replicate · Img2Img (누드 요청 · 얼굴 보존 · 정밀모드)'
+                      ? 'Replicate · Img2Img (누드 요청 · 얼굴 보존 · 고강도)'
                       : 'Replicate · Img2Img (의상 변경 · 얼굴 보존 · 정밀모드)'
                     : structural
                       ? 'Replicate · Img2Img (장면 재생성 실패 · 보조 경로)'
@@ -1062,7 +1117,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                     ? '몸매 투영: 옷을 약하게 남긴 채 페이드로 녹여 같은 체형을 드러냈어요. 옷이 남으면 「몸매 투영」을 한 번 더 눌러 보세요.'
                     : structuralFallbackClothing
                     ? fullNudeOutcome
-                      ? '탈의·나체는 Replicate 정밀 모드로 처리했어요. 얼굴이 어긋나면 「이전과 비교」→「이 버전에서 다시 수정」후 다시 적용해 보세요.'
+                      ? '탈의·나체는 기본 모델을 고강도로 돌려 처리했어요. 얼굴이 어긋나면 「이전과 비교」→「이 버전에서 다시 수정」후 다시 적용해 보세요.'
                       : '원본 인물의 얼굴을 자동 보존해 처리했어요. 의상 변경이 약하면 바꿀 내용만 다시 적어 수정해 주세요.'
                     : structural
                       ? '장면을 통째로 다시 그리는 재생성이 실패해서, 원본을 더 보존하는 보조 방식으로 대체했어요. 큰 변경이 기대만큼 반영되지 않았을 수 있어요 — 필요하면 다시 수정하기를 눌러 재시도해 주세요.'

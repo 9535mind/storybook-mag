@@ -102,8 +102,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonResponse({ ok: false, error: 'invalid_json_body' }, 400)
   }
 
-  const imageUrl = (body.imageUrl ?? '').trim()
-  const imageDataUrl = (body.imageDataUrl ?? '').trim()
+  let imageUrl = (body.imageUrl ?? '').trim()
+  let imageDataUrl = (body.imageDataUrl ?? '').trim()
+  // 클라이언트가 data URL을 imageUrl에만 넣는 경우(합성·픽셀 확정) 허용
+  if (!imageDataUrl.startsWith('data:image/') && imageUrl.startsWith('data:image/')) {
+    imageDataUrl = imageUrl
+    imageUrl = ''
+  }
   const hasDataUrl = imageDataUrl.startsWith('data:image/')
   if (!hasDataUrl) {
     const urlErr = mediaUrlError(imageUrl)
@@ -116,6 +121,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const originalPrompt = truncatePromptAtBoundary((body.prompt ?? '').trim(), ANIMATE_PROMPT_MAX_CHARS)
   const bodyProjectFlag = body.bodyProject === true
+  // BEAT 타임라인을 "3등분 약속"(실제 초 단위)에 맞춰 표기하려면 프롬프트 빌드 전에 필요.
+  const requestedDurationSec =
+    typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 15
+  const { approxSec: approxDurationSec } = resolveWanI2vDuration(requestedDurationSec)
 
   let motion = (body.motion ?? '').trim()
   if (motion.length > 400) {
@@ -146,8 +155,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     (!motionForceBecomeNude &&
       (/현재\s*나체|옷\s*없음/.test(continuity) ||
         /fully\s*nude|already\s*(fully\s*)?nude/i.test(continuity)))
+  // 오염되지 않은 원문 보존 — ensureNudeHoldMotionPhrase가 「크롯치는 선명히」/
+  // 「foggy crotch blur」같은 팬티금지 상용구를 붙이면, 그 상용구의 "crotch" 단어가
+  // 실측으로 하류(leanIntimate)의 부위 판별 정규식에 항상 걸려서 사용자가 가슴/키스를
+  // 요청해도 크롯치 애무로 뒤집히는 회귀가 있었다. 부위 판별은 반드시 이 원문으로 한다.
+  const rawMotion = motion
   motion = ensureNudeHoldMotionPhrase(motion, {
     sourceAlreadyNude: sourceNudeHold && !motionForceBecomeNude,
+    durationSec: approxDurationSec,
   })
   if (motion.length > 480) {
     motion = motion.slice(0, 480).trim()
@@ -198,18 +213,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         clipRole,
         landmarks,
         bodyProject: true,
+        durationSec: approxDurationSec,
       })
     : buildAnimationPrompt({
         prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
         motion: [motionForVideo, motion].filter(Boolean).join('\n'),
+        rawMotion,
         clipRole,
         landmarks,
+        durationSec: approxDurationSec,
       })
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
-  const requested =
-    typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 15
-  const { approxSec } = resolveWanI2vDuration(requested)
+  const requested = requestedDurationSec
+  const approxSec = approxDurationSec
   const nudeOrUndress =
     bodyProjectFlag ||
     nudeIntent.nudeBecomes ||
@@ -237,7 +254,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       durationSec: requested,
       // 모션·나체/탈의·몸매 투영이면 go_fast OFF — 켜면 중반에 팬티·브라·남자 발명이 잦음(실측)
       goFast: !(motion || nudeOrUndress || sourceNudeHold || bodyProjectFlag),
-      // 몸매 투영: 원본 벨트/바지 픽셀에 달라붙는 회귀 → sample_shift를 올려 옷 용해 여유
+      // 몸매 투영: 원본 벨트/바지 픽셀에 달라붙는 회귀 → sample_shift를 올려 옷 용해 여유.
+      // 일반 모션/나체 쇼츠는 낮은 sample_shift(원본에 더 붙임)를 시도했다가 오히려
+      // 바지가 안 벗겨지는 회귀(탈의= 큰 변형인데 원본에 더 붙이니 변형이 덜 일어남)가
+      // 실측돼 되돌림 — 모델 기본값(12)에 맡긴다.
       sampleShift: bodyProjectFlag ? 18 : undefined,
     })
 

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag · 자유 일러스트</title>
-  <link rel="stylesheet" href="/style.css?v=20260802nipoff" />
+  <link rel="stylesheet" href="/style.css?v=20260822twoperson1" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -322,11 +322,14 @@
       <div id="body-landmark-toolbar" class="body-landmark-toolbar" hidden>
         <p class="body-landmark-toolbar__hint">
           <strong>점을 드래그</strong>해 이동 · 흰 원 <strong>가장자리</strong>를 끌면 유방 크기.
-          흰 원(유방)과 빨간 점(유두)은 따로 움직입니다. 왼쪽/오른쪽을 골라 높이·크기도 맞추세요. (원본·영상에는 그려지지 않음)
+          흰 원/빨간 점/<strong>크기 핸들</strong>을 <strong>우클릭</strong>하면 그쪽 타점을 제거합니다.
+          제거한 쪽은 아래 버튼으로 다시 놓을 수 있습니다. (원본·영상에는 그려지지 않음)
         </p>
         <div class="body-landmark-toolbar__row body-landmark-toolbar__row--select" role="group" aria-label="타점 선택">
           <button type="button" class="body-landmark-toolbar__btn is-selected" data-lm-select="L">왼 유방</button>
           <button type="button" class="body-landmark-toolbar__btn" data-lm-select="R">오른 유방</button>
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-restore="L" title="제거한 왼 유방 타점 다시 놓기" hidden>왼 복구</button>
+          <button type="button" class="body-landmark-toolbar__btn" data-lm-restore="R" title="제거한 오른 유방 타점 다시 놓기" hidden>오른 복구</button>
         </div>
         <div class="body-landmark-toolbar__row body-landmark-toolbar__row--nudge" role="group" aria-label="미세 이동">
           <button type="button" class="body-landmark-toolbar__btn" data-lm-nudge="left" title="왼쪽">←</button>
@@ -425,6 +428,10 @@
             일반 나체는 「누드」「나체가 되어」등. 체형 유지 탈의 영상은 「몸매 투영 쇼츠」.
             <strong>진짜 두 칸</strong>만 아래 자르기.
           </p>
+          <label class="revise-panel__two-people">
+            <input type="checkbox" id="revise-two-people" />
+            이 사진에는 두 사람이 있어요 (커플/2인) — 체크하면 두 번째 인물을 그대로 유지하도록 잠금이 자동 조정됩니다
+          </label>
           </div>
 
           <div class="revise-panel__footer revise-panel__footer--wrap">
@@ -469,6 +476,10 @@
             <span class="form__hint motion-presets__hint">클릭하면 입력 · 저장한 예시는 ×로 삭제</span>
           </div>
         </div>
+        <label class="revise-panel__two-people" style="margin-top: 0.5rem; display: block">
+          <input type="checkbox" id="animate-two-people" />
+          이 사진에는 두 사람이 있어요 (커플/2인) — 체크하면 두 번째 인물을 그대로 유지하도록 잠금이 자동 조정됩니다
+        </label>
         <div class="form__field" style="margin-top: 0.75rem">
           <span class="form__label" id="video-duration-label">영상 길이</span>
           <div
@@ -644,6 +655,9 @@
       <button type="button" class="admin-subnav__btn" data-admin-panel="fuse" role="tab" aria-selected="false">
         합성
       </button>
+      <button type="button" class="admin-subnav__btn" data-admin-panel="faceswap" role="tab" aria-selected="false">
+        얼굴 교체(간단)
+      </button>
       <button type="button" class="admin-subnav__btn" data-admin-panel="gallery" role="tab" aria-selected="false">
         관리자 갤러리
       </button>
@@ -652,52 +666,246 @@
     <section id="admin-fuse-panel" class="admin-fuse-panel" hidden>
       <h2 class="admin-fuse-panel__title">합성 · 배치 · 머리 교체</h2>
       <p class="admin-fuse-panel__lead">
-        관리자 전용. 장면·사진을 불러와 배치한 뒤, 올가미로 잘라 붙이거나 머리를 바꿉니다.
-        「파일 / 붙여넣기 / 끌어다 놓기 / 결과·카메라 스냅샷」으로 재료를 넣을 수 있습니다.
-        「픽셀로 확정」은 AI 비용 없이 합칩니다.
+        <strong>사람</strong>: 올가미로 쓸/버릴 표시 + 맞추기.
+        <strong>AI</strong>: 배경 메우기·윤곽·피부·조도·측면 맞춤·최종 완성.
       </p>
-      <div class="admin-fuse-import" role="toolbar" aria-label="장면 가져오기">
-        <button type="button" id="admin-fuse-load-file" class="admin-subnav__btn">파일 불러오기</button>
+      <ol class="admin-fuse-steps" id="admin-fuse-steps" aria-label="합성 순서">
+        <li class="admin-fuse-steps__item is-active" data-fuse-step="1">
+          <em>1</em><span>재료 넣기</span>
+        </li>
+        <li class="admin-fuse-steps__item" data-fuse-step="2">
+          <em>2</em><span>몸 얼굴 버리기</span>
+        </li>
+        <li class="admin-fuse-steps__item" data-fuse-step="3">
+          <em>3</em><span>붙일 얼굴 쓰기</span>
+        </li>
+        <li class="admin-fuse-steps__item" data-fuse-step="4">
+          <em>4</em><span>버릴 것만 치우기</span>
+        </li>
+        <li class="admin-fuse-steps__item" data-fuse-step="5">
+          <em>5</em><span>맞추기</span>
+        </li>
+        <li class="admin-fuse-steps__item" data-fuse-step="6">
+          <em>6</em><span>AI 최종 완성</span>
+        </li>
+      </ol>
+      <div class="admin-fuse-steps__actions">
+        <button type="button" id="admin-fuse-step-prev" class="admin-subnav__btn">이전</button>
+        <button type="button" id="admin-fuse-step-next" class="admin-subnav__btn admin-subnav__btn--active">
+          다음 단계
+        </button>
+        <button type="button" id="admin-fuse-ai-finish" class="admin-subnav__btn admin-subnav__btn--active">
+          AI 최종 완성
+        </button>
+      </div>
+      <p id="admin-fuse-step-guide" class="admin-fuse-steps__guide">
+        ① 1칸에 몸·장면, 2칸에 붙일 얼굴을 넣으세요.
+      </p>
+      <div class="admin-fuse-tray" id="admin-fuse-tray" aria-label="합성 재료">
+        <div
+          class="admin-fuse-slot admin-fuse-slot--empty"
+          data-fuse-slot="0"
+          role="button"
+          tabindex="0"
+          title="몸·장면 사진"
+        >
+          <span class="admin-fuse-slot__label">1 몸·장면</span>
+          <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+        </div>
+        <div
+          class="admin-fuse-slot admin-fuse-slot--empty"
+          data-fuse-slot="1"
+          role="button"
+          tabindex="0"
+          title="붙일 얼굴·머리"
+        >
+          <span class="admin-fuse-slot__label">2 붙일 얼굴</span>
+          <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+        </div>
+        <div
+          class="admin-fuse-slot admin-fuse-slot--empty"
+          data-fuse-slot="2"
+          role="button"
+          tabindex="0"
+          title="필요할 때만"
+        >
+          <span class="admin-fuse-slot__label">3 더 쓰기</span>
+          <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+        </div>
+        <button
+          type="button"
+          id="admin-fuse-reset"
+          class="admin-fuse-reset"
+          title="재료·그림판을 모두 비우고 처음부터"
+        >
+          새로<br />시작하기
+        </button>
+      </div>
+      <div class="admin-fuse-import" role="toolbar" aria-label="사진 넣기">
+        <button type="button" id="admin-fuse-load-file" class="admin-subnav__btn admin-subnav__btn--active">
+          불러오기
+        </button>
         <button type="button" id="admin-fuse-paste" class="admin-subnav__btn">붙여넣기</button>
-        <button type="button" id="admin-fuse-from-result" class="admin-subnav__btn">결과 스냅샷</button>
-        <button type="button" id="admin-fuse-from-gallery" class="admin-subnav__btn">갤러리에서</button>
-        <button type="button" id="admin-fuse-camera" class="admin-subnav__btn">카메라 스냅샷</button>
+        <button type="button" id="admin-fuse-from-result" class="admin-subnav__btn">지금 결과</button>
+        <button type="button" id="admin-fuse-from-gallery" class="admin-subnav__btn">갤러리</button>
+        <button type="button" id="admin-fuse-camera" class="admin-subnav__btn">카메라</button>
       </div>
-      <div class="admin-fuse-tray" aria-label="합성 재료">
-        <button type="button" class="admin-fuse-slot" data-fuse-slot="0" title="몸/배경">
-          <span class="admin-fuse-slot__label">1 몸/배경</span>
-        </button>
-        <button type="button" class="admin-fuse-slot" data-fuse-slot="1" title="머리 원본">
-          <span class="admin-fuse-slot__label">2 머리원본</span>
-        </button>
-        <button type="button" class="admin-fuse-slot" data-fuse-slot="2" title="추가 재료">
-          <span class="admin-fuse-slot__label">3</span>
-        </button>
-      </div>
+      <!-- Ctrl+V / 붙여넣기 버튼이 이미지를 받을 수 있게 포커스용 (화면 밖) -->
+      <div
+        id="admin-fuse-paste-catcher"
+        class="admin-fuse-paste-catcher"
+        contenteditable="true"
+        tabindex="0"
+        aria-label="그림 붙여넣기 영역"
+        data-placeholder="여기에 Ctrl+V"
+      ></div>
+      <dialog id="admin-fuse-pick-dialog" class="admin-fuse-pick-dialog">
+        <div class="admin-fuse-pick-dialog__inner">
+          <h3 class="admin-fuse-pick-dialog__title" id="admin-fuse-pick-title">사진 넣기</h3>
+          <p class="admin-fuse-pick-dialog__lead">선택한 칸에 넣을 방법을 고르세요.</p>
+          <div class="admin-fuse-pick-dialog__list">
+            <button type="button" class="admin-fuse-pick-dialog__btn" data-fuse-pick="file">
+              불러오기 (이 컴퓨터)
+            </button>
+            <button type="button" class="admin-fuse-pick-dialog__btn" data-fuse-pick="paste">
+              붙여넣기
+            </button>
+            <button type="button" class="admin-fuse-pick-dialog__btn" data-fuse-pick="result">
+              지금 결과
+            </button>
+            <button type="button" class="admin-fuse-pick-dialog__btn" data-fuse-pick="gallery">
+              갤러리
+            </button>
+            <button type="button" class="admin-fuse-pick-dialog__btn" data-fuse-pick="camera">
+              카메라
+            </button>
+          </div>
+          <button type="button" class="admin-fuse-pick-dialog__cancel" id="admin-fuse-pick-close">닫기</button>
+        </div>
+      </dialog>
       <input id="admin-fuse-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
       <div class="admin-fuse-toolrow" role="toolbar" aria-label="합성 도구">
         <button type="button" class="admin-subnav__btn admin-subnav__btn--active" data-fuse-tool="move" aria-pressed="true">이동</button>
-        <button type="button" class="admin-subnav__btn" data-fuse-tool="align" aria-pressed="false">포인트 맞춤</button>
+        <button type="button" class="admin-subnav__btn" data-fuse-tool="align" aria-pressed="false">맞추기</button>
         <button type="button" class="admin-subnav__btn" data-fuse-tool="lasso" aria-pressed="false">올가미</button>
-        <button type="button" id="admin-fuse-cut" class="admin-subnav__btn">잘라 새 레이어</button>
-        <button type="button" id="admin-fuse-copy" class="admin-subnav__btn">복사 새 레이어</button>
-        <button type="button" id="admin-fuse-punch" class="admin-subnav__btn">구멍 뚫기</button>
+        <button type="button" id="admin-fuse-cut" class="admin-subnav__btn">머리만 자르기</button>
+        <button type="button" id="admin-fuse-copy" class="admin-subnav__btn">선택 복사</button>
+        <button
+          type="button"
+          id="admin-fuse-punch"
+          class="admin-subnav__btn"
+          title="몸 레이어 선택 → 올가미로 옛 머리 그린 뒤 누르면 그 자리만 뚫림"
+        >
+          옛 머리 지우기
+        </button>
         <button type="button" id="admin-fuse-sharpen" class="admin-subnav__btn" title="선택한 레이어를 선명하게 (AI 없음)">선명하게</button>
-        <button type="button" id="admin-fuse-head-help" class="admin-subnav__btn">머리 교체 도우미</button>
+        <button
+          type="button"
+          id="admin-fuse-cleanup"
+          class="admin-subnav__btn"
+          title="몸·장면과 지금 고른 조각만 남기고, 증명사진 원본 등 나머지 레이어를 삭제"
+        >
+          남은 조각 치우기
+        </button>
+        <button type="button" id="admin-fuse-head-help" class="admin-subnav__btn" title="위 1~6 순서로 안내">순서 다시</button>
       </div>
-      <div class="admin-fuse-canvas-wrap" id="admin-fuse-dropzone">
-        <canvas id="admin-fuse-canvas" class="admin-fuse-canvas" width="720" height="960"></canvas>
-        <canvas id="admin-fuse-lasso" class="admin-fuse-lasso" width="720" height="960"></canvas>
-        <div class="admin-fuse-drop-overlay" id="admin-fuse-drop-overlay" hidden>
-          여기에 사진·그림을 놓으세요
+      <div class="admin-fuse-viewport">
+        <div class="admin-fuse-zoombar" role="toolbar" aria-label="화면 확대">
+          <button type="button" id="admin-fuse-zoom-out" class="admin-fuse-zoombar__btn" title="축소">−</button>
+          <span id="admin-fuse-zoom-label" class="admin-fuse-zoombar__label">100%</span>
+          <button type="button" id="admin-fuse-zoom-in" class="admin-fuse-zoombar__btn" title="확대">+</button>
+          <button type="button" id="admin-fuse-zoom-reset" class="admin-fuse-zoombar__btn admin-fuse-zoombar__btn--wide" title="화면 100% + 몸 사진 크기 복구">맞춤</button>
+          <span class="admin-fuse-zoombar__hint">드래그=위치 · 휠/핀치(두 손가락)=크기 · Ctrl+휠=화면 줌 · 「맞춤」=복구</span>
+        </div>
+        <div class="admin-fuse-canvas-scroll" id="admin-fuse-canvas-scroll">
+          <div class="admin-fuse-canvas-wrap" id="admin-fuse-dropzone">
+            <canvas id="admin-fuse-canvas" class="admin-fuse-canvas" width="1080" height="1440"></canvas>
+            <canvas id="admin-fuse-lasso" class="admin-fuse-lasso" width="1080" height="1440"></canvas>
+            <div class="admin-fuse-drop-overlay" id="admin-fuse-drop-overlay" hidden>
+              여기에 사진·그림을 놓으세요
+            </div>
+          </div>
         </div>
       </div>
       <p class="form__hint">
-        가져오기: 파일 · Ctrl+V 붙여넣기 · 캔버스에 끌어다 놓기 · 결과/갤러리/카메라 스냅샷.
-        이동: 드래그·휠·우클릭 · 포인트 맞춤 · 올가미 · 「선명하게」(선택 레이어, AI 없음).
-        더 고화질이 필요하면 확정 후 화보 「다듬기」로 이어가세요.
+        정교한 올가미는 <strong>+</strong> 또는 휠로 확대한 뒤 점을 찍으세요.
+        올가미 닫기 → 우클릭 「그린 올가미 그대로 자르기」(화면과 동일) / 「버릴 조각」.
+        몸만 측면·얼굴만 정면이면 「얼굴→측면」또는 「몸→정면」.
       </p>
+      <div class="admin-fuse-polish" id="admin-fuse-polish">
+        <h3 class="admin-fuse-polish__title">AI 손보기 <span>(픽셀 확정 전 · 정교 다듬기)</span></h3>
+        <p class="admin-fuse-polish__lead">
+          <strong>측면 맞춤</strong> = 몸을 카메라 정면으로 돌리거나, 얼굴을 몸처럼 3/4·측면으로 돌림.
+          (사진이 좌우로 기울어진 것과는 다릅니다.)
+        </p>
+        <div class="admin-fuse-polish__grid">
+          <label class="admin-fuse-polish__field admin-fuse-polish__field--wide">
+            <span>측면(요) 맞춤</span>
+            <select id="admin-fuse-yaw" class="admin-fuse-polish__select">
+              <option value="off">끔</option>
+              <option value="face" selected>얼굴을 몸처럼 측면·3/4로</option>
+              <option value="body">몸을 카메라 정면으로</option>
+            </select>
+          </label>
+          <label class="admin-fuse-polish__field">
+            <span>얼굴 크기 <em id="admin-fuse-face-size-val">0</em></span>
+            <input id="admin-fuse-face-size" type="range" min="-2" max="2" step="1" value="0" />
+          </label>
+          <label class="admin-fuse-polish__field">
+            <span>윤곽·목 정교화 <em id="admin-fuse-edge-val">강함</em></span>
+            <input id="admin-fuse-edge" type="range" min="0" max="2" step="1" value="2" />
+          </label>
+          <label class="admin-fuse-polish__field">
+            <span>피부톤 맞춤 <em id="admin-fuse-skin-val">중간</em></span>
+            <input id="admin-fuse-skin" type="range" min="0" max="2" step="1" value="2" />
+          </label>
+          <label class="admin-fuse-polish__field">
+            <span>조도·그림자 <em id="admin-fuse-light-val">맞춤</em></span>
+            <input id="admin-fuse-light" type="range" min="0" max="2" step="1" value="2" />
+          </label>
+          <label class="admin-fuse-polish__field">
+            <span>명도 <em id="admin-fuse-bright-val">0</em></span>
+            <input id="admin-fuse-bright" type="range" min="-2" max="2" step="1" value="0" />
+          </label>
+          <label class="admin-fuse-polish__field">
+            <span>채도 <em id="admin-fuse-sat-val">0</em></span>
+            <input id="admin-fuse-sat" type="range" min="-2" max="2" step="1" value="0" />
+          </label>
+        </div>
+        <label class="admin-fuse-polish__note">
+          <span>추가 요청 (선택)</span>
+          <input
+            id="admin-fuse-polish-note"
+            type="text"
+            maxlength="200"
+            placeholder="예: 몸이 오른쪽을 보므로 얼굴도 같은 쪽으로 돌려 목선 맞추기"
+          />
+        </label>
+        <div class="admin-fuse-polish__actions">
+          <button type="button" id="admin-fuse-ai-matte" class="admin-subnav__btn">
+            선택 조각 AI 윤곽 정교화 (올가미 유지)
+          </button>
+          <button type="button" id="admin-fuse-yaw-face" class="admin-subnav__btn">
+            얼굴→측면
+          </button>
+          <button type="button" id="admin-fuse-yaw-body" class="admin-subnav__btn">
+            몸→정면
+          </button>
+          <button
+            type="button"
+            id="admin-fuse-ai-polish"
+            class="admin-subnav__btn"
+            title="올가미 자국·목 이음·옛 머리 구멍·피부톤만 다듬습니다. 얼굴·몸통은 유지됩니다."
+          >
+            AI로 자연스럽게
+          </button>
+          <button type="button" id="admin-fuse-ai-undo" class="admin-subnav__btn" hidden>손보기 되돌리기</button>
+        </div>
+      </div>
       <div class="admin-fuse-actions">
+        <button type="button" id="admin-fuse-ai-finish-2" class="form__submit form__submit--secondary">
+          AI 최종 완성
+        </button>
         <button type="button" id="admin-fuse-commit" class="form__submit">픽셀로 확정</button>
       </div>
       <p id="admin-fuse-status" class="form__status" hidden></p>
@@ -718,6 +926,139 @@
           </div>
         </div>
       </dialog>
+    </section>
+
+    <section id="admin-faceswap-panel" class="admin-fuse-panel" hidden>
+      <h2 class="admin-fuse-panel__title">얼굴 교체 (간단 모드)</h2>
+      <p class="admin-fuse-panel__lead">
+        올가미·잘라내기·맞추기 없이, 사진 2~3장만 넣으면 AI가 배경·포즈·조명은 그대로 두고
+        <strong>얼굴만 자동으로</strong> 바꿔줘요. 한 명(단독 사진) 또는 두 명(커플 사진) 모두 가능합니다.
+      </p>
+
+      <div class="admin-faceswap-field admin-faceswap-field--scene">
+        <label class="form__label" for="admin-faceswap-scene-preset">기본 사진이 없다면 — 장면부터 AI로 만들기</label>
+        <select id="admin-faceswap-scene-preset" class="form__select">
+          <option value="arm_in_arm" selected>팔짱 끼고 데이트</option>
+          <option value="hug">서로 포옹</option>
+          <option value="kiss">서로 키스</option>
+        </select>
+        <button type="button" id="admin-faceswap-scene-photoreal" class="form__submit">
+          증명사진 2장으로 전신 장면 바로 만들기(추천 · 더 빠르고 정확함)
+        </button>
+        <p class="admin-fuse-panel__lead" style="margin-top: 4px">
+          얼굴 1·2에 본인·상대 증명사진(얼굴 사진)을 넣고 위 버튼을 누르면, AI가 두 사람의
+          <strong>실제 얼굴을 그대로 유지</strong>한 채 전신 데이트 장면을 한 번에 만들어요.
+          (별도 얼굴교체 단계 없이 바로 완성 — 훨씬 빠르고 얼굴이 더 정확해요.)
+        </p>
+        <details style="margin-top: 8px">
+          <summary style="cursor: pointer; color: rgba(226,232,240,0.7); font-size: 13px">
+            예전 방식(장면 먼저 만들고 얼굴 나중에 교체) 쓰기
+          </summary>
+          <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap">
+            <button type="button" id="admin-faceswap-scene-generate" class="review-panel__secondary">
+              장면 만들기(기본 사진 자동 채움)
+            </button>
+            <button type="button" id="admin-faceswap-scene-and-swap" class="form__submit form__submit--secondary">
+              장면 생성 + 얼굴 합성 한번에
+            </button>
+          </div>
+        </details>
+      </div>
+
+      <div class="admin-faceswap-grid">
+        <div class="admin-faceswap-field">
+          <label class="form__label" for="admin-faceswap-target-input">1. 기본 사진 (장면·포즈)</label>
+          <div
+            id="admin-faceswap-target-slot"
+            class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
+            role="button"
+            tabindex="0"
+            title="얼굴을 붙일 장면 사진"
+          >
+            <span class="admin-fuse-slot__label">기본 사진</span>
+            <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+          </div>
+          <input id="admin-faceswap-target-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          <button type="button" id="admin-faceswap-target-clear" class="review-panel__secondary">기본 사진 비우기</button>
+        </div>
+
+        <div class="admin-faceswap-field">
+          <label class="form__label" for="admin-faceswap-face0-input">2. 얼굴 사진 1 (필수)</label>
+          <div
+            id="admin-faceswap-face0-slot"
+            class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
+            role="button"
+            tabindex="0"
+            title="붙일 얼굴 사진 1"
+          >
+            <span class="admin-fuse-slot__label">얼굴 1</span>
+            <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+          </div>
+          <input id="admin-faceswap-face0-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          <select id="admin-faceswap-gender0" class="form__select">
+            <option value="female" selected>여성</option>
+            <option value="male">남성</option>
+            <option value="non-binary">논바이너리</option>
+          </select>
+        </div>
+
+        <div class="admin-faceswap-field">
+          <label class="form__label" for="admin-faceswap-face1-input">3. 얼굴 사진 2 (선택 — 두 명 동시 교체)</label>
+          <div
+            id="admin-faceswap-face1-slot"
+            class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
+            role="button"
+            tabindex="0"
+            title="붙일 얼굴 사진 2 (선택)"
+          >
+            <span class="admin-fuse-slot__label">얼굴 2 (선택)</span>
+            <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+          </div>
+          <input id="admin-faceswap-face1-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+          <select id="admin-faceswap-gender1" class="form__select">
+            <option value="male" selected>남성</option>
+            <option value="female">여성</option>
+            <option value="non-binary">논바이너리</option>
+          </select>
+          <button type="button" id="admin-faceswap-face1-clear" class="review-panel__secondary">얼굴 2 비우기</button>
+        </div>
+      </div>
+
+      <div class="admin-faceswap-options">
+        <label class="form__label" for="admin-faceswap-workflow">헤어스타일</label>
+        <select id="admin-faceswap-workflow" class="form__select">
+          <option value="user_hair" selected>얼굴 사진 쪽 헤어스타일 유지</option>
+          <option value="target_hair">기본 사진 쪽 헤어스타일 유지</option>
+        </select>
+        <label class="form__checkbox-row" for="admin-faceswap-upscale">
+          <input id="admin-faceswap-upscale" type="checkbox" checked />
+          <span>업스케일(더 선명하게)</span>
+        </label>
+      </div>
+
+      <button type="button" id="admin-faceswap-run" class="form__submit">얼굴 바로 바꾸기</button>
+      <p id="admin-faceswap-status" class="form__status" hidden></p>
+
+      <div class="admin-faceswap-field">
+        <label class="form__label">4. 결과 (새로 합성된 사진 — 여기에 나타나요)</label>
+        <div id="admin-faceswap-result-wrap" class="admin-faceswap-result">
+          <div id="admin-faceswap-result-placeholder" class="admin-faceswap-result__placeholder">
+            아직 결과가 없어요.<br />위에서 「얼굴 바로 바꾸기」를 누르면 완성된 사진이 이 자리에 나타납니다.
+          </div>
+          <img
+            id="admin-faceswap-result-img"
+            class="admin-faceswap-result__img"
+            alt="얼굴 교체 결과"
+            hidden
+          />
+          <div id="admin-faceswap-result-actions" class="admin-faceswap-result__actions" hidden>
+            <a id="admin-faceswap-result-download" class="review-panel__secondary" download="face-swap.png">다운로드</a>
+            <button type="button" id="admin-faceswap-result-to-main" class="form__submit form__submit--secondary">
+              메인 결과로 보내기(갤러리 저장 가능)
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="admin-gallery" class="gallery gallery--admin" hidden>
@@ -1299,8 +1640,8 @@
   <script src="/tale.js?v=20260720e"></script>
   <script src="/tale-layout.js?v=20260720d"></script>
   <script src="/observe.js?v=20260722b"></script>
-  <script src="/poly-lasso.js?v=20260801textfirst"></script>
-  <script src="/admin-fuse.js?v=20260802fusesharpen"></script>
-  <script src="/app.js?v=20260802nipoff"></script>
+  <script src="/poly-lasso.js?v=20260802lasso4"></script>
+  <script src="/admin-fuse.js?v=20260803seam2"></script>
+  <script src="/app.js?v=20260822faceswapfix1"></script>
 </body>
 </html>
