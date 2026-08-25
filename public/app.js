@@ -4883,6 +4883,7 @@ window.addEventListener('resize', () => {
 })
 
 animateButton.addEventListener('click', () => {
+  if (animateButton.disabled) return
   if (!currentResult.imageUrl) {
     setAnimateStatus('먼저 이미지를 생성하거나 불러와 주세요.', true)
     return
