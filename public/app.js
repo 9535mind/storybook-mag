@@ -4317,9 +4317,7 @@ function isStudioImageLoadContext() {
 
 // 화보/관리자: Ctrl+V 캡처·이미지 붙여넣기 → 수정 대상으로 불러오기
 document.addEventListener('paste', (event) => {
-  // 합성/얼굴교체 패널이 열려 있으면 각자 자체 리스너가 처리
-  const fusePanel = document.getElementById('admin-fuse-panel')
-  if (fusePanel && !fusePanel.hidden) return
+  // 얼굴교체 패널이 열려 있으면 자체 리스너가 처리
   const faceswapPanel = document.getElementById('admin-faceswap-panel')
   if (faceswapPanel && !faceswapPanel.hidden) return
   if (!isStudioImageLoadContext()) return
@@ -5344,12 +5342,11 @@ const ADMIN_PANEL_KEY = 'storymag-admin-panel'
 
 function getAdminPanel() {
   const saved = localStorage.getItem(ADMIN_PANEL_KEY)
-  return saved === 'fuse' || saved === 'gallery' || saved === 'faceswap' ? saved : 'fashion'
+  return saved === 'gallery' || saved === 'faceswap' ? saved : 'fashion'
 }
 
 function setAdminPanel(panel) {
-  const next =
-    panel === 'fuse' || panel === 'gallery' || panel === 'faceswap' ? panel : 'fashion'
+  const next = panel === 'gallery' || panel === 'faceswap' ? panel : 'fashion'
   localStorage.setItem(ADMIN_PANEL_KEY, next)
   syncAdminWorkspaceUi()
 }
@@ -5358,7 +5355,6 @@ function syncAdminWorkspaceUi() {
   const area = getAppArea()
   const panel = getAdminPanel()
   const subnav = document.getElementById('admin-subnav')
-  const fusePanel = document.getElementById('admin-fuse-panel')
   const faceswapPanel = document.getElementById('admin-faceswap-panel')
   const formPanel = document.getElementById('generate-form')?.closest('section.panel')
   const isAdminArea = area === 'admin'
@@ -5370,7 +5366,6 @@ function syncAdminWorkspaceUi() {
     btn.setAttribute('aria-selected', on && isAdminArea ? 'true' : 'false')
   })
 
-  if (fusePanel) fusePanel.hidden = !(isAdminArea && panel === 'fuse')
   if (faceswapPanel) faceswapPanel.hidden = !(isAdminArea && panel === 'faceswap')
   if (adminGallerySection) adminGallerySection.hidden = !(isAdminArea && panel === 'gallery')
 
@@ -5877,30 +5872,6 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     setFormStatus('얼굴 교체 결과를 메인 결과로 가져왔어요. 「이미지 수정」·「쇼츠」·갤러리 저장이 바로 가능해요.', false)
   })
 })()
-
-if (window.StorymagAdminFuse?.init) {
-  window.StorymagAdminFuse.init({
-    getCurrentResult: () => currentResult,
-    getGalleryItems: () => {
-      try {
-        const items = readGallery().filter((it) => it?.imageUrl || it?.imageDataUrl)
-        // 관리자 화보 갤러리를 앞에, 그다음 내 갤러리
-        const admin = items.filter((it) => it.genMode === 'fashion')
-        const free = items.filter((it) => it.genMode !== 'fashion')
-        return [...admin, ...free]
-      } catch {
-        return []
-      }
-    },
-    showResult,
-    setAdminPanel,
-    setFormStatus,
-    moodField,
-    authHeaders,
-    isLoggedIn,
-    showPinGate,
-  })
-}
 
 bootAuth()
 renderGallery()

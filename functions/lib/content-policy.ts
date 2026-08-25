@@ -1789,51 +1789,41 @@ export function buildNudeBecomesAnimationPrompt(input: {
   const total = bounds[bounds.length - 1]
   const dissolveDeadline = isDualA ? bounds[2] : bounds[1]
 
+  const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
+  // 실측(2026-08-26): 이 함수가 buildFaceFrozenLock·buildSingleContinuousShotLock·
+  // buildClothingSilhouetteBodyLock·buildAdultPubicHairLock·buildNudeCensorFogBanLock의
+  // 풀텍스트를 전부 이어붙여 6,000자를 넘겼다 — leanIntimate/plainNudeOnly는 이미
+  // 1,500자 안으로 압축돼 있는데 이 「몸매 투영」경로만 압축이 안 된 채 남아 있었던 것이
+  // "가슴 위치/크기 불일치"와 "후반부에 다시 옷을 입음"(HOLD 지시가 프롬프트 맨 끝
+  // 4,700자 지점이라 순응도가 이미 죽은 상태) 두 회귀의 실제 원인으로 확인됐다.
+  // → leanIntimate와 같은 스타일(짧은 BEAT + 한두 줄 잠금)로 재작성한다.
+  // 카메라만은 예외: buildShortsCameraLock()의 dual-a/dual-b 줌 타이밍은 동결 규칙
+  // (24/30초 전반 와이드·후반만 줌)이라 그대로 유지 — single만 leanIntimate와 동일한
+  // 짧은 한 줄로 대체한다.
   return [
+    'Adult photorealistic image-to-video. Same Korean woman: same face and body proportions (breast size/shape, waist, hips) as the input photo — do not slim, bulk, or resize her breasts. Same room, static camera.',
     coords
-      ? `USER TAJEOM LOCK (highest priority — do not ignore): ${coords}`
+      ? `USER TAJEOM LOCK (highest priority): ${coords}`
       : 'Estimate nipple and navel under clothing from the real torso — never on the face or neck.',
-    'Adult photorealistic image-to-video. Same woman face and body as the input photo.',
-    buildFaceFrozenLock(),
-    // 실측(2026-08-22): 이 프롬프트가 좌표·의류제거 지시로만 채워져 있어서 "이건 하나의
-    // 연속된 장면이다"라는 앵커가 없으면, Wan I2V가 클립 중반에 완전히 다른 사람이
-    // 등장해 춤추는 등 무관한 장면으로 이탈하는 사고가 확인됐다(15초처럼 긴 클립에서
-    // 특히 심함). 장면 연속성을 명시적으로 못 박는다.
-    'SINGLE CONTINUOUS SHOT (CRITICAL): this is ONE unbroken shot of the SAME person, in the SAME room/background, from the SAME camera the entire time.',
-    'FORBIDDEN for the whole clip: cutting to a different scene, a different background, a different room; a second/different person appearing or replacing her; dancing, walking away, turning around to leave, or any activity other than standing still while her clothes dissolve away.',
-    'The only motion allowed is: her clothes fading/melting off her body while she stays in the same standing pose in the same spot.',
-    'MISSION: melt ALL clothes to FULL NUDE. Forbidden stopping at bra/panties/lingerie.',
-    'FAIL A: brown belt or any waist strap left on the belly.',
-    // 실측(2026-08-22): "panties"를 여러 문단에 걸쳐 반복 나열했더니(PANTY BAN 상용구 +
-    // 별도 경고 문단) 오히려 브라·팬티 세트가 더 뚜렷하게 등장하는 역효과가 실측됐다
-    // (jeweled wrap 환각과 같은 패턴 — 금지 의도라도 명사를 여러 번 반복하면 모델이
-    // 그 명사를 그릴 개념으로 더 강하게 받아들인다). 이후 사용자 제안대로 "팬티를
-    // 지워라"는 제거(removal) 프레이밍 대신, 최종 상태의 해부학적 목표(보지·음모)를
-    // 긍정적으로 묘사하는 쪽으로 무게중심을 옮긴다 — "무엇을 없애라"가 아니라
-    // "무엇이 보여야 하는가"를 그리게 하면 옷 명사 반복을 줄일 수 있다.
-    'FAIL B: mons/vulva area still hidden under any fabric silhouette — the finished shot must show her bare vulva with natural pubic hair, not a covered crotch shape.',
-    'FAIL C: bra, bandeau, strapless bra, sports bra left on the chest.',
+    'FORBIDDEN: scene/person change, dancing, or walking away — only her clothes fade off while she stays standing in place.',
     isDualA
-      ? `TWO-BEAT TIMELINE (this clip is 100% dedicated to undressing — a separate later clip handles nude-hold, so give the dissolve the majority of THIS ${total}s clip):`
-      : `TWO-BEAT TIMELINE (equal halves of the ${total}s clip — "3등분 약속": 2 actions = half each):`,
-    `BEAT 1 (0–${dissolveDeadline}s): starts clothed, then progressively dissolve TOP + BRA + TROUSERS + BELT together — draw bare breasts and nipples exactly at the locked tajeom coords, and her bare vulva with natural pubic hair at the crotch, while fabric fades. Must be FULLY NUDE (bare breasts, bare vulva, zero belt) by the ${dissolveDeadline}s mark — do not still be mid-undress after this beat ends.`,
-    `BEAT 2 (${dissolveDeadline}–${total}s, all the way to the very last frame): fully nude — bare breasts at locked nipple points, bare abdomen/navel, bare vulva with natural pubic hair clearly visible. ZERO fabric anywhere on the torso or hips.`,
-    buildAdultPubicHairLock(corpus),
-    // 실측: BEAT만 나열하면 후반부에 다시 옷을 입은 시작 포즈로 돌아가거나(loop-back),
-    // 아예 다른 장면/인물로 이탈하는 사고가 확인됐다 — 마지막 구간 동안 나체 상태를
-    // "유지"하라는 지속(hold) 지시가 없었기 때문. 명시적으로 되돌아가기를 금지한다.
+      ? `TWO-BEAT TIMELINE (this clip is 100% dedicated to undressing — do not merge or skip a beat):`
+      : `TWO-BEAT TIMELINE ("3등분 약속" — 2 actions = half each):`,
+    `BEAT 1 (0–${dissolveDeadline}s): starts clothed, then progressively dissolve top + bra + trousers + belt together — bare breasts/nipples at the locked coords, bare vulva at the crotch. Fully nude (ZERO belt, ZERO panties) by the ${dissolveDeadline}s mark.`,
     isDualA
-      ? `HOLD (CRITICAL — this clip's LAST FRAME becomes the source photo for the next clip): once fully nude in BEAT 2 (by ${dissolveDeadline}s), STAY fully nude and STAY standing in the same spot through the very last frame — FORBIDDEN putting any clothing back on, FORBIDDEN reverting to the clothed opening pose, FORBIDDEN the clip looping back to how it started. The very last frame MUST show her bare vulva and bare breasts — it will be used as the starting photo for what happens next.`
-      : `HOLD: once fully nude in BEAT 2 (by ${dissolveDeadline}s), STAY fully nude and STAY standing in the same spot for the rest of the clip — FORBIDDEN putting any clothing back on, FORBIDDEN reverting to the clothed opening pose, FORBIDDEN the clip looping back to how it started.`,
-    buildClothingSilhouetteBodyLock(corpus),
-    buildNudeCensorFogBanLock(),
-    // become 조기 return이 장문 CAMERA 잠금을 건너뛰던 회귀 — 공통 잠금 필수
-    buildShortsCameraLock({
-      clipRole: input.clipRole,
-      undressOrNude: true,
-      endCloseUp,
-    }),
-    'LAST FRAME (this is the ending state the clip must finish on, not a transition): fully nude only, same person, same room — bare breasts AND bare vulva with visible natural pubic hair, no fabric silhouette anywhere. FAIL if bra, belt, or fog crotch remain. FAIL if breasts ignore user tajeom coords. FAIL if clothing has reappeared.',
+      ? `BEAT 2 (${dissolveDeadline}–${total}s): stay fully nude, standing in the same spot, through the very last frame — this last frame becomes the source photo for the next clip. FORBIDDEN putting clothing back on.`
+      : `BEAT 2 (${dissolveDeadline}–${total}s, all the way to the very last frame): fully nude — bare breasts at the locked points, bare vulva visible. FORBIDDEN putting any clothing back on or reverting to the clothed opening pose.`,
+    'Read breast/waist/hip size from how the clothes fit the source — keep that same volume when nude, do NOT shrink to a generic/Barbie body.',
+    'Pubic hair on the mons: fine natural dark curly strands with real texture — NOT a flat painted patch, NOT a solid ink-blob triangle.',
+    'No fog/blur/mosaic or sheer-lace-outline over the crotch — sharp bare skin, ZERO panties, ZERO belt remnant.',
+    clipRole === 'single'
+      ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
+      : buildShortsCameraLock({
+          clipRole: input.clipRole,
+          undressOrNude: true,
+          endCloseUp,
+        }),
+    'LAST FRAME: still fully nude, same face and body proportions as source — bare breasts and bare vulva visible, clothing must NOT have reappeared.',
   ]
     .filter(Boolean)
     .join(' ')
@@ -2945,7 +2935,7 @@ export function buildAnimationPrompt(input: {
       const half = bounds ? bounds[1] : 0
       const total = bounds ? bounds[2] : Math.max(2, Math.round(Number(input.durationSec) || 15))
       const plainParts = [
-        'Adult photorealistic video. Same Korean woman face and body as the input image, same room, static camera.',
+        'Adult photorealistic video. Same Korean woman: same face AND same body proportions (breast size/shape, waist, hip width) as the input image — do not slim her down, bulk her up, or resize her breasts. Same room, static camera.',
         clipRole === 'single'
           ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
           : '',
@@ -2953,9 +2943,10 @@ export function buildAnimationPrompt(input: {
           ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
           : '',
         undressAction
-          ? `In the first ${half}s (0–${half}s) she completely removes ALL clothes — top, bra, pants/jeans/shorts/skirt, AND panties. From ${half}s to ${total}s, all the way to the very last frame, she stays fully nude: bare breasts with visible nipples, bare vulva with natural pubic hair clearly visible, ZERO panties, ZERO fog or blur over the crotch.`
-          : 'She is already fully nude for the entire clip: bare breasts with visible nipples, bare vulva with natural pubic hair clearly visible, ZERO panties, ZERO fog or blur over the crotch.',
+          ? `In the first ${half}s (0–${half}s) she completely removes ALL clothes — top, bra, pants/jeans/shorts/skirt, AND panties. From ${half}s to ${total}s, all the way to the very last frame, she stays fully nude: bare breasts with visible nipples, bare vulva with natural pubic hair (fine curly strands and real texture, not a flat painted patch or solid blob) clearly visible, ZERO panties, ZERO fog or blur over the crotch.`
+          : 'She is already fully nude for the entire clip: bare breasts with visible nipples, bare vulva with natural pubic hair (fine curly strands and real texture, not a flat painted patch or solid blob) clearly visible, ZERO panties, ZERO fog or blur over the crotch.',
         motion ? `Motion: ${motion}.` : '',
+        'BODY LOCK: same breast size/shape and same waist-hip proportions as the source in every frame — do NOT make her slimmer, curvier, bustier, or flatter than the source photo.',
       ].filter(Boolean)
       return plainParts.join(' ')
     }
@@ -3040,7 +3031,7 @@ export function buildAnimationPrompt(input: {
     // "가슴을 만져본다" 계열 실패로 확인 — 무거운 락 문단들을 걷어내고 plainNudeOnly와
     // 동일한 스타일의 짧은 한 줄짜리 지시로 교체한다.
     const beats = [
-      'Adult photorealistic video. Same Korean woman face and body as the input image, same room, static camera.',
+      'Adult photorealistic video. Same Korean woman: same face AND same body proportions (breast size/shape, waist, hip width) as the input image — do not slim her down, bulk her up, or resize her breasts. Same room, static camera.',
       clipRole === 'single'
         ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
         : '',
@@ -3055,10 +3046,11 @@ export function buildAnimationPrompt(input: {
       undressAction
         ? `BEAT 1 (${beat1TimeLabel}): she pulls off ALL clothes — top, bra, pants/jeans/shorts/leggings/skirt, AND panties/thong — until fully nude with bare breasts, nipples, and bare hips/crotch (applies regardless of garment style, including fantasy/decorative outfits). ZERO panties, ZERO fog left where they were.`
         : 'BEAT 1: she is already fully nude — bare breasts, clear bare crotch, ZERO panties, ZERO fog.',
+      'Pubic hair on the mons: fine natural dark curly strands with real texture — NOT a flat painted patch, NOT a solid ink-blob triangle.',
       beat2,
       beat3,
       lastFrame,
-      'Same face identity and same body shape as the clothed source.',
+      'BODY LOCK: same face identity, and same breast size/shape and waist-hip proportions as the clothed source in every frame — do NOT make her slimmer, curvier, bustier, or flatter than the source photo.',
       motion ? `User motion: ${motion}` : '',
     ].filter(Boolean)
     return beats.join(' ')
