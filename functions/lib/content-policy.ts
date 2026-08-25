@@ -2159,26 +2159,21 @@ export function buildFreeNegativePrompt(description: string): string {
 }
 
 /**
- * 전신 나체 텍스트 수정 전용 — SDXL/Juggernaut img2img는 CLIP ~77토큰(≈65~70단어) 이후는
- * 조용히 잘려서 모델에 전혀 전달되지 않는다. 예전 버전은 lock 함수 여러 개를 그대로
- * 이어붙여 몸매 투영 분기가 11,000자(2,000단어+)까지 불어났었다 — 즉 "체형 유지"·
- * "성인 음모 텍스처" 같은 핵심 지시가 실제로는 단 한 번도 모델에 도달하지 못하고
- * 있었다(가슴 크기·음모 텍스처가 매번 임의로 나오던 신고의 핵심 원인). 이제 최우선
- * 3가지(탈의 완료·체형 유지·음모 텍스처)만 짧게 압축해 예산 안에 반드시 들어가게 한다.
+ * 전신 나체 텍스트 수정 전용 — CLIP ~77토큰 안에 탈의 지시가 앞에 오도록 짧게.
+ * 몸매 투영이면 공식 정의(얼굴·체형 고정 + 옷 페이드 용해)를 최우선.
  */
 export function buildNudeIdentityRefinePrompt(revision: string, baseDescription = ''): string {
   const rev = stripDefaultContinuityEchoes(polishKoreanPromptText(revision || ''))
   const specialized = isBodyProjectRequest(revision) || isBodyProjectRequest(rev)
-  const pubicShaved = wantsExplicitPubicShave(`${baseDescription || ''} ${rev}`)
-  const pubicClause = pubicShaved
-    ? 'pubic area smooth/shaved as requested'
-    : 'natural adult pubic hair: soft dark curly strands on the mons, not a flat painted patch or smooth doll skin'
   if (specialized) {
-    return (
-      `BODY PROJECTION: same face, same body, same pose. Remove ALL clothing — top, bra, pants, skirt, panties, thong — zero garment or belt left anywhere; bare breasts and bare crotch. ` +
-      `Keep the exact breast size, waist, and hip width — do not shrink or enlarge. ` +
-      `${pubicClause}.`
-    )
+    return [
+      buildNudeBecomesDefinitionLock(`${baseDescription || ''} ${rev}`),
+      buildNudeBodyShapeContinuityLock(`${baseDescription || ''} ${rev}`),
+      buildBodyLandmarkNudeRevealLock(),
+      'Fade-melt fabric only — nude skin appears at predicted nipple(유두) and navel(배꼽) anchors on the identical body.',
+      'Same pose, framing, faces, person count. Not a new model. Not a smile-only touch-up.',
+      'Photorealistic still — clothes must be gone; landmarks stay where the clothed silhouette implied.',
+    ].join(' ')
   }
   // 일반 나체/탈의 (「나체가 되어」등)
   // 주의: "shells, jewels, veils, wraps" 처럼 구체적인 명사를 긍정 프롬프트에 나열하면
@@ -2186,11 +2181,16 @@ export function buildNudeIdentityRefinePrompt(revision: string, baseDescription 
   // 받아들여, 크롯치 위에 오히려 보석 장식 랩(jeweled wrap)을 새로 그려 넣는 사고가
   // 실측으로 확인됐다(예전 문장의 의도와 정반대 결과). 긍정 프롬프트에는 추상적인
   // 지시만 남기고, 구체적인 장식 명사는 아래 negative prompt 쪽에서 금지어로만 쓴다.
-  const fixed =
-    `FULL NUDE: same face, same body — remove ALL clothes no matter the outfit style; bare breasts and bare crotch, zero panties or decoration left. ` +
-    `Keep the exact breast size, waist, and hip width — do not shrink or enlarge. ` +
-    `${pubicClause}.`
-  return rev ? `${fixed} User: ${rev}.` : fixed
+  return [
+    'FULL NUDE: same face and same body as source; remove all clothes — bare breasts and bare crotch, ZERO panties, ZERO fabric or decoration of any kind covering the crotch or chest.',
+    'This applies no matter how the original outfit looked — plain, formal, costume, fantasy, or illustrated/fairy-tale style — none of it is a fixed part of the body, all of it comes off completely, leaving plain bare skin (no replacement garment, no decorative covering).',
+    buildNudeBodyShapeContinuityLock(`${baseDescription || ''} ${rev}`),
+    'Keep any other person in the source — only undress the woman.',
+    'Same background and framing. Photorealistic adult photo.',
+    rev ? `User: ${rev}.` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
 }
 
 /** 텍스트 수정 / 영역 수정용 프롬프트. genMode=free면 사람 얼굴 락을 쓰지 않는다. */
