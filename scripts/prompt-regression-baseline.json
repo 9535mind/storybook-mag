@@ -1,0 +1,254 @@
+{
+  "evaluateContentPolicy/nude-ok": {
+    "allowed": true,
+    "blockedReason": null,
+    "matchedSignals": []
+  },
+  "evaluateContentPolicy/minor-blocked": {
+    "allowed": true,
+    "blockedReason": null,
+    "matchedSignals": []
+  },
+  "evaluateContentPolicy/nonconsensual-blocked": {
+    "allowed": false,
+    "blockedReason": "blocked-non-consensual",
+    "matchedSignals": [
+      "non-consensual"
+    ]
+  },
+  "evaluateContentPolicy/negated-minor-ok": {
+    "allowed": true,
+    "blockedReason": null,
+    "matchedSignals": []
+  },
+  "evaluateTaleScenePolicy/child-ok": {
+    "allowed": true,
+    "blockedReason": null,
+    "matchedSignals": []
+  },
+  "evaluateTaleScenePolicy/adult-blocked": {
+    "allowed": false,
+    "blockedReason": "blocked-adult-content",
+    "matchedSignals": [
+      "adult-content"
+    ]
+  },
+  "polishKoreanPromptText/typo-fix": "가슴을 만져본다 하고 있다",
+  "polishKoreanPromptText/empty": "",
+  "wantsNudeOrUndress/basic": true,
+  "wantsNudeOrUndress/striped-false-positive-guard": false,
+  "wantsUndressAction/basic": true,
+  "wantsDressAction/basic": true,
+  "wantsFullNude/body-project": true,
+  "isBodyProjectRequest/phrase": true,
+  "isBodyProjectRequest/flag": true,
+  "isClothingChangeRevision/swap": true,
+  "wantsJewelryAccessoryRefine/earring": true,
+  "buildJewelryAccessoryRefinePrompt/butterfly": {
+    "__type": "long-string",
+    "length": 749,
+    "words": 117,
+    "hash": "9a88b9d7b7fa8168"
+  },
+  "buildWristWatchRefinePrompt/watch+bracelet": {
+    "__type": "long-string",
+    "length": 733,
+    "words": 120,
+    "hash": "ba1d33cbfc2f67b3"
+  },
+  "buildNecklaceRefinePrompt/remove": {
+    "__type": "long-string",
+    "length": 487,
+    "words": 72,
+    "hash": "7f2035192a240bd2"
+  },
+  "buildWristAndNecklaceRefinePrompt/combo": {
+    "__type": "long-string",
+    "length": 566,
+    "words": 89,
+    "hash": "8b296f72dfbd1012"
+  },
+  "wantsSplitCompositeFix/basic": true,
+  "buildSplitCompositeFixPrompt/basic": {
+    "__type": "long-string",
+    "length": 513,
+    "words": 86,
+    "hash": "c14783429d3f9a3b"
+  },
+  "wantsExplicitPubicShave/false": false,
+  "wantsExplicitPubicShave/true": true,
+  "buildFemaleAdultAnatomyLock/default": {
+    "__type": "long-string",
+    "length": 618,
+    "words": 88,
+    "hash": "b9148556c1afdd79"
+  },
+  "buildFemaleAdultAnatomyLock/large-bust": {
+    "__type": "long-string",
+    "length": 566,
+    "words": 80,
+    "hash": "d5743e1d99868034"
+  },
+  "buildAdultPubicHairLock/default": {
+    "__type": "long-string",
+    "length": 1057,
+    "words": 167,
+    "hash": "fbc37198b2f7ab77"
+  },
+  "buildAdultPubicHairLock/shaved": "pubic area smooth/shaved ONLY because the user explicitly requested shaving/waxing",
+  "buildRealisticPubicHairRefinePrompt/default": {
+    "__type": "long-string",
+    "length": 1575,
+    "words": 251,
+    "hash": "a40960778ab9b41c"
+  },
+  "buildNippleAreolaRefinePrompt/larger": {
+    "__type": "long-string",
+    "length": 322,
+    "words": 53,
+    "hash": "19f7b21214aed1dd"
+  },
+  "buildBustHeightPreferenceLine/high": "BUST HEIGHT (user override, follow this over any clothing-based guess): breasts HIGH-set, lifted toward the upper chest near the collarbone, perkier rounded profile.",
+  "buildBustHeightPreferenceLine/low": "BUST HEIGHT (user override, follow this over any clothing-based guess): breasts LOW-set and relaxed, closer to mid-upper-arm/elbow height — not lifted, not perky.",
+  "buildBustHeightPreferenceLine/auto": "",
+  "buildClothingSilhouetteBodyLock/no-override": {
+    "__type": "long-string",
+    "length": 1743,
+    "words": 300,
+    "hash": "ffc7736eb957ef7d"
+  },
+  "buildClothingSilhouetteBodyLock/low-override": {
+    "__type": "long-string",
+    "length": 1350,
+    "words": 229,
+    "hash": "af96f2157a2fdf86"
+  },
+  "normalizeBodyLandmarks/full": {
+    "moundL": {
+      "x": 0.37,
+      "y": 0.4
+    },
+    "moundR": {
+      "x": 0.63,
+      "y": 0.41
+    },
+    "nippleL": {
+      "x": 0.38,
+      "y": 0.42
+    },
+    "nippleR": {
+      "x": 0.62,
+      "y": 0.43
+    },
+    "navel": {
+      "x": 0.5,
+      "y": 0.62
+    },
+    "breastRadius": 0.09,
+    "breastRadiusL": 0.09,
+    "breastRadiusR": 0.09
+  },
+  "normalizeBodyLandmarks/null": null,
+  "normalizeBodyLandmarks/one-side": {
+    "moundL": {
+      "x": 0.4,
+      "y": 0.4
+    },
+    "nippleL": {
+      "x": 0.4,
+      "y": 0.4
+    },
+    "breastRadius": 0.08,
+    "breastRadiusL": 0.08
+  },
+  "buildBodyLandmarkCoordsLock/full": {
+    "__type": "long-string",
+    "length": 942,
+    "words": 160,
+    "hash": "15e9fec6462b9a60"
+  },
+  "buildEqualBeatSeconds/2parts": [
+    0,
+    8,
+    15
+  ],
+  "buildEqualBeatSeconds/3parts": [
+    0,
+    7,
+    13,
+    20
+  ],
+  "amplifyAdultMotionForVideo/kiss-breast-touch-lips": {
+    "addon": "sustained breast play for most of the clip: hand stays on her bare breast, squeezing and stroking continuously continuously — not a one-second tap. mandatory deep mouth-to-mouth kissing for most of the clip — lips locked together, heads leaning in, continuous kiss (not a quick peck, not faces apart). slight natural teeth OK if lips part; no wide Hollywood grin. last frame still kissing — do not return to the source still pose. kissing while fully nude, bare breasts visible",
+    "wantsPartner": true,
+    "wantsPoseChange": true
+  },
+  "amplifyAdultMotionForVideo/kiss-vulva": {
+    "addon": "mandatory mouth-to-vulva kissing for most of the clip — a consenting adult partner's lips and mouth make continuous oral contact with her bare vulva/genitals, not a hand touch, not a peck elsewhere. last frame still kissing the bare vulva — do not return to the source still pose",
+    "wantsPartner": true,
+    "wantsPoseChange": true
+  },
+  "amplifyAdultMotionForVideo/kiss-breast-only": {
+    "addon": "mandatory mouth-to-breast kissing for most of the clip — a consenting adult partner's lips make continuous oral contact with her bare breast/nipple, not a hand-only touch, not a peck elsewhere. last frame still kissing the bare breast/nipple — do not return to the source still pose",
+    "wantsPartner": true,
+    "wantsPoseChange": true
+  },
+  "amplifyAdultMotionForVideo/knead-breast": {
+    "addon": "sustained breast play for most of the clip: hand stays on her bare breast, squeezing and stroking continuously continuously — not a one-second tap",
+    "wantsPartner": false,
+    "wantsPoseChange": true
+  },
+  "amplifyAdultMotionForVideo/undress": {
+    "addon": "",
+    "wantsPartner": false,
+    "wantsPoseChange": false
+  },
+  "buildFashionMagazinePrompt/basic": {
+    "__type": "long-string",
+    "length": 333,
+    "words": 51,
+    "hash": "3456350cd65e8bed"
+  },
+  "buildFashionNegativePrompt/nude": {
+    "__type": "long-string",
+    "length": 2597,
+    "words": 365,
+    "hash": "fc234926cc268190"
+  },
+  "buildFashionNegativePrompt/lingerie": {
+    "__type": "long-string",
+    "length": 2160,
+    "words": 303,
+    "hash": "33c532b40c217a6b"
+  },
+  "buildNudeIdentityRefinePrompt/body-project": {
+    "__type": "long-string",
+    "length": 2497,
+    "words": 400,
+    "hash": "cec71901980d0518"
+  },
+  "buildNudeIdentityRefinePrompt/general-nude": {
+    "__type": "long-string",
+    "length": 1103,
+    "words": 177,
+    "hash": "7887ab17f1c10f8b"
+  },
+  "buildNudeBecomesDefinitionLock/with-landmarks-and-height": {
+    "__type": "long-string",
+    "length": 3108,
+    "words": 515,
+    "hash": "211d0c4af14d11ab"
+  },
+  "buildAnimationPrompt/body-project-shorts": {
+    "__type": "long-string",
+    "length": 1716,
+    "words": 286,
+    "hash": "3169e36afb813689"
+  },
+  "buildAnimationPrompt/kiss-breast-touch-lips": {
+    "__type": "long-string",
+    "length": 1862,
+    "words": 322,
+    "hash": "3888864febcc8e54"
+  }
+}

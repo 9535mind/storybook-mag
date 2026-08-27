@@ -5,114 +5,33 @@
  * 유일한 하드 차단: 미성년(로리/쇼타 포함), 비동의·강간, 실존 인물 딥페이크.
  */
 
-export type ContentPolicyVerdict = {
-  allowed: boolean
-  blockedReason: string | null
-  matchedSignals: string[]
-}
-
-const NON_CONSENSUAL_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
-  { label: 'non-consensual', pattern: /강간|윤간|비동의|rape\b|non-?consensual/i },
-]
-
-const MINOR_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
-  {
-    label: 'minor-reference',
-    pattern:
-      /어린이|초등학생|중학생|고등학생|미성년|아동(?!극)|십대|청소년|loli|shota|\bchild\b|\bminor\b|\bteen(?:ager)?\b|\bkid\b|\bschoolgirl\b|로리콘|쇼타|로리\b/i,
-  },
-  {
-    // "아이"는 그 자체로 독립된 낱말(어린이)일 때만 매칭한다 — 뒤에 조사/공백/문장부호/문장끝이 와야 함.
-    // "아이보리·아이라인·아이섀도·아이템·아이콘·아이디어" 같은 색상·뷰티·IT 합성어는 "아이" 뒤에 다른 한글 음절이
-    // 바로 붙어 있어 여기 해당하지 않으므로 오탐(false positive)이 아니다.
-    label: 'minor-reference-word',
-    pattern: /아이(?=가|는|를|의|와|랑|한테|에게|처럼|보다|보고|같이|만|까지|도|야|들|[\s,.!?)\]]|$)/,
-  },
-]
-
-const REAL_PERSON_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
-  { label: 'real-person', pattern: /실제\s*인물|실존\s*인물|연예인\s*(이름|사진)|celebrity\s*likeness/i },
-]
-
-function matchAny(text: string, rules: Array<{ label: string; pattern: RegExp }>): string[] {
-  const found: string[] = []
-  for (const { label, pattern } of rules) {
-    if (pattern.test(text)) found.push(label)
-  }
-  return found
-}
-
-/**
- * 「not teen」「no child」처럼 미성년을 금지·부정하는 문구는 차단 신호가 아니다.
- * (AGE LOCK의 "not teen"이 나체 쇼츠를 통째로 막던 실측)
- */
-function stripNegatedMinorPhrases(text: string): string {
-  return String(text || '')
-    .replace(
-      /\b(?:not|no|non|never|without|forbid(?:den)?|avoid)\s*[-:]?\s*(?:a\s+|an\s+)?(?:teen(?:ager)?s?|child(?:ren)?|minor|kid|loli|shota|schoolgirl)s?\b/gi,
-      ' ',
-    )
-    .replace(/미성년\s*(?:아님|아니|금지|제외)/g, ' ')
-    .replace(/십대\s*(?:아님|아니|금지|제외)/g, ' ')
-}
-
-export function evaluateContentPolicy(
-  promptText: string,
-  _options?: { mode?: string },
-): ContentPolicyVerdict {
-  const text = stripNegatedMinorPhrases(promptText ?? '')
-
-  const minor = matchAny(text, MINOR_PATTERNS)
-  if (minor.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-minor-reference', matchedSignals: minor }
-  }
-
-  const nonConsensual = matchAny(text, NON_CONSENSUAL_PATTERNS)
-  if (nonConsensual.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-non-consensual', matchedSignals: nonConsensual }
-  }
-
-  const realPerson = matchAny(text, REAL_PERSON_PATTERNS)
-  if (realPerson.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-real-person', matchedSignals: realPerson }
-  }
-
-  return { allowed: true, blockedReason: null, matchedSignals: [] }
-}
-
-const ADULT_CONTENT_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
-  {
-    label: 'adult-content',
-    pattern:
-      /누드|나체|섹스|성기|자위|전라|속옷\s*제거|란제리|nsfw|nude|naked|porn|explicit|sexual/i,
-  },
-]
-
-/**
- * 동화 삽화(캐릭터 일관성) 전용 정책 — 화보 스튜디오와 달리 "아이/어린이" 묘사는
- * 이 기능의 정상적인 사용 목적(어린이 그림책)이므로 차단하지 않는다.
- * 실존 인물·비동의 폭력·성적 콘텐츠만 차단한다.
- */
-export function evaluateTaleScenePolicy(promptText: string): ContentPolicyVerdict {
-  const text = promptText ?? ''
-
-  const realPerson = matchAny(text, REAL_PERSON_PATTERNS)
-  if (realPerson.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-real-person', matchedSignals: realPerson }
-  }
-
-  const nonConsensual = matchAny(text, NON_CONSENSUAL_PATTERNS)
-  if (nonConsensual.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-non-consensual', matchedSignals: nonConsensual }
-  }
-
-  const adult = matchAny(text, ADULT_CONTENT_PATTERNS)
-  if (adult.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-adult-content', matchedSignals: adult }
-  }
-
-  return { allowed: true, blockedReason: null, matchedSignals: [] }
-}
+export type { ContentPolicyVerdict } from './content-policy-check'
+export { evaluateContentPolicy, evaluateTaleScenePolicy } from './content-policy-check'
+import { polishKoreanPromptText } from './korean-text'
+export { polishKoreanPromptText } from './korean-text'
+import {
+  type BodyLandmarks,
+  normalizeBodyLandmarks,
+  buildBodyLandmarkCoordsLock,
+} from './body-landmarks-lock'
+export type { BodyLandmarks } from './body-landmarks-lock'
+export { normalizeBodyLandmarks, buildBodyLandmarkCoordsLock } from './body-landmarks-lock'
+import {
+  wantsJewelryAccessoryRefine,
+  buildJewelryAccessoryRefinePrompt,
+} from './jewelry-refine-prompt'
+export {
+  wantsJewelryAccessoryRefine,
+  wantsWristAccessoryRefine,
+  wantsNecklaceRefine,
+  wantsNecklaceRemove,
+  buildJewelryAccessoryRefinePrompt,
+  buildWristWatchRefinePrompt,
+  buildNecklaceRefinePrompt,
+  buildWristAndNecklaceRefinePrompt,
+  wantsSplitCompositeFix,
+  buildSplitCompositeFixPrompt,
+} from './jewelry-refine-prompt'
 
 // 한국어는 명사와 동사 사이에 조사(을/를/이/가/은/는/도/만)가 붙는 게 훨씬 자연스러운
 // 말투다("속옷을 제거해줘", "가운만 입혀라") — 기존엔 \s*(공백만 허용)라 조사가 끼면
@@ -470,158 +389,6 @@ function isDanceRevision(description: string): boolean {
 export function wantsPubicHairOnlyRefine(revision: string): boolean {
   const t = polishKoreanPromptText(revision || '')
   return /음모|치모|체모|곱슬\s*음모|pubic\s*hair|\bbush\b/i.test(t)
-}
-
-/** 귀걸이·목걸이·시계 등 장신구만 — 전신 img2img strength↑로 인물이 사라지던 실측 분리 */
-export function wantsJewelryAccessoryRefine(revision: string): boolean {
-  const t = polishKoreanPromptText(revision || '')
-  return /귀걸이|이어링|피어싱|목걸이|초커|팔찌|반지|시계|손목시계|워치|발찌|earring|necklace|choker|bracelet|piercing|jewelry|jewellery|\bwatch\b|wristwatch|anklet/i.test(
-    t,
-  )
-}
-
-/** 손목 시계·팔찌 — 귀 마스크가 아니라 손목 마스크로 라우팅 */
-export function wantsWristAccessoryRefine(revision: string): boolean {
-  const t = polishKoreanPromptText(revision || '')
-  if (/귀걸이|이어링|earring|피어싱|piercing/i.test(t) && !/시계|워치|\bwatch\b|팔찌|bracelet|팔목/i.test(t)) {
-    return false
-  }
-  return /시계|손목시계|워치|손목|팔목|팔찌|발찌|\bwatch\b|wristwatch|bracelet|anklet/i.test(t)
-}
-
-/** 목걸이 추가·제거·변경 */
-export function wantsNecklaceRefine(revision: string): boolean {
-  const t = polishKoreanPromptText(revision || '')
-  return /목걸이|초커|펜던트|necklace|choker|pendant/i.test(t)
-}
-
-/** 목걸이 제거·없애기 */
-export function wantsNecklaceRemove(revision: string): boolean {
-  const t = polishKoreanPromptText(revision || '')
-  if (!wantsNecklaceRefine(t)) return false
-  return /제거|없애|지워|빼|삭제|벗어|빼고|없이|remove|delete|without|no\s*necklace/i.test(t)
-}
-
-/** 장신구만 추가/변경 — 얼굴·헤어·옷·배경·포즈 픽셀 유지 전제 */
-export function buildJewelryAccessoryRefinePrompt(revision: string): string {
-  const t = polishKoreanPromptText(revision || '')
-  const wrist = wantsWristAccessoryRefine(t)
-  const necklace = wantsNecklaceRefine(t)
-  if (wrist && necklace) return buildWristAndNecklaceRefinePrompt(t)
-  if (wrist) return buildWristWatchRefinePrompt(t)
-  if (necklace) return buildNecklaceRefinePrompt(t)
-  const butterfly = /나비|butterfly/i.test(t)
-  return [
-    'Local edit: ONLY change the masked ear/jewelry areas. Paint jewelry into the white mask only.',
-    butterfly
-      ? 'Add clearly visible butterfly-shaped dangling earrings on the visible ear(s) — ornate butterfly wing motif, metallic, readable at a glance.'
-      : 'Add or change the requested jewelry on the SAME woman from the source photo.',
-    'CRITICAL: keep the exact same face, hair, body, clothing, pose, background, and camera framing outside the mask — do not invent a new person or studio portrait.',
-    'FORBIDDEN inventions: surgical/medical face mask, KF94, covering the mouth/nose, new buildings, extra walls, changed sky or trees.',
-    'If the source is a profile, put the earring on the visible ear near the jaw/hairline. Do not blank the ear — the earring must be clearly visible.',
-    t ? `Jewelry request: ${t}.` : '',
-    'Photorealistic seamless inpaint, same lighting.',
-  ]
-    .filter(Boolean)
-    .join(' ')
-}
-
-/** 손목에 시계/팔찌만 — 얼굴·옷·배경 유지 */
-export function buildWristWatchRefinePrompt(revision: string): string {
-  const t = polishKoreanPromptText(revision || '')
-  const wantsWatch = /시계|워치|\bwatch\b|wristwatch/i.test(t)
-  const wantsBracelet = /팔찌|bracelet/i.test(t)
-  let addLine =
-    'Add a clearly visible wristwatch on the most prominent visible wrist — slim metal or leather strap, readable watch face, fashion editorial.'
-  if (wantsWatch && wantsBracelet) {
-    addLine =
-      'Add BOTH: a slim wristwatch on one wrist AND a slim elegant metal bracelet on the other wrist — both clearly visible, fashion editorial. Do not leave either wrist bare if both are in frame.'
-  } else if (wantsBracelet && !wantsWatch) {
-    addLine = 'Add a slim elegant bracelet on the most visible wrist — metallic, clear, fashion editorial.'
-  }
-  return [
-    'Local edit: ONLY change the masked wrist areas. Paint accessory onto visible wrists only.',
-    addLine,
-    'CRITICAL: keep the exact same face, hair, body, clothing, pose, background, and camera framing. Do not invent a new person.',
-    'FORBIDDEN: surgical face mask, new buildings, changing outfit or hair, blanking wrists without the requested accessory.',
-    'If wrists are not in frame, do not invent arms from a close-up crop — leave the image unchanged rather than inventing a new pose.',
-    t ? `Accessory request: ${t}.` : '',
-    'Photorealistic seamless inpaint, same lighting.',
-  ]
-    .filter(Boolean)
-    .join(' ')
-}
-
-/** 목걸이만 추가/제거 */
-export function buildNecklaceRefinePrompt(revision: string): string {
-  const t = polishKoreanPromptText(revision || '')
-  const remove = wantsNecklaceRemove(t)
-  return [
-    'Local edit: ONLY change the masked neck/chest necklace area.',
-    remove
-      ? 'REMOVE the necklace, chain, cross pendant, and any neck jewelry completely. Bare clean neck and upper chest skin matching the source. No chain shadow leftover.'
-      : 'Add or change the necklace as requested on the SAME woman — clear pendant/chain, fashion editorial.',
-    'CRITICAL: keep the exact same face, hair, blouse, pose, background, and framing. Do not invent a new person or change clothing.',
-    'FORBIDDEN: surgical face mask, new buildings, changing outfit.',
-    t ? `Necklace request: ${t}.` : '',
-    'Photorealistic seamless inpaint, same lighting.',
-  ]
-    .filter(Boolean)
-    .join(' ')
-}
-
-/** 손목 액세서리 + 목걸이 처리(제거 포함) 한 번에 */
-export function buildWristAndNecklaceRefinePrompt(revision: string): string {
-  const t = polishKoreanPromptText(revision || '')
-  const wantsWatch = /시계|워치|\bwatch\b|wristwatch/i.test(t)
-  const wantsBracelet = /팔찌|bracelet/i.test(t)
-  const removeNecklace = wantsNecklaceRemove(t)
-  const wristLine =
-    wantsWatch && wantsBracelet
-      ? 'On the wrists: add a slim wristwatch on one wrist AND a slim metal bracelet on the other — both clearly visible.'
-      : wantsBracelet
-        ? 'On the wrists: add a slim elegant bracelet on the most visible wrist.'
-        : 'On the wrists: add a clearly visible slim wristwatch on the most prominent wrist.'
-  const neckLine = removeNecklace
-    ? 'On the neck: REMOVE the necklace, chain, and cross pendant completely — bare clean neck matching the skin, no leftover chain.'
-    : 'On the neck: apply the necklace change as requested.'
-  return [
-    'Local edit: ONLY change the masked wrist and neck areas.',
-    wristLine,
-    neckLine,
-    'CRITICAL: keep the exact same face, hair, clothing (white blouse, red skirt), pose, studio white background, and framing. Same woman.',
-    'FORBIDDEN: surgical face mask, new buildings, changing outfit or hair, inventing a new person.',
-    t ? `Request: ${t}.` : '',
-    'Photorealistic seamless inpaint, same lighting.',
-  ]
-    .filter(Boolean)
-    .join(' ')
-}
-
-/**
- * 한 장 안에서 좌우로 옷/색/몸이 갈라진 생성 오류 수정
- * (두 패널 크롭과 다름 — 세로 이음새·반반 색 통일)
- */
-export function wantsSplitCompositeFix(revision: string): boolean {
-  const t = polishKoreanPromptText(revision || '')
-  return /갈라|반반|세로\s*나|이음|통일|하나로|한\s*벌|색\s*하나로|split\s*(?:color|outfit|composite)|half[\s-]?and[\s-]?half|merged\s*twin|세로\s*분할/i.test(
-    t,
-  )
-}
-
-/** 한 장·한 사람·한 옷으로 되돌리는 짧은 수정 프롬프트 */
-export function buildSplitCompositeFixPrompt(revision: string): string {
-  const t = polishKoreanPromptText(revision || '')
-  return [
-    'Image-to-image repair of ONE photo of ONE woman.',
-    'CRITICAL: the source wrongly shows a vertical split — left and right halves differ in clothing color or look fused. Unify into a single coherent person and a single outfit color across the whole torso.',
-    'No vertical seam down the middle, no half-and-half garment, no side-by-side twin inside one frame.',
-    'Keep the same face identity. Prefer the clearer half of the face/outfit if they conflict.',
-    'Photorealistic single portrait, not a diptych.',
-    t ? `User note: ${t}.` : '',
-  ]
-    .filter(Boolean)
-    .join(' ')
 }
 
 /** 제모·민무늬를 아주 명시했을 때만 true (bare/smooth 같은 약한 단어로는 허용하지 않음) */
@@ -1020,37 +787,6 @@ export function buildFashionNegativePrompt(descriptionOrBase: string, revision?:
     )
   }
   return extras.length ? `${base}, ${extras.join(', ')}` : base
-}
-
-/** 생성·수정 공통: 흔한 한글 오타·커서 잔여 정리 */
-export function polishKoreanPromptText(text: string): string {
-  let t = String(text || '')
-  if (!t) return ''
-  t = t.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200D\uFEFF]/g, '')
-  t = t.replace(/[|/\\]+/g, '')
-  t = t.replace(/\s+/g, ' ').trim()
-  t = t.replace(/([가-힣])\s+(게|히)(?=\s|$|[가-힣.,!?…·])/g, '$1$2')
-  t = t.replace(/하고\s*잇다/g, '하고 있다')
-  t = t.replace(/되어\s*잇다/g, '되어 있다')
-  t = t.replace(/([가-힣])잇다/g, '$1있다')
-  t = t.replace(/수정하래/g, '수정해줘')
-  t = t.replace(/([가-힣])하래(?=\s|$|[.!?…])/g, '$1해줘')
-  t = t.replace(/되엇/g, '되었')
-  t = t.replace(/햇다/g, '했다')
-  // 란제리촉옷차림 → 란제리 속옷차림
-  t = t.replace(/촉옷/g, '속옷')
-  t = t.replace(/란제리\s*속옷/g, '란제리 속옷')
-  t = t.replace(/않자/g, '앉아')
-  t = t.replace(/위애/g, '위에')
-  t = t.replace(/잇어요/g, '있어요')
-  t = t.replace(/잇다/g, '있다')
-  t = t.replace(/잆학/g, '입학')
-  t = t.replace(/입핵/g, '입학')
-  // 가습(습/슴 받침 오타) → 가슴. "가습기"(가전제품)는 실존 단어라 제외해야 한다 —
-  // 실측: "가습을 만져본다"를 "가슴을 만져본다"로 못 읽어서 가슴 터치 감지가 통째로
-  // 빠지고, 결국 동작 없는 폴백(그냥 나체 유지)으로 새서 요청한 동작이 사라졌었다.
-  t = t.replace(/가습(?!기)/g, '가슴')
-  return t.replace(/\s+/g, ' ').trim()
 }
 
 /**
@@ -1622,128 +1358,6 @@ export function isBodyProjectRequest(text: string, bodyProjectFlag?: boolean): b
   if (!t) return false
   if (/몸매\s*투영/u.test(t)) return true
   return hasNudeBecomesPhrase(t)
-}
-
-/** Normalized body landmarks (0–1, image top-left origin) placed by the user before 몸매 투영. */
-export type BodyLandmarks = {
-  /** White-circle center = breast mound center (not always equal to nipple). */
-  moundL?: { x: number; y: number }
-  moundR?: { x: number; y: number }
-  /** Red-dot = nipple; may sit off-center on the mound. Absent = user removed that side. */
-  nippleL?: { x: number; y: number }
-  nippleR?: { x: number; y: number }
-  /** Optional — UI no longer collects navel; kept for backward compat. */
-  navel?: { x: number; y: number }
-  /** Breast mound radius as fraction of min(imageW, imageH). */
-  breastRadius?: number
-  /** Per-side radii when user tuned left/right independently. */
-  breastRadiusL?: number
-  breastRadiusR?: number
-}
-
-function clamp01(n: number): number {
-  if (!Number.isFinite(n)) return 0.5
-  return Math.min(1, Math.max(0, n))
-}
-
-function clampBreastRadius(n: number, fallback = 0.08): number {
-  if (!Number.isFinite(n)) return fallback
-  return Math.min(0.22, Math.max(0.035, n))
-}
-
-/** Sanitize client landmarks; returns null if neither breast side remains. */
-export function normalizeBodyLandmarks(raw: unknown): BodyLandmarks | null {
-  if (!raw || typeof raw !== 'object') return null
-  const o = raw as Record<string, unknown>
-  const readPt = (key: string) => {
-    const p = o[key]
-    if (!p || typeof p !== 'object') return null
-    const x = Number((p as { x?: unknown }).x)
-    const y = Number((p as { y?: unknown }).y)
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null
-    return { x: clamp01(x), y: clamp01(y) }
-  }
-  const nippleL = readPt('nippleL')
-  const nippleR = readPt('nippleR')
-  // 사용자가 우클릭으로 한쪽 타점을 제거한 경우 — 남은 쪽만으로도 허용
-  if (!nippleL && !nippleR) return null
-  const moundL = nippleL ? readPt('moundL') || { ...nippleL } : undefined
-  const moundR = nippleR ? readPt('moundR') || { ...nippleR } : undefined
-  const navel = readPt('navel')
-  const br = Number(o.breastRadius)
-  const brL = Number(o.breastRadiusL)
-  const brR = Number(o.breastRadiusR)
-  const shared = Number.isFinite(br) ? clampBreastRadius(br) : 0.08
-  const breastRadiusL = nippleL
-    ? Number.isFinite(brL)
-      ? clampBreastRadius(brL, shared)
-      : shared
-    : undefined
-  const breastRadiusR = nippleR
-    ? Number.isFinite(brR)
-      ? clampBreastRadius(brR, shared)
-      : shared
-    : undefined
-  const radii = [breastRadiusL, breastRadiusR].filter((n): n is number => typeof n === 'number')
-  return {
-    ...(moundL ? { moundL } : {}),
-    ...(moundR ? { moundR } : {}),
-    ...(nippleL ? { nippleL } : {}),
-    ...(nippleR ? { nippleR } : {}),
-    ...(navel ? { navel } : {}),
-    breastRadius: radii.length ? radii.reduce((a, b) => a + b, 0) / radii.length : shared,
-    ...(breastRadiusL != null ? { breastRadiusL } : {}),
-    ...(breastRadiusR != null ? { breastRadiusR } : {}),
-  }
-}
-
-function pct(n: number): string {
-  return `${(clamp01(n) * 100).toFixed(1)}%`
-}
-
-/**
- * User-placed 타점 → exact nipple/breast/navel anchors for I2V.
- * Coords only — never paint dots onto the source; anchors must match the clothed silhouette.
- */
-export function buildBodyLandmarkCoordsLock(landmarks: BodyLandmarks): string {
-  const parts = [
-    'USER-CONFIRMED BODY LANDMARKS (normalized image coords, origin top-left) — mound center and nipple may differ:',
-  ]
-  if (landmarks.nippleL) {
-    const rL = landmarks.breastRadiusL ?? landmarks.breastRadius ?? 0.08
-    const mL = landmarks.moundL ?? landmarks.nippleL
-    parts.push(
-      `LEFT breast MOUND center at x=${pct(mL.x)} , y=${pct(mL.y)} — mound radius ≈ ${(rL * 100).toFixed(1)}% of shorter image side`,
-      `LEFT NIPPLE (red point) at x=${pct(landmarks.nippleL.x)} , y=${pct(landmarks.nippleL.y)} — place the actual nipple here; it may be off-center on the mound (not always at the circle center)`,
-    )
-  } else {
-    parts.push(
-      'LEFT breast: NO user landmark — estimate left mound/nipple from the clothed anatomy; do not invent a second face or wrong torso side',
-    )
-  }
-  if (landmarks.nippleR) {
-    const rR = landmarks.breastRadiusR ?? landmarks.breastRadius ?? 0.08
-    const mR = landmarks.moundR ?? landmarks.nippleR
-    parts.push(
-      `RIGHT breast MOUND center at x=${pct(mR.x)} , y=${pct(mR.y)} — mound radius ≈ ${(rR * 100).toFixed(1)}% of shorter image side`,
-      `RIGHT NIPPLE (red point) at x=${pct(landmarks.nippleR.x)} , y=${pct(landmarks.nippleR.y)} — place the actual nipple here; off-center OK`,
-    )
-  } else {
-    parts.push(
-      'RIGHT breast: NO user landmark — estimate right mound/nipple from the clothed anatomy; do not invent a second face or wrong torso side',
-    )
-  }
-  if (landmarks.navel) {
-    parts.push(
-      `NAVEL at x=${pct(landmarks.navel.x)} from left, y=${pct(landmarks.navel.y)} from top`,
-    )
-  }
-  parts.push(
-    'Draw soft breast volume around each PROVIDED MOUND center; put nipples exactly at the provided nipple coords — FORBIDDEN forcing nipples to geometric circle centers if the red points are offset',
-    'The source image has NO painted circles or dots — use only these coordinates',
-    'Do NOT move nipples to face/neck/shoulder; do NOT shrink the bust away from these anchors',
-  )
-  return parts.join('. ')
 }
 
 /**

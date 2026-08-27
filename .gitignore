@@ -8,3 +8,7 @@ tmp/
 _become.txt
 _lean.txt
 *.hwp
+_tmp_bundle/
+_tmp_*.txt
+_tmp_*.mjs
+_tmp_*.cjs
