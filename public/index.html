@@ -428,6 +428,24 @@
             일반 나체는 「누드」「나체가 되어」등. 체형 유지 탈의 영상은 「몸매 투영 쇼츠」.
             <strong>진짜 두 칸</strong>만 아래 자르기.
           </p>
+          <div class="form__field" style="margin-top: 0.5rem">
+            <span class="form__label" id="bust-height-label">가슴 높이 (나체 변환 시)</span>
+            <div
+              id="bust-height-select"
+              class="video-duration"
+              role="group"
+              aria-labelledby="bust-height-label"
+              data-bust-height="auto"
+            >
+              <button type="button" class="video-duration__btn is-active" data-bust-height="auto">자동</button>
+              <button type="button" class="video-duration__btn" data-bust-height="high">높게</button>
+              <button type="button" class="video-duration__btn" data-bust-height="mid">중간</button>
+              <button type="button" class="video-duration__btn" data-bust-height="low">낮게</button>
+            </div>
+            <p class="form__hint" style="margin-top: 6px">
+              자동 = 사진 속 팔·어깨로 AI가 추정(애매하면 살짝 낮게). 애매한 추정이 자꾸 빗나가면 높게/중간/낮게를 직접 고르세요.
+            </p>
+          </div>
           <label class="revise-panel__two-people">
             <input type="checkbox" id="revise-two-people" />
             이 사진에는 두 사람이 있어요 (커플/2인) — 체크하면 두 번째 인물을 그대로 유지하도록 잠금이 자동 조정됩니다
@@ -527,6 +545,24 @@
             <button type="button" class="video-duration__btn is-active" data-speed="normal">보통</button>
             <button type="button" class="video-duration__btn" data-speed="fast">빠르게</button>
           </div>
+        </div>
+        <div class="form__field" style="margin-top: 0.75rem">
+          <span class="form__label" id="bust-height-label-shorts">가슴 높이 (나체 시)</span>
+          <div
+            id="bust-height-select-shorts"
+            class="video-duration"
+            role="group"
+            aria-labelledby="bust-height-label-shorts"
+            data-bust-height="auto"
+          >
+            <button type="button" class="video-duration__btn is-active" data-bust-height="auto">자동</button>
+            <button type="button" class="video-duration__btn" data-bust-height="high">높게</button>
+            <button type="button" class="video-duration__btn" data-bust-height="mid">중간</button>
+            <button type="button" class="video-duration__btn" data-bust-height="low">낮게</button>
+          </div>
+          <p class="form__hint" style="margin-top: 6px">
+            자동 = AI가 팔·어깨로 추정(애매하면 살짝 낮게). 계속 빗나가면 높게/중간/낮게를 직접 고르세요.
+          </p>
         </div>
         <div class="animate-panel__actions">
           <button

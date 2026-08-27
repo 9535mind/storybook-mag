@@ -95,6 +95,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     landmarks?: unknown
     /** single | dual-a | dual-b — 줌 연출은 dual만 */
     clipRole?: string
+    /** 사용자가 직접 고른 가슴 높이(high/mid/low) — 없거나 'auto'면 기존 추정 로직 사용 */
+    bustHeight?: string
   }
   try {
     body = await request.json()
@@ -121,6 +123,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const originalPrompt = truncatePromptAtBoundary((body.prompt ?? '').trim(), ANIMATE_PROMPT_MAX_CHARS)
   const bodyProjectFlag = body.bodyProject === true
+  const bustHeight = ['high', 'mid', 'low'].includes(body.bustHeight ?? '') ? body.bustHeight : undefined
   // BEAT 타임라인을 "3등분 약속"(실제 초 단위)에 맞춰 표기하려면 프롬프트 빌드 전에 필요.
   const requestedDurationSec =
     typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 15
@@ -214,6 +217,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         landmarks,
         bodyProject: true,
         durationSec: approxDurationSec,
+        bustHeight,
       })
     : buildAnimationPrompt({
         prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
@@ -222,6 +226,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         clipRole,
         landmarks,
         durationSec: approxDurationSec,
+        bustHeight,
       })
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'

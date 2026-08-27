@@ -262,6 +262,8 @@ const videoResultSection = document.getElementById('video-result')
 const resultVideo = document.getElementById('result-video')
 const videoDurationGroup = document.getElementById('video-duration')
 const videoSpeedGroup = document.getElementById('video-speed')
+const bustHeightGroup = document.getElementById('bust-height-select')
+const bustHeightGroupShorts = document.getElementById('bust-height-select-shorts')
 
 const VIDEO_PLAYBACK_RATES = { slow: 0.75, normal: 1, fast: 1.35 }
 const VIDEO_MOTION_HINTS = {
@@ -516,6 +518,40 @@ function setSelectedVideoSpeed(speed) {
   })
   applyVideoPlaybackRate()
 }
+
+const BUST_HEIGHT_VALUES = ['auto', 'high', 'mid', 'low']
+
+function getBustHeightFrom(group) {
+  const v = group?.dataset?.bustHeight || 'auto'
+  return BUST_HEIGHT_VALUES.includes(v) ? v : 'auto'
+}
+
+function setBustHeightOn(group, value) {
+  const v = BUST_HEIGHT_VALUES.includes(value) ? value : 'auto'
+  if (group) group.dataset.bustHeight = v
+  group?.querySelectorAll('[data-bust-height]').forEach((btn) => {
+    btn.classList.toggle('is-active', btn.getAttribute('data-bust-height') === v)
+  })
+}
+
+function getSelectedBustHeight() {
+  return getBustHeightFrom(bustHeightGroup)
+}
+
+function getSelectedBustHeightShorts() {
+  return getBustHeightFrom(bustHeightGroupShorts)
+}
+
+bustHeightGroup?.querySelectorAll('[data-bust-height]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    setBustHeightOn(bustHeightGroup, btn.getAttribute('data-bust-height'))
+  })
+})
+bustHeightGroupShorts?.querySelectorAll('[data-bust-height]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    setBustHeightOn(bustHeightGroupShorts, btn.getAttribute('data-bust-height'))
+  })
+})
 
 function applyVideoPlaybackRate() {
   if (!resultVideo) return
@@ -3484,6 +3520,7 @@ async function requestAnimate(options = {}) {
         bodyProject: bodyProject || undefined,
         landmarks: bodyProject && landmarks ? landmarks : undefined,
         clipRole: options.clipRole === 'dual-a' || options.clipRole === 'dual-b' ? options.clipRole : 'single',
+        bustHeight: getSelectedBustHeightShorts(),
       }),
     })
     const rawText = await response.text()
@@ -4731,6 +4768,7 @@ reviseApplyButton.addEventListener('click', async () => {
         mood: currentResult.mood,
         size: currentResult.size || sizeField?.value || 'landscape',
         regionCount: ensureReviseLasso()?.getRegions?.().length || 0,
+        bustHeight: getSelectedBustHeight(),
       }),
     })
     const rawText = await response.text()

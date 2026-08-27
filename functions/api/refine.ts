@@ -110,6 +110,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     revision?: string
     /** 「몸매 투영」버튼 — 문구 규칙 없이 체형 유지 탈의 경로 */
     bodyProject?: boolean
+    /** 사용자가 직접 고른 가슴 높이(high/mid/low) — 없거나 'auto'면 기존 추정 로직 사용 */
+    bustHeight?: string
     maskDataUrl?: string
     mood?: string
     size?: string
@@ -122,6 +124,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const bodyProjectFlag = body.bodyProject === true
+  const bustHeight = ['high', 'mid', 'low'].includes(body.bustHeight ?? '') ? body.bustHeight : undefined
   const mode = body.mode === 'region' ? 'region' : 'text'
   // 화보 모드는 아래의 화보 전용 img2img/재생성 경로를 타야 하므로, genMode='fashion'이면
   // 자유 장면 재생성 블록을 건너뛰게 한다(예전엔 여기서 무조건 'free'로 강제해서, 화보
@@ -536,7 +539,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const nudeBecomesHit = isBodyProjectRequest(revision, bodyProjectFlag)
   let prompt =
     nudeBecomesHit && mode === 'text' && genMode === 'fashion' && !animalSubject
-      ? buildNudeIdentityRefinePrompt(revision, baseDescription)
+      ? buildNudeIdentityRefinePrompt(revision, baseDescription, bustHeight)
       : buildRefinePrompt({
           baseDescription: baseDescriptionForPrompt,
           revision: revisionForPrompt,
@@ -1047,7 +1050,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         (usePrecision || pubicHairOnly || splitCompositeFix) && !nudeLightning
       const nudePrompt =
         nudeBecomesHit || fullNudeOutcome
-          ? buildNudeIdentityRefinePrompt(revision, baseDescription)
+          ? buildNudeIdentityRefinePrompt(revision, baseDescription, bustHeight)
           : prompt
       const { imageUrl: nextUrl } = await refineReplicateImageToImage({
         apiToken: env.REPLICATE_API_TOKEN,
@@ -1148,7 +1151,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // 상의만 벗기면 팬티가 남는 회귀 → 하반신·속옷 제거를 같은 문장에 명시
       const inpaintPrompt = nudeBecomesHit
         ? [
-            buildNudeBecomesDefinitionLock(),
+            buildNudeBecomesDefinitionLock('', null, bustHeight),
             'Local edit: melt clothing on the masked body to transparency — same body projection, fully nude.',
             'Bare breasts with nipples, bare crotch. Face outside mask stays exact. No smile-only result.',
             'Keep other people in frame. Photorealistic.',

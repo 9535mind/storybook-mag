@@ -133,10 +133,15 @@ const KO_CLOTHING_NOUN =
 // "벗다"뿐 아니라 "제거/없애/지우다"도 실제로 쓰이는 탈의 표현이다. 동사 어간만 매칭해서
 // 활용형(제거하다/제거해줘/제거하라, 없애다/없애줘/없애라, 지우다/지워줘/지워라, 벗다/
 // 벗어/벗겨/벗기/벗김/벗을/벗었 등)을 활용형 하나하나 나열하지 않고 전부 커버한다.
-const KO_REMOVE_VERB_STEM = '(?:제거|없애|지워|지우|벗)'
+// 주의: "없애"/"지우"는 모음 어간이라 평서형 "-ㄴ다"에서 어간 끝음절이 사라진다
+// (없애+ㄴ다→없앤다, 지우+ㄴ다→지운다 — "없애"/"지우" 글자가 결과 문자열에 없음).
+// "벗"·"제거"는 자음 종성(ㅅ)이거나 명사+하다 합성어라 이 문제가 없어 안전하다.
+const KO_REMOVE_VERB_STEM = '(?:제거|없애|없앤|지워|지우|지운|벗)'
 
 // 반대 방향(착의) 동사 어간 — 입다/착용하다/걸치다/두르다/씌우다의 모든 활용형을 어간만으로 커버.
-const KO_DRESS_VERB_STEM = '(?:입|착용|걸치|두르|씌우)'
+// 주의: "걸치"/"두르"/"씌우"도 모음 어간이라 "-ㄴ다"에서 어간이 바뀐다
+// (걸치+ㄴ다→걸친다, 두르+ㄴ다→두른다, 씌우+ㄴ다→씌운다) — 활용형을 추가로 넣어야 한다.
+const KO_DRESS_VERB_STEM = '(?:입|착용|걸치|걸친|두르|두른|씌우|씌운)'
 
 // "바꾸다/교체하다/변경하다/대체하다/A 대신 B" — 명사 바로 옆이 아니라 문장 뒤쪽에 오는
 // 경우가 많아(예: "바지를 스커트로 바꿔줘") 인접 매칭 대신 문장 전체에서 별도로 검사한다.
@@ -661,7 +666,8 @@ export function buildAdultPubicHairLock(text = ''): string {
   return [
     'MANDATORY photorealistic adult pubic hair: soft dark-brown natural CURLS with visible separate strands on the mons pubis (곱슬·가닥)',
     'hair looks like real coiled hair in soft clumps — NOT grainy stipple, NOT sandpaper noise, NOT 5-o’clock shadow stubble, NOT a painted ink blob',
-    'natural adult density: fuller on the mons, slightly thinner toward the edges — not a harsh horizontal band',
+    'COMPACT SHAPE: a modest, neatly-contained patch centered on the mons pubis only — NOT spreading wide onto the inner thighs or groin creases, NOT scraggly stray wisps trailing outward at the edges; a clean, soft-edged perimeter',
+    'DENSE VOLUME within that compact patch: full, curly, richly coiled hair packed close together — not sparse or thin, not a harsh horizontal band',
     'vulva anatomy realistic for an adult woman: soft natural labia, gentle cleft — NOT clamped tightly shut, NOT oversized sealed Barbie seam, NOT cartoon slit',
     'CRITICAL SAFETY: FORBIDDEN hairless/smooth blank crotch that reads as non-adult',
     'FORBIDDEN: fabric underwear, thong, briefs, lace bottoms covering the crotch — bare skin + natural hair only',
@@ -714,14 +720,40 @@ export function buildNippleAreolaRefinePrompt(revision: string): string {
 }
 
 /**
+ * 가슴 높이 — 사용자가 직접 고르는 명시적 오버라이드.
+ * "애매할 때만 살짝 더 낮게" 자동 추정이 여러 번 빗나간다는 사용자 피드백(2026-08-27)에
+ * 따라, 옷 실루엣/팔꿈치 랜드마크로 추측하는 대신 사용자가 높게/중간/낮게를 직접 못박을
+ * 수 있게 한다. 'auto'(기본, 미선택)면 빈 문자열 — 기존 추정 로직을 그대로 쓴다.
+ */
+export type BustHeightPreference = 'auto' | 'high' | 'mid' | 'low'
+
+export function buildBustHeightPreferenceLine(pref?: string): string {
+  switch (pref) {
+    case 'high':
+      return 'BUST HEIGHT (user override, follow this over any clothing-based guess): breasts HIGH-set, lifted toward the upper chest near the collarbone, perkier rounded profile.'
+    case 'mid':
+      return 'BUST HEIGHT (user override, follow this over any clothing-based guess): breasts at a NATURAL MID height on the chest — neither lifted high nor drooping low.'
+    case 'low':
+      return 'BUST HEIGHT (user override, follow this over any clothing-based guess): breasts LOW-set and relaxed, closer to mid-upper-arm/elbow height — not lifted, not perky.'
+    default:
+      return ''
+  }
+}
+
+/**
  * 옷이 달라붙어 보이는 실루엣 = 나체/영상에서도 같은 몸매.
  * (타이트한 상의의 큰 가슴 → 나체에 바비형 빈유로 바뀌는 실망 방지)
  */
-export function buildClothingSilhouetteBodyLock(text = ''): string {
+export function buildClothingSilhouetteBodyLock(text = '', bustHeight?: string): string {
   const t = polishKoreanPromptText(text || '')
+  const heightOverride = buildBustHeightPreferenceLine(bustHeight)
   const bits = [
     'CLOTHING SILHOUETTE → BODY LOCK: read breast size, waist, hips, and overall figure from how the clothes fit in the source photo — nude or video must match that implied body, not a generic Barbie doll',
-    'BUST HEIGHT from arm landmarks: compare the chest mound under the shirt to the shoulder, upper arm (bicep), and elbow — if fabric volume sits low toward mid-upper-arm / near elbow height, keep LOWER-set breasts (not high Barbie bust under the collarbone)',
+    heightOverride ||
+      'BUST HEIGHT from arm landmarks: compare the chest mound under the shirt to the shoulder, upper arm (bicep), and elbow — if fabric volume sits low toward mid-upper-arm / near elbow height, keep LOWER-set breasts (not high Barbie bust under the collarbone)',
+    heightOverride
+      ? ''
+      : 'if the arm/elbow landmarks are unclear or hard to read from the photo, default to a slightly LOWER, natural relaxed bust placement rather than a lifted/perky high-set one — a natural drop is safer than an artificially raised bust when in doubt',
     'BUST VOLUME from chest print/ruffles: if lettering or lace sits on a forward-projecting chest and the tee/blouse lifts off the ribs, read FULL adult volume about full-C to D cup — FORBIDDEN collapsing to flat 빈유 or tiny A/B when the clothed chest clearly projects',
     'if the outfit shows a full/large bust under fabric, keep LARGE full breasts when nude — FORBIDDEN tiny barbie breasts, flat doll chest, or shrinking the bust after undress',
     'if frontal clothing makes bust hard to read, prefer soft FULL breast volume (볼륨감, ~C½–D) over flat empty 빈유 — volume is safer than underestimating',
@@ -738,7 +770,7 @@ export function buildClothingSilhouetteBodyLock(text = ''): string {
   if (/글래머|풍만|curvy|hourglass|글래머체/i.test(t)) {
     bits.push('curvy hourglass continuity — full bust, defined waist, hips matching the clothed silhouette')
   }
-  return bits.join('. ') + '.'
+  return bits.filter(Boolean).join('. ') + '.'
 }
 
 /**
@@ -1717,28 +1749,36 @@ export function buildBodyLandmarkCoordsLock(landmarks: BodyLandmarks): string {
 /**
  * 몸매 투영 — 착의 → 실루엣 예측 → 옷이 약하게 보이며 페이드로 녹음 → 같은 체형.
  */
-export function buildNudeBecomesDefinitionLock(_corpus = '', landmarks?: BodyLandmarks | null): string {
-  // 같은 얼굴/체형 + 옷 아래 유두·배꼽·치부 기점 → 상의·바지·치마·팬티 전부 제거
+export function buildNudeBecomesDefinitionLock(
+  _corpus = '',
+  landmarks?: BodyLandmarks | null,
+  bustHeight?: string,
+): string {
+  // 실측(2026-08-27): 이 함수가 buildPantyLayerBanLock·buildUnderbustGarmentRemnantBanLock·
+  // buildClothingSilhouetteBodyLock·buildBodyLandmarkNudeRevealLock을 전부 이어붙이면서
+  // buildBodyLandmarkNudeRevealLock이 내부적으로 앞의 두 락을 다시 호출해 팬티/언더버스트
+  // 문단이 2~3중 중복되어 8,000~11,000자까지 폭주했다. leanIntimate/plainNudeOnly(쇼츠)는
+  // 이미 짧게 압축돼 있었는데 이 「몸매 투영」 정지 이미지 경로만 압축이 안 된 채 남아
+  // 있었던 것이 유두 스와이럴/타겟 무늬·돌 같은 얼굴·가슴 위치 드리프트의 실제 원인.
+  // 아래는 같은 내용을 중복 없이 한 번씩만 짧게 담은 버전.
   const step1 = landmarks
-    ? 'STEP 1 USE USER 타점 on THIS photo: draw breast mounds and nipples exactly at the locked left/right coords that sit on the real clothed chest — do not re-guess or drift to neck/shoulder.'
-    : 'STEP 1 PREDICT under clothes: nipple (유두) height from shoulder/upper-arm/elbow landmarks on the clothed bust mound; navel (배꼽) on the torso midline at the natural waist (ignore any belt — the belt must be removed, not used as a keep-guide); pubic mound under pants/skirt.'
+    ? 'Use the locked left/right coords on THIS photo for breast mound and nipple placement — do not re-guess or drift to neck/shoulder.'
+    : 'Predict nipple (유두) height from shoulder → upper-arm → elbow landmarks on the clothed bust mound (often mid-upper-arm, not automatically under the collarbone); navel (배꼽) on the torso midline at the natural waist; pubic mound under the fabric.'
   return [
-    'BOTTOM BAN FIRST (몸매 투영): pants, jeans, trousers, slacks, skirt, shorts, panties, thong, briefs, bikini bottoms, belts, waistbands — ALL must leave the body and exit the frame.',
-    'FAILED results: topless but still in pants; nude top with jeans; white/sheer/double-layer panties left on; brown waist belt still strapped on the abdomen. Lower garments and belts must vanish completely.',
-    buildPantyLayerBanLock(),
-    'BODY PROJECTION = landmark reveal, not a new body.',
+    'BODY PROJECTION = landmark reveal, not a new body. Same face, same body, same pose, same person count — do not invent anyone.',
     buildFaceFrozenLock(),
-    'SAME BODY: keep the exact people, faces, poses, person count from the source photo — do not invent anyone.',
     landmarks ? buildBodyLandmarkCoordsLock(landmarks) : '',
     step1,
-    'STEP 2 LOCK those nipple, navel, and crotch landmarks — they must not drift after clothes disappear.',
-    'STEP 3 REVEAL: clothes WEAKEN then fade — EVERY layer vanishes (blouse/top AND pants/jeans/skirt/shorts AND belt/waistband AND underwear); redraw continuous bare skin from underbust through navel to hips — no leftover strip.',
-    'BUST: soft full volume around the nipple anchors (full-C to D when clothed chest projects) — FORBIDDEN high tiny barbie bust or flat 빈유 away from the markers.',
-    buildUnderbustGarmentRemnantBanLock(),
-    buildClothingSilhouetteBodyLock(_corpus),
-    buildBodyLandmarkNudeRevealLock(),
-    'END: fully nude — bare breasts with volume at the marked points, bare underbust/abdomen with ZERO belt remnant, bare navel, bare legs and crotch; ZERO pants, ZERO jeans, ZERO panties, ZERO belt. FORBIDDEN: new figure, gender swap, ending still in trousers, brown band under breasts.',
-    buildNudeCensorFogBanLock(),
+    'Remove ALL clothing completely and keep it off: top/bra, pants/jeans/skirt/shorts, belt/waistband, AND panties/thong/briefs — every layer leaves the body, none stay on. FAILED: topless but still in pants, belt/waistband remnant under the breasts, or any panty layer left on.',
+    bustHeight && bustHeight !== 'auto'
+      ? 'BUST: soft full volume at the nipple anchors — read from how the clothes fit (full-C to D when the chest projects); when unsure, prefer fuller over flat 빈유.'
+      : 'BUST: soft full volume at the nipple anchors — read from how the clothes fit (full-C to D when the chest projects); when unsure, prefer fuller over flat 빈유; if arm/elbow landmarks are unclear, default to a slightly LOWER natural bust placement rather than a lifted perky one.',
+    buildBustHeightPreferenceLine(bustHeight),
+    'Nipples/areola: plain natural skin, soft pinkish-brown — FORBIDDEN spiral, swirl, ring, target, pinwheel, tattoo, or any printed graphic pattern on the breast.',
+    'Pubic hair on the mons: a compact, neatly-contained patch of dense dark curly coils — NOT wide straggly wisps spreading onto the thighs or navel, NOT a flat painted patch.',
+    'Bare skin must be continuous from underbust through navel to crotch — ZERO belt/strap/buckle remnant under the breasts, ZERO brown horizontal band on the abdomen.',
+    'FORBIDDEN foggy blur, mosaic, or censor smear over the crotch — sharp uncensored bare skin with natural pubic hair.',
+    'Keep the exact same breast size, waist width, and hip width the person already has — do not shrink, flatten, or generic-ify into a smaller doll-like body.',
   ]
     .filter(Boolean)
     .join(' ')
@@ -1770,6 +1810,8 @@ export function buildNudeBecomesAnimationPrompt(input: {
   landmarks?: BodyLandmarks | null
   /** 실제 클립 길이(초) — BEAT 구간을 "3등분 약속"(2동작=반반)에 맞춰 구체적 초로 표기 */
   durationSec?: number
+  /** 사용자가 UI에서 직접 고른 가슴 높이(high/mid/low) — 없으면(auto) 기존 추정 로직 사용 */
+  bustHeight?: string
 }): string {
   // Wan I2V ignores long essays; belt/bra/panties stick to source pixels.
   // Lead with USER coords, then a short beat script that bans lingerie stop.
@@ -1815,7 +1857,8 @@ export function buildNudeBecomesAnimationPrompt(input: {
       ? `BEAT 2 (${dissolveDeadline}–${total}s): stay fully nude, standing in the same spot, through the very last frame — this last frame becomes the source photo for the next clip. FORBIDDEN putting clothing back on.`
       : `BEAT 2 (${dissolveDeadline}–${total}s, all the way to the very last frame): fully nude — bare breasts at the locked points, bare vulva visible. FORBIDDEN putting any clothing back on or reverting to the clothed opening pose.`,
     'Read breast/waist/hip size from how the clothes fit the source — keep that same volume when nude, do NOT shrink to a generic/Barbie body.',
-    'Pubic hair on the mons: fine natural dark curly strands with real texture — NOT a flat painted patch, NOT a solid ink-blob triangle.',
+    buildBustHeightPreferenceLine(input.bustHeight),
+    'Pubic hair on the mons: a compact, neatly-contained patch of dense dark curly coils — NOT wide straggly wisps spreading onto the thighs, NOT a flat painted patch.',
     'No fog/blur/mosaic or sheer-lace-outline over the crotch — sharp bare skin, ZERO panties, ZERO belt remnant.',
     clipRole === 'single'
       ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
@@ -2163,17 +2206,18 @@ export function buildFreeNegativePrompt(description: string): string {
  * 전신 나체 텍스트 수정 전용 — CLIP ~77토큰 안에 탈의 지시가 앞에 오도록 짧게.
  * 몸매 투영이면 공식 정의(얼굴·체형 고정 + 옷 페이드 용해)를 최우선.
  */
-export function buildNudeIdentityRefinePrompt(revision: string, baseDescription = ''): string {
+export function buildNudeIdentityRefinePrompt(
+  revision: string,
+  baseDescription = '',
+  bustHeight?: string,
+): string {
   const rev = stripDefaultContinuityEchoes(polishKoreanPromptText(revision || ''))
   const specialized = isBodyProjectRequest(revision) || isBodyProjectRequest(rev)
   if (specialized) {
     return [
-      buildNudeBecomesDefinitionLock(`${baseDescription || ''} ${rev}`),
-      buildNudeBodyShapeContinuityLock(`${baseDescription || ''} ${rev}`),
-      buildBodyLandmarkNudeRevealLock(),
-      'Fade-melt fabric only — nude skin appears at predicted nipple(유두) and navel(배꼽) anchors on the identical body.',
-      'Same pose, framing, faces, person count. Not a new model. Not a smile-only touch-up.',
-      'Photorealistic still — clothes must be gone; landmarks stay where the clothed silhouette implied.',
+      buildNudeBecomesDefinitionLock(`${baseDescription || ''} ${rev}`, null, bustHeight),
+      'Fade-melt fabric only — nude skin appears at predicted nipple(유두) and navel(배꼽) anchors on the identical body. Not a new model, not a smile-only touch-up.',
+      'Same background and framing. Photorealistic adult photo.',
     ].join(' ')
   }
   // 일반 나체/탈의 (「나체가 되어」등)
@@ -2185,6 +2229,8 @@ export function buildNudeIdentityRefinePrompt(revision: string, baseDescription 
   return [
     'FULL NUDE: same face and same body as source; remove all clothes — bare breasts and bare crotch, ZERO panties, ZERO fabric or decoration of any kind covering the crotch or chest.',
     'This applies no matter how the original outfit looked — plain, formal, costume, fantasy, or illustrated/fairy-tale style — none of it is a fixed part of the body, all of it comes off completely, leaving plain bare skin (no replacement garment, no decorative covering).',
+    'Nipples/areola: plain natural skin, soft pinkish-brown — FORBIDDEN spiral, swirl, ring, target, pinwheel, tattoo, or any printed graphic pattern on the breast.',
+    buildBustHeightPreferenceLine(bustHeight),
     buildNudeBodyShapeContinuityLock(`${baseDescription || ''} ${rev}`),
     'Keep any other person in the source — only undress the woman.',
     'Same background and framing. Photorealistic adult photo.',
@@ -2383,13 +2429,65 @@ function truncateContinuityText(text: string, maxLen: number): string {
  * 한국어 활용형(축약·불규칙)까지 커버: 예) 만지다→만진다/만져(지+어=져 축약),
  * 누르다→눌러(르-불규칙), 비틀다→비트는(ㄹ 탈락), 당기다→당겨(기+어=겨 축약).
  * 어간이 자음으로 끝나는 동사(꼬집다·긁다·핥다 등)는 활용해도 어간이 안 사라져 안전하다.
+ *
+ * 주의(실측 버그): 「르-불규칙」 동사(주무르다·누르다·문지르다·찌르다·비틀다 등)는
+ * 평서형 현재("-ㄴ다")에서 마지막 음절 "르"가 "ㄴ"과 합쳐져 "른/눈"처럼 변하고
+ * 원래 어간 글자가 문자열에서 사라진다 — 예) "주무른다"에는 "주무르"가 문자 그대로
+ * 들어있지 않다(주무르+ㄴ다 → 주무른다). 이 형태를 안 넣으면 "가슴을 주무른다" 같은
+ * 아주 흔한 문장이 "동작 없음"으로 잘못 판정돼 모션 지시가 통째로 빠지는 사고가 난다.
  */
 const TOUCH_ACTION_VERBS_KO =
   '만지|만져|만진|만졌|만질|쓰다듬|어루만지|어루만져|어루만진|어루만졌|스치|스쳐|' +
-  '주무르|주물러|주물렀|문지르|문질러|문질렀|비비|비벼|비빈|비볐|' +
-  '꼬집|비틀어|비틀고|비틀었|비트는|누르|눌러|눌렀|짓누르|짓눌러|' +
-  '움켜쥐|잡아당기|잡아당겨|당기|당겨|당긴|당겼|쥐어짜|' +
-  '긁어|긁고|긁는|깨물어|깨물고|깨무는|깨물었|튕기|튕겨|튕긴|튕겼|찌르|찔러|찔렀'
+  '주무르|주물러|주물렀|주무른|문지르|문질러|문질렀|문지른|비비|비벼|비빈|비볐|' +
+  '꼬집|비틀어|비틀고|비틀었|비트는|비튼|누르|눌러|눌렀|누른|짓누르|짓눌러|짓누른|' +
+  '움켜쥐|잡아당기|잡아당겨|당기|당겨|당긴|당겼|쥐어짜|쥐어짠|' +
+  '긁어|긁고|긁는|깨물어|깨물고|깨무는|깨물었|튕기|튕겨|튕긴|튕겼|찌르|찔러|찔렀|찌른'
+
+/**
+ * 「가슴을 만지고 입술에 딮키스한다」처럼 "가슴"(터치 대상)과 "키스/입술"(별개 동작의
+ * 대상)이 한 문장에 같이 있으면, 예전 정규식(거리 8자 이내면 매칭)이 "가슴에 키스"로
+ * 잘못 인식해 실제 요청(입-입 딥키스 + 손으로 가슴 터치)과 다르게 가슴에 입으로 키스하는
+ * 결과가 나왔다(실측, 2026-08-28). "가슴을 만지고"의 "만지고"처럼 별도 터치 동사가 그
+ * 사이에 끼어 있으면 "그 부위에 입맞춤"이 아니라 "손 터치 + (다른 대상) 키스"라는 뜻이므로,
+ * 대상 부위와 키스 단어 사이에 터치 동사가 없을 때만 "그 부위 키스"로 판정한다.
+ */
+function detectKissBodyTarget(text: string): 'vulva' | 'breast' | null {
+  const kissWordRe = /입\s*(?:을\s*)?맞|입술|키스/
+  const touchVerbRe = new RegExp(TOUCH_ACTION_VERBS_KO, 'i')
+  // bodyPartRe는 'g' 없이 매번 새 substring에 exec — lastIndex 상태를 공유하지 않아 안전.
+  const findTarget = (bodyPartRe: RegExp): boolean => {
+    let searchFrom = 0
+    while (searchFrom < text.length) {
+      const remainder = text.slice(searchFrom)
+      const bodyMatch = bodyPartRe.exec(remainder)
+      if (!bodyMatch) return false
+      const bodyEnd = searchFrom + bodyMatch.index + bodyMatch[0].length
+      const after = text.slice(bodyEnd)
+      const kissMatch = kissWordRe.exec(after)
+      if (kissMatch) {
+        const between = after.slice(0, kissMatch.index)
+        // 조사(에/을/를 등)·공백·짧은 부사 정도만 허용 — 별도 터치 동사나 너무 먼 거리는
+        // 「그 부위에 키스」가 아니라 별개 동작으로 본다.
+        if (!touchVerbRe.test(between) && between.length <= 10) return true
+      }
+      searchFrom = bodyEnd
+    }
+    return false
+  }
+  if (
+    findTarget(/보지|음부|성기|클리토리스|클리|외음|사타구니|가랑이/i) ||
+    /kiss(?:es|ing)?\s*(?:her\s*)?(?:pussy|vulva|clit(?:oris)?)/i.test(text)
+  ) {
+    return 'vulva'
+  }
+  if (
+    findTarget(/가슴|젖꼭지|유두|유방/i) ||
+    /kiss(?:es|ing)?\s*(?:her\s*)?(?:breast|nipple)/i.test(text)
+  ) {
+    return 'breast'
+  }
+  return null
+}
 
 /** 사용자가 쓴 구체 동사를 그대로 영어 동작 묘사로 반영 — 전부 "fondling"으로 뭉개지 않는다. */
 function detectTouchVerbPhrase(t: string): string {
@@ -2495,8 +2593,13 @@ export function amplifyAdultMotionForVideo(motion: string): {
       'i',
     ).test(t)
   if (breastTouch) {
-    wantsPartner = true
     wantsPoseChange = true
+    // 크롯치 애무와 동일 규칙 — 파트너 명시가 없으면 본인 손으로 본다.
+    // 예전엔 무조건 wantsPartner=true였어서 "자신의 가슴을 주무른다"(자가 애무) 같은
+    // 솔로 요청에도 coupleRequested가 켜져 "남자가 보이면…" 같은 무관한 문구가 섞였다.
+    if (/파트너|남자|남친|애인|상대|partner|man\s+hand|his\s+hand/i.test(t)) {
+      wantsPartner = true
+    }
     const verbPhrase = detectTouchVerbPhrase(t)
     bits.push(
       `sustained breast play for most of the clip: hand stays on her bare breast, ${verbPhrase} continuously — not a one-second tap`,
@@ -2509,15 +2612,12 @@ export function amplifyAdultMotionForVideo(motion: string): {
   if (/딥\s*키스|키스|입\s*(?:을\s*)?맞추|입맞춤|kiss(?:es|ing)?/i.test(t)) {
     wantsPartner = true
     wantsPoseChange = true
-    const kissVulva =
-      /(?:보지|음부|성기|클리토리스|클리|외음|사타구니|가랑이)[^.,;]{0,8}(?:에|에다가?|을|를)?[^.,;]{0,8}(?:입\s*(?:을\s*)?맞|입술|키스)|kiss(?:es|ing)?\s*(?:her\s*)?(?:pussy|vulva|clit(?:oris)?)/i.test(
-        t,
-      )
-    const kissBreast =
-      !kissVulva &&
-      /(?:가슴|젖꼭지|유두|유방)[^.,;]{0,8}(?:에|에다가?|을|를)?[^.,;]{0,8}(?:입\s*(?:을\s*)?맞|입술|키스)|kiss(?:es|ing)?\s*(?:her\s*)?(?:breast|nipple)/i.test(
-        t,
-      )
+    const kissTarget = detectKissBodyTarget(t)
+    const kissVulva = kissTarget === 'vulva'
+    // 가슴을 손으로 만지는 동작(breastTouch)이 이미 별도로 감지·처리됐으면, 이 문장의
+    // "가슴"은 키스 대상이 아니라 손터치 대상이다 — 입-입 딥키스 쪽으로 남겨둔다
+    // ("가슴을 만지고 입술에 딮키스한다" 실측 오분류 수정, 2026-08-28).
+    const kissBreast = kissTarget === 'breast' && !breastTouch
     if (kissVulva) {
       bits.push(
         'mandatory mouth-to-vulva kissing for most of the clip — a consenting adult partner\'s lips and mouth make continuous oral contact with her bare vulva/genitals, not a hand touch, not a peck elsewhere',
@@ -2565,14 +2665,19 @@ export function amplifyAdultMotionForVideo(motion: string): {
  */
 export function buildAdultStructureLock(
   text: string,
-  opts?: { forNudeHold?: boolean; allowPoseChange?: boolean; skipIdentityAndSexLocks?: boolean },
+  opts?: {
+    forNudeHold?: boolean
+    allowPoseChange?: boolean
+    skipIdentityAndSexLocks?: boolean
+    bustHeight?: string
+  },
 ): string {
   const t = polishKoreanPromptText(text || '')
   const bits: string[] = [
     'STRUCTURE LOCK from the source image: same face identity, same age look',
     'same natural East Asian / Korean skin tone — not pale white, not muddy dark brown',
     'same body type and silhouette (shoulders, waist, hips, breast size/shape, limb proportions)',
-    buildClothingSilhouetteBodyLock(t),
+    buildClothingSilhouetteBodyLock(t, opts?.bustHeight),
   ]
   // skipIdentityAndSexLocks: 호출부가 이미 buildKoreanTwentiesLookLock/buildFemaleAdultAnatomyLock을
   // 앞에서 직접 넣었을 때 — 여기서 또 넣으면 통째로 중복되어 프롬프트가 과도하게 길어지고
@@ -2836,6 +2941,8 @@ export function buildAnimationPrompt(input: {
   bodyProject?: boolean
   /** 실제 클립 길이(초) — BEAT 타임라인을 "3등분 약속"에 맞춰 구체적 초로 표기 */
   durationSec?: number
+  /** 사용자가 UI에서 직접 고른 가슴 높이(high/mid/low) — 없으면(auto) 기존 추정 로직 사용 */
+  bustHeight?: string
 }): string {
   const fullOriginal = polishKoreanPromptText(input.prompt ?? '')
   const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
@@ -2890,6 +2997,7 @@ export function buildAnimationPrompt(input: {
       prompt: fullOriginal,
       landmarks,
       durationSec: input.durationSec,
+      bustHeight: input.bustHeight,
     })
   }
 
@@ -2928,9 +3036,10 @@ export function buildAnimationPrompt(input: {
       !wantsKiss &&
       !wantsCrotch &&
       !wantsBreast &&
-      !/만지|만져|만진|만졌|애무|주무르|주물러|문지르|문질러|비비|비벼|꼬집|비틀|누르|눌러|움켜쥐|긁어|긁고|깨물어|깨물고|찌르|찔러|쓰다듬|어루만지/i.test(
-        detectionMotion,
-      )
+      // TOUCH_ACTION_VERBS_KO 재사용 — 예전엔 여기에 별도 하드코딩 목록이 있어서
+      // "주무른다" 같은 르-불규칙 활용형이 위(wantsBreast)와 따로 또 빠지는 사고가 났다.
+      // 상수를 하나만 두고 재사용해야 두 판정이 항상 같이 고쳐진다.
+      !new RegExp(`${TOUCH_ACTION_VERBS_KO}|애무`, 'i').test(detectionMotion)
     if (plainNudeOnly) {
       const bounds = undressAction ? buildEqualBeatSeconds(input.durationSec, 2) : null
       const half = bounds ? bounds[1] : 0
@@ -2944,27 +3053,23 @@ export function buildAnimationPrompt(input: {
           ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
           : '',
         undressAction
-          ? `In the first ${half}s (0–${half}s) she completely removes ALL clothes together — top, bra, AND pants/jeans/shorts/skirt/panties, not just the top. From ${half}s to ${total}s, all the way to the very last frame, she stays fully nude: bare breasts staying at the SAME height/position on her chest as before undressing (do NOT lift them higher) with small-to-medium round natural pinkish-brown nipples/areola (NOT a large dark oval blob, NOT a printed spiral/swirl/ring pattern), bare vulva with natural pubic hair (fine curly strands and real texture, not a flat painted patch or solid blob) clearly visible, ZERO panties left on at any point, ZERO fog or blur over the crotch.`
-          : 'She is already fully nude for the entire clip: bare breasts at the same height as the clothed source (not lifted higher) with small-to-medium round natural pinkish-brown nipples/areola (NOT a large dark oval blob, NOT a printed spiral/swirl/ring pattern), bare vulva with natural pubic hair (fine curly strands and real texture, not a flat painted patch or solid blob) clearly visible, ZERO panties, ZERO fog or blur over the crotch.',
+          ? `In the first ${half}s (0–${half}s) she completely removes ALL clothes together — top, bra, AND pants/jeans/shorts/skirt/panties, not just the top. From ${half}s to ${total}s, all the way to the very last frame, she stays fully nude: bare breasts staying at the SAME height/position on her chest as before undressing (do NOT lift them higher) with small-to-medium round natural pinkish-brown nipples/areola (NOT a large dark oval blob, NOT a printed spiral/swirl/ring pattern), bare vulva with a compact patch of dense natural curly pubic hair (not wide straggly wisps, not a flat painted patch) clearly visible, ZERO panties left on at any point, ZERO fog or blur over the crotch.`
+          : 'She is already fully nude for the entire clip: bare breasts at the same height as the clothed source (not lifted higher) with small-to-medium round natural pinkish-brown nipples/areola (NOT a large dark oval blob, NOT a printed spiral/swirl/ring pattern), bare vulva with a compact patch of dense natural curly pubic hair (not wide straggly wisps, not a flat painted patch) clearly visible, ZERO panties, ZERO fog or blur over the crotch.',
         motion ? `Motion: ${motion}.` : '',
         'BODY LOCK: breasts a touch LARGER than the clothing implies (not smaller), same HEIGHT and waist-hip proportions as source, natural jiggle/sway with movement (not rigid) — consistent every frame.',
+        buildBustHeightPreferenceLine(input.bustHeight),
       ].filter(Boolean)
       return plainParts.join(' ')
     }
     // 키스 "대상 부위" — 「키스」단어만 보고 무조건 입-입으로 고정하면, 「보지에 키스」/
     // 「가슴에 키스」요청이 반영 안 되고(입-입 키스로 대체) 결국 크롯치 오판과 겹쳐
     // "손으로 만지기"만 남는 실측이 있었다. 명시된 대상이 있으면 그 부위 키스로 분기한다.
-    const kissTargetVulva =
-      wantsKiss &&
-      /(?:보지|음부|성기|클리토리스|클리|외음|사타구니|가랑이)[^.,;]{0,8}(?:에|에다가?|을|를)?[^.,;]{0,8}(?:입\s*(?:을\s*)?맞|입술|키스)|kiss(?:es|ing)?\s*(?:her\s*)?(?:pussy|vulva|clit(?:oris)?)/i.test(
-        detectionMotion,
-      )
-    const kissTargetBreast =
-      !kissTargetVulva &&
-      wantsKiss &&
-      /(?:가슴|젖꼭지|유두|유방)[^.,;]{0,8}(?:에|에다가?|을|를)?[^.,;]{0,8}(?:입\s*(?:을\s*)?맞|입술|키스)|kiss(?:es|ing)?\s*(?:her\s*)?(?:breast|nipple)/i.test(
-        detectionMotion,
-      )
+    // 단, wantsBreast(가슴 손터치)가 이미 따로 감지됐으면 "가슴을 만지고 입술에 키스"처럼
+    // 가슴은 손터치 대상이고 키스는 입에 하는 별개 동작이므로 가슴 키스로 오분류하지 않는다
+    // (실측: "가슴을 만지고 입술에 딮키스한다"가 입-가슴 키스로 잘못 나옴, 2026-08-28).
+    const kissTarget = wantsKiss ? detectKissBodyTarget(detectionMotion) : null
+    const kissTargetVulva = kissTarget === 'vulva'
+    const kissTargetBreast = kissTarget === 'breast' && !wantsBreast
     // 순서가 있는 3단계 요청 — "가슴을 만진다 그리고 키스한다"처럼 두 동작을 접속사로
     // 잇는 경우, 이전엔 무조건 "동시에"(가슴 만지며 키스)로 뭉쳐버렸다. 접속사뿐 아니라
     // "빤 다음", "키스한 후", "만진 후", "애무하고 나서"처럼 동사 뒤에 「후/다음/뒤/나서」가
@@ -3047,12 +3152,13 @@ export function buildAnimationPrompt(input: {
       undressAction
         ? `BEAT 1 (${beat1TimeLabel}): she pulls off ALL clothes together — top, bra, pants/skirt, AND panties (not just the top) — fully nude; breasts stay at the SAME height as before undressing (do NOT lift higher); bare nipples/crotch, any outfit style. ZERO panties left at any point, ZERO fog.`
         : 'BEAT 1: she is already fully nude — bare breasts at the same height as the clothed source (not lifted higher), clear bare crotch, ZERO panties, ZERO fog.',
-      'Pubic hair on the mons: fine natural dark curly strands with real texture — NOT a flat painted patch, NOT a solid ink-blob triangle.',
+      'Pubic hair on the mons: a compact, neatly-contained patch of dense dark curly coils — NOT wide straggly wisps spreading onto the thighs, NOT a flat painted patch.',
       'Nipples/areola: small round areola, soft pinkish-brown, in proportion to the breast — NOT a large dark oval blob or bruise-like patch, NOT a printed spiral/swirl/ring.',
       beat2,
       beat3,
       lastFrame,
       'BODY LOCK: same face; breasts a touch LARGER than the clothed silhouette implies, same HEIGHT and waist-hip proportions, natural jiggle/sway with movement (not rigid) — consistent every frame.',
+      buildBustHeightPreferenceLine(input.bustHeight),
       motion ? `User motion: ${motion}` : '',
     ].filter(Boolean)
     return beats.join(' ')
@@ -3164,6 +3270,7 @@ export function buildAnimationPrompt(input: {
       allowPoseChange,
       // koreanLook(3063)·buildFemaleAdultAnatomyLock(3066)를 이미 앞에서 넣었음 — 중복 방지
       skipIdentityAndSexLocks: true,
+      bustHeight: input.bustHeight,
     }),
   )
   if (original) {
