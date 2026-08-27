@@ -8,6 +8,9 @@ interface Env {
 }
 
 const MAX_BYTES = 10 * 1024 * 1024
+// 쇼츠 이어붙이기(dual-a/b)용 끝 프레임 캡처가 클립 원본(mp4)을 통째로 이 엔드포인트로
+// 가져와야 해서, 이미지보다 큰 상한이 필요하다 (12~15초 480p 클립은 대략 수 MB대).
+const MAX_VIDEO_BYTES = 20 * 1024 * 1024
 
 function jsonResponse(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -51,21 +54,30 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       )
     }
 
+    const headerType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
+    const urlLower = imageUrl.toLowerCase()
+    const isVideo =
+      headerType.startsWith('video/') || /\.(mp4|webm|mov|m4v)(\?|$)/.test(urlLower)
+
     const buf = await response.arrayBuffer()
     if (buf.byteLength < 64) {
       return jsonResponse({ ok: false, error: 'source_image_empty' }, 200)
     }
-    if (buf.byteLength > MAX_BYTES) {
+    if (buf.byteLength > (isVideo ? MAX_VIDEO_BYTES : MAX_BYTES)) {
       return jsonResponse({ ok: false, error: 'source_image_too_large' }, 200)
     }
 
-    const headerType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
-    const contentType =
-      headerType.startsWith('image/') && !headerType.includes('svg')
+    const contentType = isVideo
+      ? headerType.startsWith('video/')
         ? headerType
-        : imageUrl.toLowerCase().includes('.png')
+        : urlLower.includes('.webm')
+          ? 'video/webm'
+          : 'video/mp4'
+      : headerType.startsWith('image/') && !headerType.includes('svg')
+        ? headerType
+        : urlLower.includes('.png')
           ? 'image/png'
-          : imageUrl.toLowerCase().includes('.webp')
+          : urlLower.includes('.webp')
             ? 'image/webp'
             : 'image/jpeg'
 

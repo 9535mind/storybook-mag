@@ -3595,12 +3595,32 @@ async function requestAnimate(options = {}) {
 
 /** 영상 끝 프레임 → data URL (CORS 실패 시 null) */ 
 async function captureVideoEndFrame(videoUrl) {
+  // CORS 회피: Replicate/fal의 원본 비디오 URL은 대부분 canvas 판독을 허용하는 CORS
+  // 헤더가 없어서, crossOrigin='anonymous'로 재생은 되어도 canvas.toDataURL()에서
+  // "tainted canvas" 오류가 나 캡처가 항상 실패하는 실측이 있었다 — 그 실패가 조용히
+  // 삼켜지면(호출부의 catch) 후반(dual-b) 클립이 끝프레임 대신 "옷 입은 원본 스틸"로
+  // 생성되어, 나체 스트립쇼 후반에 다시 옷을 입는 것처럼 보이는 회귀로 이어진다.
+  // → 서버(/api/media-bytes)를 통해 data: URL로 받아오면 canvas가 오염되지 않는다.
+  let source = videoUrl
+  try {
+    const response = await fetch('/api/media-bytes', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ imageUrl: videoUrl }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (data?.ok && typeof data.dataUrl === 'string' && data.dataUrl.startsWith('data:video/')) {
+      source = data.dataUrl
+    }
+  } catch (err) {
+    console.warn('media-bytes proxy for end-frame capture failed, trying direct URL', err)
+  }
   const video = document.createElement('video')
   video.muted = true
   video.playsInline = true
   video.preload = 'auto'
-  video.crossOrigin = 'anonymous'
-  video.src = videoUrl
+  if (source === videoUrl) video.crossOrigin = 'anonymous'
+  video.src = source
   await new Promise((resolve, reject) => {
     const t = window.setTimeout(() => reject(new Error('video_meta_timeout')), 20000)
     video.onloadedmetadata = () => {
@@ -3677,8 +3697,6 @@ async function requestDualFrameShorts(totalSec, opts = {}) {
 
   setAnimateBusy(true)
   setSelectedVideoDuration(total)
-  const savedImageUrl = currentResult.imageUrl
-  const savedImageDataUrl = currentResult.imageDataUrl
   const savedPrompt = currentResult.prompt
   const bodyProjectFirst = opts.bodyProjectFirst === true
   const landmarks = opts.landmarks
@@ -3711,27 +3729,29 @@ async function requestDualFrameShorts(totalSec, opts = {}) {
     } catch (err) {
       console.warn('end frame capture failed', err)
     }
-    if (endFrame?.startsWith('data:image/')) {
-      showResult(endFrame, '전반 끝 프레임', false, {
-        size: currentResult.size,
-        itemId: currentResult.itemId,
-        prompt: `${savedPrompt || ''} · already nude continuity`.trim(),
-        accepted: true,
-        mood: currentResult.mood,
-        engine: currentResult.engine,
-        genMode: currentResult.genMode,
-      })
-      currentResult.imageDataUrl = endFrame
-      currentResult.imageUrl = endFrame
-    } else {
+    if (!endFrame?.startsWith('data:image/')) {
+      // 실측: 끝 프레임 캡처가 실패했을 때 "원본(옷 입은) 스틸"로 후반을 이어가면,
+      // 후반부 프롬프트는 "이미 나체 유지"라고 말하는데 실제 소스 픽셀은 옷을 입은
+      // 상태라 모델이 그 모순을 절충하면서 후반에 다시 옷을 입는 것처럼 보이는
+      // 결과가 나온다 — 조용히 잘못된 소스로 계속 진행하는 대신 여기서 멈추고
+      // 사용자가 다시 시도하게 한다.
       setAnimateStatus(
-        `[${total}초 · 1/2] 끝 프레임을 못 가져와 원본 스틸로 후반을 이어갑니다.`,
-        false,
+        `[${total}초 · 1/2] 끝 프레임을 가져오지 못해 중단했습니다. 다시 시도해 주세요 (후반이 원본 옷 입은 스틸로 이어지면 도중에 다시 옷을 입는 것처럼 보이는 오류가 생깁니다).`,
+        true,
       )
-      currentResult.imageUrl = savedImageUrl
-      currentResult.imageDataUrl = savedImageDataUrl
-      currentResult.prompt = savedPrompt
+      return
     }
+    showResult(endFrame, '전반 끝 프레임', false, {
+      size: currentResult.size,
+      itemId: currentResult.itemId,
+      prompt: `${savedPrompt || ''} · already nude continuity`.trim(),
+      accepted: true,
+      mood: currentResult.mood,
+      engine: currentResult.engine,
+      genMode: currentResult.genMode,
+    })
+    currentResult.imageDataUrl = endFrame
+    currentResult.imageUrl = endFrame
 
     const motion2Safe = /이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude/i.test(motion2)
       ? motion2
