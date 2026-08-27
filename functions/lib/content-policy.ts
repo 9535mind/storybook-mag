@@ -643,6 +643,7 @@ export function buildFemaleAdultAnatomyLock(text = ''): string {
   return [
     'SEX LOCK: the subject is an adult WOMAN — feminine face, female body, female chest',
     `${bust}, visible female nipples when nude`,
+    'nipples/areola: plain natural skin, soft pinkish-brown, smooth continuous tone — FORBIDDEN spiral, swirl, ring, target, pinwheel, tattoo, or any printed graphic pattern on the breast',
     'FORBIDDEN: male or androgynous flat chest, bodybuilder pecs, six-pack masculinization, turning her into a man',
     'FORBIDDEN: leaving jeans/pants/underwear on when nude/undress is requested — remove lower garments completely',
   ].join('. ')
@@ -2943,10 +2944,10 @@ export function buildAnimationPrompt(input: {
           ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
           : '',
         undressAction
-          ? `In the first ${half}s (0–${half}s) she completely removes ALL clothes — top, bra, pants/jeans/shorts/skirt, AND panties. From ${half}s to ${total}s, all the way to the very last frame, she stays fully nude: bare breasts with visible nipples, bare vulva with natural pubic hair (fine curly strands and real texture, not a flat painted patch or solid blob) clearly visible, ZERO panties, ZERO fog or blur over the crotch.`
-          : 'She is already fully nude for the entire clip: bare breasts with visible nipples, bare vulva with natural pubic hair (fine curly strands and real texture, not a flat painted patch or solid blob) clearly visible, ZERO panties, ZERO fog or blur over the crotch.',
+          ? `In the first ${half}s (0–${half}s) she completely removes ALL clothes — top, bra, pants/jeans/shorts/skirt, AND panties. From ${half}s to ${total}s, all the way to the very last frame, she stays fully nude: bare breasts staying at the SAME height/position on her chest as before undressing (do NOT lift them higher) with visible nipples (plain natural skin, NOT a printed spiral/swirl/ring pattern), bare vulva with natural pubic hair (fine curly strands and real texture, not a flat painted patch or solid blob) clearly visible, ZERO panties, ZERO fog or blur over the crotch.`
+          : 'She is already fully nude for the entire clip: bare breasts at the same height as the clothed source (not lifted higher) with visible nipples (plain natural skin, NOT a printed spiral/swirl/ring pattern), bare vulva with natural pubic hair (fine curly strands and real texture, not a flat painted patch or solid blob) clearly visible, ZERO panties, ZERO fog or blur over the crotch.',
         motion ? `Motion: ${motion}.` : '',
-        'BODY LOCK: same breast size/shape and same waist-hip proportions as the source in every frame — do NOT make her slimmer, curvier, bustier, or flatter than the source photo.',
+        'BODY LOCK: same breast size/shape/HEIGHT and same waist-hip proportions as the source in every frame — do NOT make her slimmer, curvier, bustier, flatter, or shift her breasts higher/lower than the source photo.',
       ].filter(Boolean)
       return plainParts.join(' ')
     }
@@ -3044,13 +3045,14 @@ export function buildAnimationPrompt(input: {
           ? `TWO-BEAT TIMELINE ("3등분 약속" — 2 actions = half each) — do not merge or skip a beat:`
           : '',
       undressAction
-        ? `BEAT 1 (${beat1TimeLabel}): she pulls off ALL clothes — top, bra, pants/jeans/shorts/leggings/skirt, AND panties/thong — until fully nude with bare breasts, nipples, and bare hips/crotch (applies regardless of garment style, including fantasy/decorative outfits). ZERO panties, ZERO fog left where they were.`
-        : 'BEAT 1: she is already fully nude — bare breasts, clear bare crotch, ZERO panties, ZERO fog.',
+        ? `BEAT 1 (${beat1TimeLabel}): she pulls off ALL clothes — top, bra, pants/jeans/shorts/leggings/skirt, AND panties/thong — until fully nude; breasts stay at the SAME height as before undressing (do NOT lift higher); bare nipples and bare hips/crotch (any garment style, incl. fantasy outfits). ZERO panties, ZERO fog left.`
+        : 'BEAT 1: she is already fully nude — bare breasts at the same height as the clothed source (not lifted higher), clear bare crotch, ZERO panties, ZERO fog.',
       'Pubic hair on the mons: fine natural dark curly strands with real texture — NOT a flat painted patch, NOT a solid ink-blob triangle.',
+      'Nipples/areola: plain natural skin tone — NOT a printed spiral, swirl, ring, or target pattern on the breast.',
       beat2,
       beat3,
       lastFrame,
-      'BODY LOCK: same face identity, and same breast size/shape and waist-hip proportions as the clothed source in every frame — do NOT make her slimmer, curvier, bustier, or flatter than the source photo.',
+      'BODY LOCK: same face, breast size/shape/HEIGHT, and waist-hip proportions as the clothed source in every frame — do NOT slim, bulk, or shift her breasts higher/lower than the source.',
       motion ? `User motion: ${motion}` : '',
     ].filter(Boolean)
     return beats.join(' ')
