@@ -60,19 +60,22 @@ function isProviderContentBlock(message: string): boolean {
 // Cloudflare Pages Functions는 HTTP 요청 1건당 총 30초 벽시계 한도가 있다(플랫폼이 강제
 // 종료 — 우리 try/catch가 못 잡고, 클라이언트는 본문 없는 raw 502를 받는다. 실측으로 확인:
 // Replicate 기본 타임아웃(55초)을 그대로 쓰면 번역 단계 시간과 합쳐 이 한도를 조용히 넘겨서
-// "장면 생성에 실패했어요: 502"로 보였다). 요청 시작 시각부터 남은 예산을 계산해 각 이미지
-// 엔진 호출에 넘기고, 그래도 못 끝내면 30초를 넘기기 전에 우리가 먼저 깔끔한 에러로 실패시킨다.
-const CLOUDFLARE_WALL_TIME_BUDGET_MS = 30_000
-const RESPONSE_OVERHEAD_MARGIN_MS = 5_000
+// "장면 생성에 실패했어요: 502"로 보였다(실측 재현: 35초 지점에서 raw 502).
+// 요청 시작 시각부터 "진짜" 남은 예산을 계산해 각 이미지 엔진 호출에 넘긴다 — 중요한 점은
+// 이 값에 최소치를 강제로 깔면 안 된다는 것: 첫 시도가 예산을 다 쓰고도 실패했을 때 재시도나
+// 폴백 엔진에 "그래도 최소 N초는 줘야지"라며 시간을 더 얹으면, 그 추가 시도들이 누적되어
+// 결국 30초 플랫폼 한도를 넘겨버린다(실측으로 이 사고를 직접 재현함). 그래서 남은 예산이
+// MIN_ENGINE_ATTEMPT_MS보다 적으면 그 엔진(또는 재시도)은 아예 시도하지 않고 바로 실패 처리한다.
+const CLOUDFLARE_WALL_TIME_BUDGET_MS = 25_000
+const RESPONSE_OVERHEAD_MARGIN_MS = 3_000
+const MIN_ENGINE_ATTEMPT_MS = 5_000
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context
   const requestStartedAt = Date.now()
+  /** 음수/0도 그대로 반환한다(호출부가 MIN_ENGINE_ATTEMPT_MS와 비교해 시도 여부를 판단). */
   const remainingEngineBudgetMs = () =>
-    Math.max(
-      6_000,
-      CLOUDFLARE_WALL_TIME_BUDGET_MS - RESPONSE_OVERHEAD_MARGIN_MS - (Date.now() - requestStartedAt),
-    )
+    CLOUDFLARE_WALL_TIME_BUDGET_MS - RESPONSE_OVERHEAD_MARGIN_MS - (Date.now() - requestStartedAt)
 
   try {
     const auth = await requireAuth(request, env)
@@ -207,12 +210,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         attempts.push({ engine: 'fal', error: 'fal_skipped_for_adult_content' })
         return null
       }
+      const budgetBeforeFal = remainingEngineBudgetMs()
+      if (budgetBeforeFal < MIN_ENGINE_ATTEMPT_MS) {
+        attempts.push({ engine: 'fal', error: 'insufficient_time_budget' })
+        return null
+      }
       try {
         const falModel = env.FAL_MODEL_ID?.trim() || 'fal-ai/flux-2-pro'
         const preferredFalTimeoutMs = wildlifeScene || asPrimary ? FAL_WILDLIFE_TIMEOUT_MS : undefined
         const falTimeoutMs = preferredFalTimeoutMs
-          ? Math.min(preferredFalTimeoutMs, remainingEngineBudgetMs())
-          : remainingEngineBudgetMs()
+          ? Math.min(preferredFalTimeoutMs, budgetBeforeFal)
+          : budgetBeforeFal
         const { imageUrl } = await generateFalImage({
           falKey: env.FAL_KEY,
           falModel,
@@ -253,6 +261,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         attempts.push({ engine: 'replicate', error: 'replicate_token_not_configured' })
         return null
       }
+      const budgetBeforeReplicate = remainingEngineBudgetMs()
+      if (budgetBeforeReplicate < MIN_ENGINE_ATTEMPT_MS) {
+        attempts.push({ engine: 'replicate', error: 'insufficient_time_budget' })
+        return null
+      }
       try {
         // 야생동물: Juggernaut 화보 편향을 CFG/steps로 누르고, 네거티브는 이미 강화됨
         const fashionSceneHeavy =
@@ -284,7 +297,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           disableSafetyChecker: true,
           numInferenceSteps: steps,
           guidanceScale: cfg,
-          timeoutMs: remainingEngineBudgetMs(),
+          timeoutMs: budgetBeforeReplicate,
           ...resolveReplicateImageSize(size),
         })
         return jsonResponse(
@@ -356,7 +369,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       )
     }
 
-    return jsonResponse({ ok: false, error: 'generation_failed', attempts }, 502)
+    // 콜드 스타트(모델 컨테이너가 꺼져 있어 첫 요청이 오래 걸림)로 시간 예산을 다 써서
+    // 실패한 경우, 재시도하면 컨테이너가 이미 데워져 있어 거의 항상 훨씬 빨리 성공한다 —
+    // 사용자에게 원인 코드 대신 바로 실행 가능한 안내를 보여준다.
+    const timedOut = attempts.some(
+      (attempt) => /aborted|timeout|insufficient_time_budget/i.test(attempt.error),
+    )
+    return jsonResponse(
+      {
+        ok: false,
+        error: 'generation_failed',
+        message: timedOut
+          ? '이미지 생성 엔진이 평소보다 오래 걸려서 시간 안에 완료하지 못했어요(첫 요청 후 오랜만이면 흔히 발생해요). 잠시 후 다시 시도하면 대부분 훨씬 빨리 성공해요.'
+          : undefined,
+        attempts,
+      },
+      502,
+    )
   } catch (error) {
     return jsonResponse(
       {

@@ -221,7 +221,12 @@ export async function generateReplicateImage(options: {
     fullInput.disable_safety_checker = true
   }
 
-  const remainingBudget = () => Math.max(3_000, timeoutMs - (Date.now() - startedAt))
+  // 최소치를 강제로 깔지 않는다 — 첫 시도가 예산을 다 쓰고 실패했는데도 재시도에 시간을
+  // "더" 얹으면, 그 누적 시간이 Cloudflare의 30초 요청 한도를 넘겨서 우리 JSON 에러 대신
+  // 클라이언트가 본문 없는 raw 502를 받는 사고로 실측 재현됨. 남은 시간이 최소 시도 가치가
+  // 있는 수준(MIN_RETRY_BUDGET_MS) 밑이면 재시도하지 않고 원래 에러를 그대로 던진다.
+  const MIN_RETRY_BUDGET_MS = 4_000
+  const remainingBudget = () => timeoutMs - (Date.now() - startedAt)
 
   let prediction: ReplicatePredictionResponse
   try {
@@ -230,6 +235,10 @@ export async function generateReplicateImage(options: {
     const message = error instanceof Error ? error.message : 'replicate_request_failed'
     // 레이트리밋은 재시도해도 동일·악화. NSFW는 안전필터 해제 입력으로 한 번 더 시도.
     if (/throttl|rate limit|429/i.test(message)) {
+      throw new Error(message)
+    }
+    const retryBudget = remainingBudget()
+    if (retryBudget < MIN_RETRY_BUDGET_MS) {
       throw new Error(message)
     }
     if (/nsfw/i.test(message) && options.disableSafetyChecker) {
@@ -241,7 +250,7 @@ export async function generateReplicateImage(options: {
         disable_safety_checker: true,
         number_of_images: 1,
       }
-      prediction = await createPrediction(options.apiToken, versionId, nsfwRetry, remainingBudget())
+      prediction = await createPrediction(options.apiToken, versionId, nsfwRetry, retryBudget)
     } else {
       // 모델 스키마가 다를 수 있음(추가 필드 거부) — 최소 입력으로 재시도.
       const minimalInput: Record<string, unknown> = {
@@ -252,7 +261,7 @@ export async function generateReplicateImage(options: {
       if (options.disableSafetyChecker) {
         minimalInput.disable_safety_checker = true
       }
-      prediction = await createPrediction(options.apiToken, versionId, minimalInput, remainingBudget())
+      prediction = await createPrediction(options.apiToken, versionId, minimalInput, retryBudget)
     }
   }
 
