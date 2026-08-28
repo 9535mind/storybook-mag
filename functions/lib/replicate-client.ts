@@ -187,11 +187,19 @@ export async function generateReplicateImage(options: {
   disableSafetyChecker?: boolean
   numInferenceSteps?: number
   guidanceScale?: number
+  /**
+   * Cloudflare Pages Functions는 HTTP 요청당 총 30초 벽시계 한도가 있다(런타임이 강제
+   * 종료 — 우리 코드의 try/catch도 못 잡고 클라이언트는 본문 없는 raw 502를 받는다).
+   * 기본 REPLICATE_TIMEOUT_MS(55초)를 그대로 쓰면 번역 등 앞 단계 시간과 합쳐 이 한도를
+   * 넘기기 쉬우므로, 호출부(generate.ts)가 남은 예산을 계산해 넘겨야 한다.
+   */
+  timeoutMs?: number
 }): Promise<{ imageUrl: string }> {
   if (!options.apiToken?.trim()) {
     throw new Error('missing_replicate_token')
   }
 
+  const timeoutMs = options.timeoutMs ?? REPLICATE_TIMEOUT_MS
   const startedAt = Date.now()
   const versionId =
     options.modelVersion?.trim() ||
@@ -213,9 +221,11 @@ export async function generateReplicateImage(options: {
     fullInput.disable_safety_checker = true
   }
 
+  const remainingBudget = () => Math.max(3_000, timeoutMs - (Date.now() - startedAt))
+
   let prediction: ReplicatePredictionResponse
   try {
-    prediction = await createPrediction(options.apiToken, versionId, fullInput)
+    prediction = await createPrediction(options.apiToken, versionId, fullInput, timeoutMs)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'replicate_request_failed'
     // 레이트리밋은 재시도해도 동일·악화. NSFW는 안전필터 해제 입력으로 한 번 더 시도.
@@ -231,7 +241,7 @@ export async function generateReplicateImage(options: {
         disable_safety_checker: true,
         number_of_images: 1,
       }
-      prediction = await createPrediction(options.apiToken, versionId, nsfwRetry)
+      prediction = await createPrediction(options.apiToken, versionId, nsfwRetry, remainingBudget())
     } else {
       // 모델 스키마가 다를 수 있음(추가 필드 거부) — 최소 입력으로 재시도.
       const minimalInput: Record<string, unknown> = {
@@ -242,7 +252,7 @@ export async function generateReplicateImage(options: {
       if (options.disableSafetyChecker) {
         minimalInput.disable_safety_checker = true
       }
-      prediction = await createPrediction(options.apiToken, versionId, minimalInput)
+      prediction = await createPrediction(options.apiToken, versionId, minimalInput, remainingBudget())
     }
   }
 
@@ -252,7 +262,7 @@ export async function generateReplicateImage(options: {
 
   if (prediction.status !== 'succeeded') {
     if (!prediction.id) throw new Error('replicate_missing_prediction_id')
-    prediction = await pollPrediction(options.apiToken, prediction.id, startedAt)
+    prediction = await pollPrediction(options.apiToken, prediction.id, startedAt, timeoutMs)
   }
 
   if (prediction.status === 'failed') {

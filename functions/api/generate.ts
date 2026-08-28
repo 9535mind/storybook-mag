@@ -57,8 +57,22 @@ function isProviderContentBlock(message: string): boolean {
   return /nsfw|content.?policy|flagged|safety|could not be processed/i.test(message)
 }
 
+// Cloudflare Pages Functions는 HTTP 요청 1건당 총 30초 벽시계 한도가 있다(플랫폼이 강제
+// 종료 — 우리 try/catch가 못 잡고, 클라이언트는 본문 없는 raw 502를 받는다. 실측으로 확인:
+// Replicate 기본 타임아웃(55초)을 그대로 쓰면 번역 단계 시간과 합쳐 이 한도를 조용히 넘겨서
+// "장면 생성에 실패했어요: 502"로 보였다). 요청 시작 시각부터 남은 예산을 계산해 각 이미지
+// 엔진 호출에 넘기고, 그래도 못 끝내면 30초를 넘기기 전에 우리가 먼저 깔끔한 에러로 실패시킨다.
+const CLOUDFLARE_WALL_TIME_BUDGET_MS = 30_000
+const RESPONSE_OVERHEAD_MARGIN_MS = 5_000
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context
+  const requestStartedAt = Date.now()
+  const remainingEngineBudgetMs = () =>
+    Math.max(
+      6_000,
+      CLOUDFLARE_WALL_TIME_BUDGET_MS - RESPONSE_OVERHEAD_MARGIN_MS - (Date.now() - requestStartedAt),
+    )
 
   try {
     const auth = await requireAuth(request, env)
@@ -195,6 +209,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
       try {
         const falModel = env.FAL_MODEL_ID?.trim() || 'fal-ai/flux-2-pro'
+        const preferredFalTimeoutMs = wildlifeScene || asPrimary ? FAL_WILDLIFE_TIMEOUT_MS : undefined
+        const falTimeoutMs = preferredFalTimeoutMs
+          ? Math.min(preferredFalTimeoutMs, remainingEngineBudgetMs())
+          : remainingEngineBudgetMs()
         const { imageUrl } = await generateFalImage({
           falKey: env.FAL_KEY,
           falModel,
@@ -202,7 +220,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           // Flux는 negative_prompt API 없음 → 클라이언트에서 긍정 제약으로 bake
           negativePrompt,
           imageSize: resolveFalImageSize(size),
-          timeoutMs: wildlifeScene || asPrimary ? FAL_WILDLIFE_TIMEOUT_MS : undefined,
+          timeoutMs: falTimeoutMs,
         })
         return jsonResponse(
           {
@@ -266,6 +284,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           disableSafetyChecker: true,
           numInferenceSteps: steps,
           guidanceScale: cfg,
+          timeoutMs: remainingEngineBudgetMs(),
           ...resolveReplicateImageSize(size),
         })
         return jsonResponse(
