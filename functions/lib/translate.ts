@@ -188,6 +188,14 @@ export async function compileSdxlTagPrompt(
   const revisionTrimmed = (revision || '').trim()
   if (!trimmed && !revisionTrimmed) return { text: '', engine: 'fallback' }
 
+  // 이미 영어이고 예산 안이면 Claude 왕복을 건너뛴다. 얼굴교체 "예전 방식" 장면 생성처럼
+  // 미리 압축된 태그 프롬프트가 Cloudflare 30초 한도 안에서 Replicate에 시간을 남기려면 필수.
+  if (trimmed && !revisionTrimmed && !HANGUL_RE.test(trimmed)) {
+    const wordCount = trimmed.split(/\s+/).filter(Boolean).length
+    // 예산보다 조금만 길면 Claude 왕복 대신 뒤에서 자른다(얼굴교체 예전 방식 장면 생성용).
+    if (wordCount <= maxWords + 8) return { text: capWords(trimmed, maxWords), engine: 'fallback' }
+  }
+
   if ((env.ANTHROPIC_API_KEY || '').trim()) {
     try {
       const system = revisionTrimmed
@@ -199,6 +207,7 @@ export async function compileSdxlTagPrompt(
         system,
         user,
         maxTokens: 400,
+        timeoutMs: 8_000,
       })
       const rawOut = out.trim().replace(/\s*\n+\s*/g, ', ')
       if (rawOut && !looksLikeRefusalOrMeta(rawOut)) {

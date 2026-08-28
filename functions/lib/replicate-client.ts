@@ -63,7 +63,7 @@ async function resolveLatestVersion(apiToken: string, owner: string, name: strin
   const response = await fetchWithTimeout(
     `https://api.replicate.com/v1/models/${owner}/${name}`,
     { headers: { Authorization: `Bearer ${apiToken}` } },
-    15_000,
+    8_000,
   )
   const payload = (await response.json().catch(() => ({}))) as ReplicateModelResponse
   if (!response.ok) {
@@ -139,10 +139,12 @@ async function pollPrediction(
     const elapsed = Date.now() - startedAt
     if (elapsed >= timeoutMs) throw new Error('replicate_timeout')
 
+    // 한 번의 GET을 남은 예산 전체로 붙잡지 않는다. Prefer: wait 없이 짧게 폴링해야
+    // Cloudflare Pages 30초 강제종료(본문 없는 raw 502)를 피할 수 있다.
     const response = await fetchWithTimeout(
       `https://api.replicate.com/v1/predictions/${id}`,
       { headers: { Authorization: `Bearer ${apiToken}` } },
-      timeoutMs - elapsed,
+      Math.min(8_000, Math.max(1_000, timeoutMs - elapsed)),
     )
     const payload = (await response.json().catch(() => ({}))) as ReplicatePredictionResponse
     if (!response.ok) throw new Error(extractReplicateError(payload))
@@ -227,10 +229,20 @@ export async function generateReplicateImage(options: {
   // 있는 수준(MIN_RETRY_BUDGET_MS) 밑이면 재시도하지 않고 원래 에러를 그대로 던진다.
   const MIN_RETRY_BUDGET_MS = 4_000
   const remainingBudget = () => timeoutMs - (Date.now() - startedAt)
+  // 제출 자체는 1~2초면 끝난다. Prefer: wait 로 수십 초를 붙잡으면 Abort가 안 먹고
+  // Cloudflare가 isolate를 죽여 클라이언트가 "장면 생성에 실패했어요: 502"만 보게 된다.
+  // 최소치를 남은 예산보다 크게 깔면 안 된다(실측: 재시도가 30초 한도를 넘김).
+  const submitTimeoutMs = () => {
+    const left = remainingBudget()
+    if (left < 1_000) throw new Error('replicate_timeout')
+    return Math.min(12_000, left)
+  }
 
   let prediction: ReplicatePredictionResponse
   try {
-    prediction = await createPrediction(options.apiToken, versionId, fullInput, timeoutMs)
+    prediction = await createPrediction(options.apiToken, versionId, fullInput, submitTimeoutMs(), {
+      waitSec: null,
+    })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'replicate_request_failed'
     // 레이트리밋은 재시도해도 동일·악화. NSFW는 안전필터 해제 입력으로 한 번 더 시도.
@@ -250,7 +262,9 @@ export async function generateReplicateImage(options: {
         disable_safety_checker: true,
         number_of_images: 1,
       }
-      prediction = await createPrediction(options.apiToken, versionId, nsfwRetry, retryBudget)
+      prediction = await createPrediction(options.apiToken, versionId, nsfwRetry, submitTimeoutMs(), {
+        waitSec: null,
+      })
     } else {
       // 모델 스키마가 다를 수 있음(추가 필드 거부) — 최소 입력으로 재시도.
       const minimalInput: Record<string, unknown> = {
@@ -261,7 +275,9 @@ export async function generateReplicateImage(options: {
       if (options.disableSafetyChecker) {
         minimalInput.disable_safety_checker = true
       }
-      prediction = await createPrediction(options.apiToken, versionId, minimalInput, retryBudget)
+      prediction = await createPrediction(options.apiToken, versionId, minimalInput, submitTimeoutMs(), {
+        waitSec: null,
+      })
     }
   }
 

@@ -5726,11 +5726,25 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   // "차렷 자세로 뻣뻣하게 서 있다"는 실측 실패 사례 — 팔짱/포옹/키스라는 단어만으로는
   // 부족해서, 팔의 구체적 위치·몸의 기울임·체중 이동까지 명시하고 "차렷 자세 금지"를
   // 직접 못박아야 자연스러운 커플 포즈가 나온다.
+  // 예전 방식(/api/generate)은 Cloudflare 30초 한도 안에서 번역+생성을 끝내야 한다.
+  // 긴 한글 문장을 보내면 Claude 압축에 5~15초가 빠져 Replicate가 502로 죽는다.
+  // 이미 영어 태그이고 55단어 안이면 서버가 번역을 건너뛰므로, 여기서 바로 태그를 보낸다.
   const SCENE_PRESET_DESCRIPTIONS = {
     arm_in_arm:
-      '20대 남녀 커플이 도심 거리에서 팔짱을 끼고 나란히 걸으며 데이트하는 모습. 여자가 남자의 팔을 양손으로 감싸 팔짱을 끼고, 두 사람의 어깨와 상체가 서로 살짝 기울어 맞닿아 있다. 서로 마주보며 자연스럽게 웃는 표정, 캐주얼하고 단정한 옷차림, 낮 시간 배경, 두 사람의 얼굴이 또렷하게 보이는 정면 구도, 사진처럼 사실적인 화보. 뻣뻣하게 양팔을 몸통 옆에 붙이고 차렷 자세로 정면을 보고 서 있는 증명사진 같은 포즈는 절대 금지.',
-    hug: '20대 남녀 커플이 서로 마주 서서 다정하게 포옹하는 모습. 한 사람의 팔이 상대방의 등과 허리를 감싸 안고, 두 사람의 몸이 가깝게 밀착되어 있으며 고개는 서로의 어깨나 얼굴 쪽으로 살짝 기울어 있다. 캐주얼하고 단정한 옷차림, 실내 또는 거리 배경, 사진처럼 사실적인 화보. 뻣뻣하게 양팔을 몸통 옆에 붙이고 차렷 자세로 나란히 서 있는 증명사진 같은 포즈는 절대 금지.',
-    kiss: '20대 남녀 커플이 서로 마주 보고 다정하게 입맞춤하는 모습. 두 사람이 서로를 향해 몸을 기울이고, 한쪽 또는 양쪽 팔이 상대방의 허리나 얼굴을 감싸며 입술이 맞닿아 있다. 캐주얼하고 단정한 옷차림, 사진처럼 사실적인 화보. 뻣뻣하게 양팔을 몸통 옆에 붙이고 차렷 자세로 떨어져 서 있는 증명사진 같은 포즈는 절대 금지.',
+      'young korean man and woman couple, walking arm in arm on city street, woman holding man arm with both hands, shoulders leaning together, looking at each other smiling, casual clothes, daytime, full bodies facing camera, photorealistic fashion photo, no stiff passport pose, no arms hanging at sides',
+    hug: 'young korean man and woman couple hugging face to face, arms wrapped around back and waist, bodies pressed close, heads tilted toward each other, casual clothes, indoor or street, photorealistic fashion photo, no stiff side-by-side passport pose',
+    kiss: 'young korean man and woman couple kissing on the lips, bodies leaning in, arms around waist or face, lips touching, casual clothes, photorealistic fashion photo, no stiff standing-apart pose',
+  }
+
+  function sceneGenerateFailMessage(response, data) {
+    if (data.message) return data.message
+    if (data.error === 'provider_content_blocked') {
+      return '장면 생성이 안전 필터에 걸렸어요. 다른 장면을 골라 다시 시도해 주세요.'
+    }
+    if (response.status === 502 || data.error === 'generation_failed') {
+      return '장면 생성이 서버 시간 한도를 넘겼어요. 잠시 후 다시 시도해 주세요.'
+    }
+    return `장면 생성에 실패했어요: ${data.error || response.status}`
   }
 
   async function generateCoupleScene() {
@@ -5752,13 +5766,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return null
     }
     if (!data.ok || !data.imageUrl) {
-      setStatus(
-        data.message ||
-          (data.error === 'provider_content_blocked'
-            ? '장면 생성이 안전 필터에 걸렸어요. 다른 장면을 골라 다시 시도해 주세요.'
-            : `장면 생성에 실패했어요: ${data.error || response.status}`),
-        true,
-      )
+      setStatus(sceneGenerateFailMessage(response, data), true)
       return null
     }
     return data.imageUrl
@@ -5803,13 +5811,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return null
     }
     if (!data.ok || !data.imageUrl) {
-      setStatus(
-        data.message ||
-          (data.error === 'provider_content_blocked'
-            ? '장면 생성이 안전 필터에 걸렸어요. 다른 장면을 골라 다시 시도해 주세요.'
-            : `장면 생성에 실패했어요: ${data.error || response.status}`),
-        true,
-      )
+      setStatus(sceneGenerateFailMessage(response, data), true)
       return null
     }
     return data.imageUrl

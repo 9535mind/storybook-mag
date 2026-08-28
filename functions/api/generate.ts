@@ -381,7 +381,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         error: 'generation_failed',
         message: timedOut
           ? '이미지 생성 엔진이 평소보다 오래 걸려서 시간 안에 완료하지 못했어요(첫 요청 후 오랜만이면 흔히 발생해요). 잠시 후 다시 시도하면 대부분 훨씬 빨리 성공해요.'
-          : undefined,
+          : '장면 생성에 실패했어요. 잠시 후 다시 시도해 주세요.',
         attempts,
       },
       502,

@@ -54,6 +54,8 @@ export async function runClaudeText(input: {
   maxTokens: number
   /** 첨부하면 Claude Vision으로 이미지를 함께 보낸다 (그림관찰과 표현 등). */
   image?: ClaudeImageInput
+  /** 미지정 시 18초. Cloudflare Pages 30초 한도를 넘기지 않게 번역/압축 호출을 자른다. */
+  timeoutMs?: number
 }): Promise<{ text: string; model: string }> {
   const apiKey = (input.env.ANTHROPIC_API_KEY || '').trim()
   if (!apiKey) throw new Error('anthropic_api_key_missing')
@@ -71,16 +73,30 @@ export async function runClaudeText(input: {
     system: input.system,
     messages: [{ role: 'user', content }],
   })
-  const response = await fetch(ANTHROPIC_URL, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'user-agent': 'storymag-cloudflare-pages/1.0',
-    },
-    body: bodyJson,
-  })
+  const timeoutMs = Math.max(3_000, input.timeoutMs ?? 18_000)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let response: Response
+  try {
+    response = await fetch(ANTHROPIC_URL, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'user-agent': 'storymag-cloudflare-pages/1.0',
+      },
+      body: bodyJson,
+      signal: controller.signal,
+    })
+  } catch (error) {
+    clearTimeout(timer)
+    if (error instanceof Error && (error.name === 'AbortError' || /aborted/i.test(error.message))) {
+      throw new Error('anthropic_timeout')
+    }
+    throw error
+  }
+  clearTimeout(timer)
 
   if (!response.ok) {
     const rawText = await response.text().catch((e) => `<본문 읽기 실패: ${errMessage(e)}>`)
