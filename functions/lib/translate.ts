@@ -15,6 +15,24 @@ import { runClaudeText, type ClaudeEnv } from './claude-client'
 
 const HANGUL_RE = /[\uac00-\ud7a3]/
 
+/**
+ * Claude가 가끔 "번역"이 아니라 거절/메타 응답("I notice the Korean text appears
+ * garbled/corrupted... Could you please re-paste...")을 그대로 돌려주는 사고가 실측으로
+ * 확인됐다 — 호출부는 문자열이 비어있지 않기만 하면 그대로 이미지 프롬프트에 박아 넣었기
+ * 때문에, 이런 응답이 그대로 "여자 사진" 대신 들어가 화면이 완전히 엉뚱하게 나왔다.
+ * 번역 결과로 받아들이기 전에 이런 패턴인지 걸러낸다.
+ */
+function looksLikeRefusalOrMeta(text: string): boolean {
+  const t = text.trim()
+  if (!t) return true
+  // 번역 결과에 한글이 다량 남아있으면(요청은 영어 번역인데) 실패로 간주한다.
+  const hangulMatches = t.match(/[\uac00-\ud7a3]/g)
+  if (hangulMatches && hangulMatches.length > Math.max(3, t.length * 0.15)) return true
+  return /\b(i\s+(cannot|can't|can not|am not able|apologi[sz]e|notice|see)|as an ai|i'm sorry|i am sorry|please\s+(re-?paste|provide|share|clarify)|cannot\s+(accurately\s+)?(translate|interpret|process)|unable to (translate|process|interpret)|garbled|corrupted|placeholder characters|no (readable|valid) (korean|text)|original (korean )?text)\b/i.test(
+    t,
+  )
+}
+
 export type TranslateEnv = ClaudeEnv & {
   AI?: { run: (model: string, input: Record<string, unknown>) => Promise<unknown> }
 }
@@ -95,7 +113,8 @@ export async function translateDescriptionForImagePrompt(
         maxTokens: 3200,
       })
       const cleaned = out.trim()
-      if (cleaned) return { text: cleaned, translated: true, engine: 'claude' }
+      if (cleaned && !looksLikeRefusalOrMeta(cleaned)) return { text: cleaned, translated: true, engine: 'claude' }
+      if (cleaned) console.error('[translate] Claude 번역이 거절/메타 응답처럼 보여 폐기, Workers AI로 폴백:', cleaned.slice(0, 200))
     } catch (err) {
       console.error('[translate] Claude 번역 실패, Workers AI로 폴백:', errMessage(err))
     }
@@ -181,8 +200,13 @@ export async function compileSdxlTagPrompt(
         user,
         maxTokens: 400,
       })
-      const cleaned = capWords(out.trim().replace(/\s*\n+\s*/g, ', '), maxWords)
-      if (cleaned) return { text: cleaned, engine: 'claude' }
+      const rawOut = out.trim().replace(/\s*\n+\s*/g, ', ')
+      if (rawOut && !looksLikeRefusalOrMeta(rawOut)) {
+        const cleaned = capWords(rawOut, maxWords)
+        if (cleaned) return { text: cleaned, engine: 'claude' }
+      } else if (rawOut) {
+        console.error('[translate] SDXL 태그 압축이 거절/메타 응답처럼 보여 폐기, 번역 후 단순 절삭으로 폴백:', rawOut.slice(0, 200))
+      }
     } catch (err) {
       console.error('[translate] SDXL 태그 압축 실패, 번역 후 단순 절삭으로 폴백:', errMessage(err))
     }
