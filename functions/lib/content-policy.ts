@@ -822,7 +822,6 @@ export function buildNudeBecomesAnimationPrompt(input: {
   const total = bounds[bounds.length - 1]
   const dissolveDeadline = isDualA ? bounds[2] : bounds[1]
 
-  const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
   // 실측(2026-08-26): 이 함수가 buildFaceFrozenLock·buildSingleContinuousShotLock·
   // buildClothingSilhouetteBodyLock·buildAdultPubicHairLock·buildNudeCensorFogBanLock의
   // 풀텍스트를 전부 이어붙여 6,000자를 넘겼다 — leanIntimate/plainNudeOnly는 이미
@@ -830,9 +829,6 @@ export function buildNudeBecomesAnimationPrompt(input: {
   // "가슴 위치/크기 불일치"와 "후반부에 다시 옷을 입음"(HOLD 지시가 프롬프트 맨 끝
   // 4,700자 지점이라 순응도가 이미 죽은 상태) 두 회귀의 실제 원인으로 확인됐다.
   // → leanIntimate와 같은 스타일(짧은 BEAT + 한두 줄 잠금)로 재작성한다.
-  // 카메라만은 예외: buildShortsCameraLock()의 dual-a/dual-b 줌 타이밍은 동결 규칙
-  // (24/30초 전반 와이드·후반만 줌)이라 그대로 유지 — single만 leanIntimate와 동일한
-  // 짧은 한 줄로 대체한다.
   return [
     'Adult photorealistic image-to-video. Same Korean woman: same face and body proportions (breast size/shape, waist, hips) as the input photo — do not slim, bulk, or resize her breasts. Same room, static camera.',
     coords
@@ -850,13 +846,11 @@ export function buildNudeBecomesAnimationPrompt(input: {
     buildBustHeightPreferenceLine(input.bustHeight),
     'Pubic hair on the mons: a compact, neatly-contained patch of dense dark curly coils — NOT wide straggly wisps spreading onto the thighs, NOT a flat painted patch.',
     'No fog/blur/mosaic or sheer-lace-outline over the crotch — sharp bare skin, ZERO panties, ZERO belt remnant.',
-    clipRole === 'single'
-      ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
-      : buildShortsCameraLock({
-          clipRole: input.clipRole,
-          undressOrNude: true,
-          endCloseUp,
-        }),
+    buildShortsCameraLock({
+      clipRole: input.clipRole,
+      undressOrNude: true,
+      endCloseUp,
+    }),
     'LAST FRAME: still fully nude, same face and body proportions as source — bare breasts and bare vulva visible, clothing must NOT have reappeared.',
   ]
     .filter(Boolean)
@@ -1423,81 +1417,21 @@ export function buildAdultStructureLock(
 }
 
 /**
- * 쇼츠 카메라/클로즈업 공통 잠금.
- * single = 줌·클로즈업 전면 금지(소스 프레이밍 유지).
- * dual-a 탈의/몸매투영 = 전반 와이드만(나체 전 줌인 금지).
- * dual-b = 나체 확인 후 후반에만 약한 줌; 사용자가 클로즈업 종결을 요청한 경우만 클로즈로 끝.
+ * 쇼츠 카메라 잠금 — 줌/클로즈업 기능 전면 제거(2026-08-28, 사용자 명시 요청).
+ * 예전엔 single만 줌 전면 금지였고 dual-a(후반 줌인 브릿지)·dual-b(후반 줌아웃 또는
+ * 클로즈업 종결)에는 줌 연출이 남아 있었다 — 이제 clipRole·undressOrNude·endCloseUp과
+ * 무관하게 모든 클립이 처음부터 끝까지 소스 프레이밍을 그대로 유지한다(줌 완전 삭제).
  */
 export function buildShortsCameraLock(input: {
   clipRole?: 'single' | 'dual-a' | 'dual-b'
   undressOrNude?: boolean
   endCloseUp?: boolean
 }): string {
-  const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
-  const lockWide = input.undressOrNude === true
-  const endCloseUp = input.endCloseUp === true
-  const parts: string[] = []
-
-  if (clipRole === 'single') {
-    parts.push(
-      'CAMERA (single clip — NO CLOSE-UP): keep the EXACT same shot scale and crop as the source still for EVERY frame.',
-      'FORBIDDEN for the whole single clip: zoom-in, push-in, dolly-in, smash zoom, face close-up, bust-only crop, headshot crop, tightening the frame.',
-      'If the source shows hips/legs/full body, those areas MUST stay visible through the last frame — never crop them away.',
-    )
-    if (lockWide) {
-      parts.push(
-        'SEQUENCE: undress / nude action happens while the camera STAYS WIDE — never zoom before, during, or after undressing on a single clip.',
-      )
-    }
-    return parts.join(' ')
-  }
-
-  if (clipRole === 'dual-a') {
-    if (lockWide) {
-      parts.push(
-        'CAMERA (dual clip 1/2 — UNDRESS WIDE ONLY): hold the FULL source framing for the ENTIRE clip 1. Zero zoom-in, zero close-up, zero push-in.',
-        'This clip’s job is finishing undress while wide. Do NOT begin any zoom bridge here — zoom belongs only after she is already fully nude (clip 2).',
-        'Hips, legs, and crotch area stay in frame so pants/skirt/panties can be pulled fully off and leave the body.',
-      )
-    } else {
-      parts.push(
-        'CAMERA (dual clip 1/2): hold wide source framing through most of this clip.',
-        'Only in the LAST portion of THIS clip begin a SLOW gradual zoom-in toward a medium framing — bridging into clip 2. Never smash-zoom at the start.',
-      )
-    }
-  } else {
-    // dual-b
-    if (lockWide) {
-      parts.push(
-        'CAMERA (dual clip 2/2): she should already be fully nude from clip 1 — keep framing wide enough at the start to confirm bare hips/breasts with no pants/skirt/panties left.',
-        'Do NOT zoom-in until nude is clearly established. Any zoom only in the late portion, slow and slight.',
-      )
-    } else {
-      parts.push(
-        'CAMERA (dual clip 2/2): may continue a closer intimate framing from clip 1; early/mid portion stays stable.',
-      )
-    }
-    if (endCloseUp) {
-      parts.push(
-        'USER REQUEST: END ON CLOSE-UP — only after nude/action is clear; do NOT zoom out; finish held in close-up as requested.',
-      )
-    } else if (!lockWide) {
-      parts.push(
-        'In the FINAL portion of THIS clip, SLOWLY zoom back out to a wider closing frame (soft zoom-out ending). Do not smash cut.',
-      )
-    } else {
-      // nude dual-b without explicit close-up request: prefer staying readable, not smash face-close
-      parts.push(
-        'DEFAULT ENDING: do NOT finish as an extreme face close-up or bust-only crop unless the user asked for close-up — keep hips or torso readable.',
-      )
-    }
-  }
-
-  parts.push(
-    'If any zoom happens: SAME face identity and SAME skin color/tone as the source — no face morph, no pale bleach, no muddy recolor.',
-    'NEVER zoom-in before clothing is fully removed when undress was requested.',
-  )
-  return parts.join(' ')
+  const base =
+    'CAMERA: NO zoom-in, NO zoom-out, NO push-in, NO close-up crop for the whole clip — keep the EXACT source framing (same scale/crop) from the first frame to the last, even during undress/nude action.'
+  return input.undressOrNude === true
+    ? `${base} Hips/legs/crotch stay in frame so clothing can come fully off within this same wide shot.`
+    : base
 }
 
 /** 모션에 「클로즈업으로 끝내」「줌인 유지」 등 — 2프레임 후반 줌아웃 대신 클로즈 종결 */
@@ -1770,11 +1704,10 @@ export function buildAnimationPrompt(input: {
   const parts = ['Premium photorealistic adult short-form video.']
   // 줌 금지는 프롬프트 맨 앞에서도 한 번 더 — 뒤쪽 buildShortsCameraLock()과 중복되지만,
   // 긴 프롬프트에서 뒤쪽 지시가 묻혀 줌인이 새는 실측이 있어 앞뒤로 강조한다.
-  if (clipRole === 'single') {
-    parts.push(
-      'CAMERA PRIORITY (read first): absolutely NO zoom-in, NO push-in, NO close-up crop for this entire clip — keep the exact source framing from the first frame to the last frame.',
-    )
-  }
+  // 줌 기능 전면 삭제(2026-08-28)로 clipRole과 무관하게 항상 넣는다.
+  parts.push(
+    'CAMERA PRIORITY (read first): absolutely NO zoom-in, NO zoom-out, NO push-in, NO close-up crop for this entire clip — keep the exact source framing from the first frame to the last frame.',
+  )
   if (staysNude || undressAction) {
     parts.push(buildSingleContinuousShotLock(coupleRequested))
   }
