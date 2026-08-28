@@ -171,6 +171,24 @@ const cases = [
         baseDescription: '나체 상태의 20대 여성',
       }),
   ],
+  // 커플(2인) 소스 사진 얼굴 드리프트 방지 — 2026-08-28 실측: 증명사진이 아니라 전신/반신
+  // 합성 사진으로 커플 데이트 쇼츠를 만들면 인물 중 한쪽 얼굴이 다른 사람으로 바뀌는 사고.
+  [
+    'buildAnimationPrompt/couple-clothed-date-has-face-lock',
+    () =>
+      mod.buildAnimationPrompt({
+        motion: '남녀가 팔짱을 끼고 걷는다',
+        baseDescription: '20대 남녀 커플이 도심 거리에서 팔짱을 끼고 데이트하는 모습',
+      }).includes('TWO PEOPLE, TWO SEPARATE FACES'),
+  ],
+  [
+    'buildAnimationPrompt/solo-implied-partner-no-couple-face-lock',
+    () =>
+      mod.buildAnimationPrompt({
+        motion: '나체로 여자의 가슴을 만지고 입술에 딮키스한다',
+        baseDescription: '나체 상태의 20대 여성',
+      }).includes('TWO PEOPLE, TWO SEPARATE FACES'),
+  ],
 ]
 
 const results = {}

@@ -24,3 +24,17 @@ export function buildFaceFrozenLock(): string {
     buildSoftMouthFaceLock(),
   ].join('. ')
 }
+
+/**
+ * 2인(커플) 쇼츠 전용 얼굴 고정 — 위 buildFaceFrozenLock/STRUCTURE LOCK은 전부 단수
+ * ("same face identity" 한 문장)라 한 사람만 있다고 가정한 문구였다. 소스 사진에 두 사람이
+ * 함께 있을 때(특히 증명사진이 아니라 전신/반신 합성 사진처럼 두 얼굴이 작게 나오는 경우)
+ * Wan I2V가 영상 진행 중 둘 중 한쪽 얼굴을 다른 사람으로 드리프트시키는 실측이 확인됐다 —
+ * "두 사람 모두 각자의 얼굴을 그대로 유지"를 별도 문장으로 명시해야 한다.
+ */
+export function buildCoupleFaceLock(): string {
+  return [
+    'TWO PEOPLE, TWO SEPARATE FACES: this is two different real individuals, not one person twice — keep EACH person\'s own face, skin tone, and hairstyle exactly as in the source photo, in every frame',
+    'FORBIDDEN: either face drifting into a different-looking person, the two faces blending into each other, or one person being replaced/duplicated as the video plays',
+  ].join('. ')
+}

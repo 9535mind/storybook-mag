@@ -42,8 +42,8 @@ export {
   mentionsHumanSubject,
   defaultEthnicitySentence,
 } from './ethnicity-defaults'
-import { buildSoftMouthFaceLock, buildFaceFrozenLock } from './face-locks'
-export { buildSoftMouthFaceLock, buildFaceFrozenLock } from './face-locks'
+import { buildSoftMouthFaceLock, buildFaceFrozenLock, buildCoupleFaceLock } from './face-locks'
+export { buildSoftMouthFaceLock, buildFaceFrozenLock, buildCoupleFaceLock } from './face-locks'
 import { DYNAMIC_ACTION_PATTERN, resolveDanceTag, isDanceRevision } from './dance-scene-tags'
 export { resolveDanceTag, isDanceRevision } from './dance-scene-tags'
 import { describesAnimalSubject } from './animal-scene-detect'
@@ -1506,6 +1506,14 @@ export function buildAnimationPrompt(input: {
     /남녀|남여|둘\s*다|남자와|여성과|커플|서로|partner|couple|both\s*adults|man\s+and\s+woman/i.test(
       `${motion} ${fullOriginal}`,
     )
+  // coupleRequested는 intimate.wantsPartner(단독 사진 + "파트너가 만진다"류 암시 동작)도
+  // 포함해서, 그 경우엔 사진에 실제로 두 번째 사람이 없을 수 있다 — buildCoupleFaceLock은
+  // "사진에 이미 두 사람이 있다"는 텍스트 신호가 명시적으로 있을 때만 넣는다(암시된 파트너
+  // 만으로 넣으면 무관한 문구가 이미 짧게 압축된 leanIntimate 프롬프트를 다시 늘린다).
+  const twoPeopleInSource =
+    /남녀|남여|둘\s*다|남자와|여성과|커플|서로|both\s*adults|man\s+and\s+woman|couple/i.test(
+      structureCorpus,
+    )
 
   // 몸매 투영 전용 — 버튼(bodyProject) 또는 유효 타점이 있을 때만 become 단축.
   // 모션 문구에 「몸매 투영」이 남아 있어도 키스/애무 leanIntimate를 가로채지 않는다.
@@ -1571,6 +1579,7 @@ export function buildAnimationPrompt(input: {
         coupleRequested
           ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
           : '',
+        twoPeopleInSource ? buildCoupleFaceLock() : '',
         undressAction
           ? `In the first ${half}s (0–${half}s) she completely removes ALL clothes together — top, bra, AND pants/jeans/shorts/skirt/panties, not just the top. From ${half}s to ${total}s, all the way to the very last frame, she stays fully nude: bare breasts staying at the SAME height/position on her chest as before undressing (do NOT lift them higher) with small-to-medium round natural pinkish-brown nipples/areola (NOT a large dark oval blob, NOT a printed spiral/swirl/ring pattern), bare vulva with a compact patch of dense natural curly pubic hair (not wide straggly wisps, not a flat painted patch) clearly visible, ZERO panties left on at any point, ZERO fog or blur over the crotch.`
           : 'She is already fully nude for the entire clip: bare breasts at the same height as the clothed source (not lifted higher) with small-to-medium round natural pinkish-brown nipples/areola (NOT a large dark oval blob, NOT a printed spiral/swirl/ring pattern), bare vulva with a compact patch of dense natural curly pubic hair (not wide straggly wisps, not a flat painted patch) clearly visible, ZERO panties, ZERO fog or blur over the crotch.',
@@ -1663,6 +1672,7 @@ export function buildAnimationPrompt(input: {
       undressAction && coupleRequested
         ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
         : '',
+      twoPeopleInSource ? buildCoupleFaceLock() : '',
       sequentialBreastThenKiss
         ? `THREE-BEAT TIMELINE ("3등분 약속" — equal thirds) — do not merge or skip a beat:`
         : undressAction
@@ -1714,6 +1724,10 @@ export function buildAnimationPrompt(input: {
   // 나체 유지는 모션보다 앞에 — Wan이 뒤쪽 누드 락을 무시하고 옷을 입히던 실측
   const koreanLook = buildKoreanTwentiesLookLock(structureCorpus)
   if (koreanLook) parts.push(koreanLook)
+  // 커플(2인) 소스는 나체 여부와 무관하게 얼굴 드리프트 위험 — 증명사진이 아니라 전신/반신
+  // 합성 사진(얼굴이 작게 나옴)일 때 특히 실측됨. staysNude/undressAction 분기 밖에서
+  // 한 번만 넣어 옷을 입은 커플 데이트 쇼츠에도 항상 적용되게 한다.
+  if (twoPeopleInSource) parts.push(buildCoupleFaceLock())
   if (staysNude || undressAction) {
     parts.push(buildFemaleAdultAnatomyLock(structureCorpus))
   }

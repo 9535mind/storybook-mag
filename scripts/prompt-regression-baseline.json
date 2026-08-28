@@ -250,5 +250,7 @@
     "length": 1862,
     "words": 322,
     "hash": "3888864febcc8e54"
-  }
+  },
+  "buildAnimationPrompt/couple-clothed-date-has-face-lock": true,
+  "buildAnimationPrompt/solo-implied-partner-no-couple-face-lock": false
 }
