@@ -5670,71 +5670,124 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
 
   async function toDisplayableImageUrl(imageUrl) {
     if (!imageUrl || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
-    // fal CDN이 referrer로 막히면 <img>가 검게 나옴 — no-referrer로 직접 로드를 우선하고,
-    // 가능하면 서버 persist로 우리 CDN 주소로 바꿔 안정적으로 보여 준다.
+    // fal CDN을 브라우저에 직접 넣으면 검은 화면만 나오는 실측 — 서버 경유만 허용.
     try {
+      const controller = new AbortController()
+      const timer = window.setTimeout(() => controller.abort(), 45000)
+      const bytesRes = await fetch('/api/media-bytes', {
+        method: 'POST',
+        headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl }),
+        signal: controller.signal,
+      })
+      window.clearTimeout(timer)
+      const bytesData = await bytesRes.json().catch(() => ({}))
+      if (bytesData.ok && typeof bytesData.dataUrl === 'string' && bytesData.dataUrl.startsWith('data:image/')) {
+        if ((bytesData.bytes || 0) >= 2000) return bytesData.dataUrl
+      }
+    } catch (_) {
+      /* try persist */
+    }
+    try {
+      const controller = new AbortController()
+      const timer = window.setTimeout(() => controller.abort(), 20000)
       const persistRes = await fetch('/api/persist-media', {
         method: 'POST',
         headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: imageUrl }),
+        signal: controller.signal,
       })
+      window.clearTimeout(timer)
       const persistData = await persistRes.json().catch(() => ({}))
-      if (persistData.ok && persistData.url) return persistData.url
+      if (persistData.ok && persistData.url && !/fal\.media|fal\.ai/i.test(persistData.url)) {
+        return persistData.url
+      }
     } catch (_) {
-      /* keep original */
+      /* fail */
     }
-    return imageUrl
+    // fal 원본 URL로 폴백하지 않음 — 검은 화면의 원인
+    return null
   }
 
-  function displayFaceswapResult(imageUrl, opts) {
+  function paintFaceswapResult(displayUrl, opts) {
     const label = opts?.engineLabel || '얼굴·장면'
     const prompt = opts?.prompt || label
-
-    void (async () => {
-      const displayUrl = await toDisplayableImageUrl(imageUrl)
-      revokeFaceswapBlob()
-      if (resultImg) {
-        resultImg.referrerPolicy = 'no-referrer'
-        resultImg.onload = () => {
-          resultImg.hidden = false
-          if (resultPlaceholder) resultPlaceholder.hidden = true
-        }
-        resultImg.onerror = () => {
+    revokeFaceswapBlob()
+    if (resultImg) {
+      resultImg.referrerPolicy = 'no-referrer'
+      resultImg.onload = () => {
+        resultImg.hidden = false
+        if (resultPlaceholder) resultPlaceholder.hidden = true
+        // 로드됐는데 사실상 빈 검정이면(아주 작은 natural size) 안내
+        if (resultImg.naturalWidth > 0 && resultImg.naturalWidth < 8 && resultImg.naturalHeight < 8) {
           resultImg.hidden = true
           if (resultPlaceholder) {
             resultPlaceholder.hidden = false
-            resultPlaceholder.innerHTML =
-              '미리보기를 불러오지 못했어요.<br />아래 「메인 결과로 보내기」또는 다운로드를 눌러 보세요.'
+            resultPlaceholder.textContent =
+              '결과가 비어 있거나 깨졌어요. 장면을 다시 만들어 주세요.'
           }
-          setStatus(
-            '결과는 받았지만 미리보기 로드에 실패했어요. 「메인 결과로 보내기」를 눌러 확인해 주세요.',
-            true,
-          )
         }
-        resultImg.src = displayUrl
-        resultImg.hidden = false
       }
-      if (resultDownload) resultDownload.href = displayUrl
-      if (resultActions) resultActions.hidden = false
-      if (resultPlaceholder) resultPlaceholder.hidden = true
-      if (typeof showResult === 'function') {
-        showResult(displayUrl, label, false, {
-          size: typeof sizeField !== 'undefined' && sizeField ? sizeField.value : 'portrait',
-          itemId: null,
-          prompt,
-          accepted: false,
-          mood: typeof moodField !== 'undefined' && moodField ? moodField.value : 'clean',
-          engine: opts?.engine || 'tale-scene',
-          genMode: 'fashion',
-          reviseRound: 0,
-        })
+      resultImg.onerror = () => {
+        resultImg.hidden = true
+        if (resultPlaceholder) {
+          resultPlaceholder.hidden = false
+          resultPlaceholder.innerHTML =
+            '미리보기를 불러오지 못했어요.<br />아래 「다운로드」또는 「메인 결과로 보내기」를 눌러 보세요.'
+        }
+        setStatus(
+          '결과는 받았지만 미리보기 로드에 실패했어요. 「다운로드」로 확인해 주세요.',
+          true,
+        )
       }
-      if (resultWrap) {
-        window.setTimeout(() => {
-          resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
-        }, 50)
+      resultImg.removeAttribute('src')
+      resultImg.src = displayUrl
+      resultImg.hidden = false
+    }
+    if (resultDownload) {
+      resultDownload.href = displayUrl
+      resultDownload.removeAttribute('hidden')
+    }
+    if (resultActions) resultActions.hidden = false
+    if (resultPlaceholder) resultPlaceholder.hidden = true
+    if (typeof showResult === 'function') {
+      showResult(displayUrl, label, false, {
+        size: typeof sizeField !== 'undefined' && sizeField ? sizeField.value : 'portrait',
+        itemId: null,
+        prompt,
+        accepted: false,
+        mood: typeof moodField !== 'undefined' && moodField ? moodField.value : 'clean',
+        engine: opts?.engine || 'tale-scene',
+        genMode: 'fashion',
+        reviseRound: 0,
+      })
+    }
+    if (resultWrap) {
+      window.setTimeout(() => {
+        resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 50)
+    }
+  }
+
+  /** 스튜디오 결과란 + 메인 「생성 결과」. 원격 URL은 서버 프록시로 받은 뒤 표시(검은 화면 방지). */
+  async function displayFaceswapResult(imageUrl, opts) {
+    if (!imageUrl) return false
+    setStatus('결과 이미지를 불러오는 중…', false)
+    const displayUrl = await toDisplayableImageUrl(imageUrl)
+    if (!displayUrl) {
+      setStatus(
+        '장면은 만들어졌지만 미리보기를 받지 못했어요. 잠시 후 다시 시도해 주세요.',
+        true,
+      )
+      if (resultPlaceholder) {
+        resultPlaceholder.hidden = false
+        resultPlaceholder.textContent =
+          '미리보기 로드 실패. 다시 「장면 만들기」를 눌러 주세요.'
       }
-    })()
+      return false
+    }
+    paintFaceswapResult(displayUrl, opts)
+    return true
   }
 
   // 얼굴 2장(특히 두 명 동시 교체, 또는 방금 새로 생성한 낯선 장면 위 교체)은 fal 처리가
@@ -5763,7 +5816,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
         return null
       }
-      if (data.status === 'succeeded' && data.imageUrl) return data.imageUrl
+      if (data.status === 'succeeded') {
+        if (typeof data.dataUrl === 'string' && data.dataUrl.startsWith('data:image/')) return data.dataUrl
+        if (data.imageUrl) return data.imageUrl
+      }
       if (data.status === 'failed') {
         setStatus(data.message || `얼굴 교체에 실패했어요: ${data.error || 'unknown_error'}`, true)
         return null
@@ -5867,11 +5923,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         stepLabel: hasSecondFace ? '두 얼굴 교체' : '',
       })
       if (!imageUrl) return
-      displayFaceswapResult(imageUrl, {
+      const shown = await displayFaceswapResult(imageUrl, {
         engineLabel: hasSecondFace ? '두 얼굴 교체(AI)' : '얼굴 교체(AI)',
         prompt: '얼굴 교체(간단 모드) 결과',
         engine: 'face-swap',
       })
+      if (!shown) return
       setStatus(
         hasSecondFace
           ? '완성! 두 얼굴이 장면 성별에 맞춰 합성됐어요. 위 「생성 결과」와 아래 결과란을 확인하세요.'
@@ -5903,6 +5960,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     arm_in_arm:
       'young korean man and woman couple, walking arm in arm on city street, woman holding man arm with both hands, shoulders leaning together, looking at each other smiling, casual clothes, daytime, full bodies facing camera, photorealistic fashion photo, no stiff passport pose, no arms hanging at sides',
     hug: 'young korean man and woman couple hugging face to face, arms wrapped around back and waist, bodies pressed close, heads tilted toward each other, casual clothes, indoor or street, photorealistic fashion photo, no stiff side-by-side passport pose',
+    back_hug:
+      'young korean man and woman couple in a back-hug: the man stands DIRECTLY BEHIND the woman, his chest against her back, both arms wrapped around her torso from behind, her head may tilt back toward him, casual clothes, photorealistic fashion photo, FORBIDDEN standing side-by-side or face-to-face square stance',
     kiss: 'young korean man and woman couple kissing on the lips, bodies leaning in, arms around waist or face, lips touching, casual clothes, photorealistic fashion photo, no stiff standing-apart pose',
   }
   // 증명사진→전신 연출용: "young korean / fashion photo"처럼 새 인물을 발명하는 문구를 빼다.
@@ -5911,6 +5970,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     arm_in_arm:
       'walking arm in arm on a city street, linked arms, shoulders leaning together, looking at each other, natural casual clothes, daytime, full bodies, no stiff passport pose',
     hug: 'face-to-face hug, arms wrapped around back and waist, bodies pressed close, heads tilted toward each other, casual clothes, no stiff side-by-side passport pose',
+    back_hug:
+      'BACK-HUG pose: man stands DIRECTLY BEHIND the woman, chest to her back, both arms wrapped around her from behind — not side-by-side, not face-to-face; she may tilt her head back toward him; casual clothes; full bodies',
     kiss: 'kissing on the lips, bodies leaning in, arms around waist or face, lips touching, casual clothes, no stiff standing-apart pose',
   }
 
@@ -5994,6 +6055,37 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   // 증명사진 2장을 참고 이미지로 그대로 Flux Kontext Multi에 넘겨서, "장면 생성 + 별도
   // 얼굴교체" 2단계 대신 한 번의 생성으로 실제 얼굴을 유지한 전신 장면을 바로 만든다.
   // face-swap보다 훨씬 빠르고(생성 1회), 얼굴이 원본과 다른 사람으로 나오는 사고도 줄어든다.
+  // 서버는 submit만 하고 클라이언트가 status를 폴링(Pages 시간 한도·45초 동기 타임아웃 회피).
+  async function pollTaleSceneStatus(statusUrl, responseUrl) {
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      await sleep(attempt < 6 ? 1500 : 2500)
+      const response = await fetch('/api/tale-scene-status', {
+        method: 'POST',
+        headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ statusUrl, responseUrl }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (response.status === 401) {
+        if (typeof clearAllAuth === 'function') clearAllAuth()
+        if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+        return null
+      }
+      if (data.status === 'succeeded') {
+        // 서버가 이미 dataUrl로 인라인해 주면 검은 화면 없이 바로 표시
+        if (typeof data.dataUrl === 'string' && data.dataUrl.startsWith('data:image/')) {
+          return data.dataUrl
+        }
+        if (data.imageUrl) return data.imageUrl
+      }
+      if (data.status === 'failed') {
+        setStatus(data.message || sceneGenerateFailMessage(response, data), true)
+        return null
+      }
+    }
+    setStatus('장면 생성이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.', true)
+    return null
+  }
+
   async function generateCoupleScenePhotoreal(face0DataUrl, face1DataUrl) {
     const description = requireSceneDescription(true)
     if (!description) return null
@@ -6020,6 +6112,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       setStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
       return null
     }
+    if (data.pending && data.statusUrl && data.responseUrl) {
+      return await pollTaleSceneStatus(data.statusUrl, data.responseUrl)
+    }
     if (!data.ok || !data.imageUrl) {
       setStatus(sceneGenerateFailMessage(response, data), true)
       return null
@@ -6044,15 +6139,21 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     if (resultImg) resultImg.hidden = true
     if (resultActions) resultActions.hidden = true
     if (resultPlaceholder) resultPlaceholder.hidden = false
-    setStatus('두 사람의 얼굴을 유지한 채 장면을 만들고 있어요… (보통 20~40초)', false)
+    const progressLabel =
+      faceswapMode === 'body'
+        ? '전신·반신으로 장면을 만들고 있어요…'
+        : '두 사람의 얼굴을 유지한 채 장면을 만들고 있어요…'
+    const stopTimer = startProgressTimer(setStatus, progressLabel)
     try {
       const imageUrl = await generateCoupleScenePhotoreal(state.face0, state.face1)
+      stopTimer()
       if (!imageUrl) return
-      displayFaceswapResult(imageUrl, {
+      const shown = await displayFaceswapResult(imageUrl, {
         engineLabel: faceswapMode === 'body' ? '전신·반신으로 장면' : '얼굴로 장면',
         prompt: '증명사진으로 만든 장면',
         engine: 'tale-scene',
       })
+      if (!shown) return
       state.target = imageUrl
       setSlotPreview(targetSlot, imageUrl)
       setStatus(
@@ -6060,8 +6161,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         false,
       )
     } catch (error) {
+      stopTimer()
       setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
     } finally {
+      stopTimer()
       scenePhotorealBtn.disabled = false
     }
   })
@@ -6073,24 +6176,28 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     }
     if (blockedByExistingTarget()) return
     sceneGenerateBtn.disabled = true
-    setStatus('데이트 장면을 만들고 있어요…', false)
+    const stopTimer = startProgressTimer(setStatus, '데이트 장면을 만들고 있어요…')
     try {
       const imageUrl = await generateCoupleScene()
+      stopTimer()
       if (!imageUrl) return
       state.target = imageUrl
       setSlotPreview(targetSlot, imageUrl)
-      displayFaceswapResult(imageUrl, {
+      const shown = await displayFaceswapResult(imageUrl, {
         engineLabel: '장면만 생성',
         prompt: '장면만 만들기(얼굴 미적용)',
         engine: 'generate',
       })
+      if (!shown) return
       setStatus(
         '장면을 만들었어요. 「3. 얼굴 바꾸기」로 얼굴을 붙이거나, 위 결과가 쓸 만하면 그대로 쓰세요.',
         false,
       )
     } catch (error) {
+      stopTimer()
       setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
     } finally {
+      stopTimer()
       sceneGenerateBtn.disabled = false
     }
   })
@@ -6110,16 +6217,19 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return
     }
     sceneAndSwapBtn.disabled = true
-    setStatus('데이트 장면을 만들고 있어요…', false)
+    const stopTimer = startProgressTimer(setStatus, '데이트 장면을 만들고 있어요…')
     try {
       const imageUrl = await generateCoupleScene()
+      stopTimer()
       if (!imageUrl) return
       state.target = imageUrl
       setSlotPreview(targetSlot, imageUrl)
       runBtn.click()
     } catch (error) {
+      stopTimer()
       setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
     } finally {
+      stopTimer()
       sceneAndSwapBtn.disabled = false
     }
   })

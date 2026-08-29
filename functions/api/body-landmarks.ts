@@ -85,15 +85,16 @@ const SYSTEM = [
   'Find the primary adult woman facing the camera (if multiple people, prefer the clearest frontal female torso).',
   'moundL/R = breast mound centers (white circle). nippleL/R = nipple points (red dots).',
   'IMPORTANT: nipples are often NOT at the geometric center of the breast — they may sit slightly lower/outward/inward. Set mound and nipple independently when the clothed silhouette suggests it.',
-  'breastRadiusL/R are mound radii as a fraction of min(imageWidth,imageHeight), typically 0.05..0.12.',
+  'Size rule: breastRadius should match the clothed chest bulge; if ambiguous, allow a touch larger (~half cup), never 2–3 cups oversized.',
   'Never place points on face, neck, shoulders, or arms.',
 ].join(' ')
 
 const USER = [
   'Inspect this photo and estimate body landmarks for the main woman.',
   'JSON schema exactly:',
-  '{"moundL":{"x":0.0,"y":0.0},"moundR":{"x":0.0,"y":0.0},"nippleL":{"x":0.0,"y":0.0},"nippleR":{"x":0.0,"y":0.0},"breastRadiusL":0.08,"breastRadiusR":0.08}',
+  '{"moundL":{"x":0.0,"y":0.0},"moundR":{"x":0.0,"y":0.0},"nippleL":{"x":0.0,"y":0.0},"nippleR":{"x":0.0,"y":0.0},"breastRadiusL":0.07,"breastRadiusR":0.07}',
   'Rules: left/right from VIEWER perspective. mound = soft breast volume center under clothing; nipple = expected nipple under fabric (may be off-center). Omit navel.',
+  'Size rule: if the clothed bulge is clear, match it; if ambiguous, breastRadius may be slightly larger (~half cup feel), not dramatically oversized.',
 ].join('\n')
 
 /**

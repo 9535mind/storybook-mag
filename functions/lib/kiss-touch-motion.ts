@@ -25,6 +25,51 @@ export const TOUCH_ACTION_VERBS_KO =
   '긁어|긁고|긁는|깨물어|깨물고|깨무는|깨물었|튕기|튕겨|튕긴|튕겼|찌르|찔러|찔렀|찌른'
 
 /**
+ * 키스 강도 구분 (제품 규칙):
+ * - peck: 뽀뽀 / 가벼운 입맞춤 — 입술만 살짝 닿음
+ * - kiss: 「키스」기본값 — 입술을 세게 맞대고 빠는 격한 키스 (혀 필수 아님)
+ * - deep: 딥키스/딮키스/혀 — 혀가 보이는 프렌치 키스
+ * - null: 키스 관련 단어 없음
+ */
+export type KissIntensity = 'peck' | 'kiss' | 'deep'
+
+export function detectKissIntensity(text: string): KissIntensity | null {
+  const t = polishKoreanPromptText(text || '')
+  if (!t) return null
+  if (
+    /딥\s*키스|딮\s*키스|혀\s*(?:를\s*)?(?:넣|섞|엉|맞)|french\s*kiss|tongue\s*kiss|with\s*(?:his\s*|her\s*)?tongue/i.test(
+      t,
+    )
+  ) {
+    return 'deep'
+  }
+  // 「키스」가 있으면 기본은 격한 입술 키스 (뽀뽀가 아님)
+  if (/키스|kiss(?:es|ing)?/i.test(t)) return 'kiss'
+  // 뽀뽀·입맞춤만 (키스 단어 없이)
+  if (/뽀뽀|입\s*(?:을\s*)?맞추|입맞춤|peck|light\s*kiss|quick\s*kiss/i.test(t)) return 'peck'
+  return null
+}
+
+/** Wan MOTION/TIME용 — 강도별 영어 동작 한 줄 */
+export function kissIntensityActionLine(intensity: KissIntensity, opts?: { backHug?: boolean }): string {
+  const back = opts?.backHug === true
+  if (intensity === 'peck') {
+    return back
+      ? 'light peck from behind/over her shoulder — lips briefly touch, soft 뽀뽀, NOT a long sucking kiss'
+      : 'light peck / soft lip touch (뽀뽀·가벼운 입맞춤) — brief contact only, NOT deep sucking'
+  }
+  if (intensity === 'deep') {
+    return back
+      ? 'DEEP KISS (딥키스) from behind: mouths locked over her shoulder, tongues visibly intertwining, passionate — not a peck'
+      : 'DEEP KISS (딥키스): mouths locked, lips sucking hard, tongues visibly intertwining / french kiss — continuous, not a peck'
+  }
+  // default 「키스」
+  return back
+    ? 'PASSIONATE KISS from behind: mouths locked over her shoulder, lips pressing and sucking firmly together for most of the clip — NOT a light peck/뽀뽀; tongue optional unless deep-kiss was requested'
+    : 'PASSIONATE KISS: mouths locked, lips pressing and sucking firmly together (서로 입술을 세게 빠는 키스) for most of the clip — NOT a light peck/뽀뽀; heads lean in; continuous'
+}
+
+/**
  * 「가슴을 만지고 입술에 딮키스한다」처럼 "가슴"(터치 대상)과 "키스/입술"(별개 동작의
  * 대상)이 한 문장에 같이 있으면, 예전 정규식(거리 8자 이내면 매칭)이 "가슴에 키스"로
  * 잘못 인식해 실제 요청(입-입 딥키스 + 손으로 가슴 터치)과 다르게 가슴에 입으로 키스하는
@@ -109,6 +154,17 @@ export function wantsMaleGenitalHand(text: string): boolean {
 }
 
 /**
+ * 백허그 / 뒤에서 안기 — 옆구리 손만 올리는 옆서기로 대체되는 실측이 있어 별도 감지.
+ */
+export function wantsBackHug(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  if (!t) return false
+  return /백\s*허그|뒤에서\s*(?:안|껴안|감싸|포옹)|뒤로\s*(?:안|껴안)|등\s*뒤에서|from\s*behind|back\s*hug|hug(?:s|ging)?\s*(?:her\s*)?from\s*behind|stands?\s*behind\s*her|embrace(?:s|d)?\s*(?:her\s*)?from\s*behind/i.test(
+    t,
+  )
+}
+
+/**
  * I2V 모션: 애무·눕기·올라타기 등 Wan이 무시하기 쉬운 성인 동작을 영어 동작 지시로 증폭.
  * (단순 번역만 넣으면 "subtle camera / limbs only" 잠금에 밀려 안 먹히는 실측)
  */
@@ -117,6 +173,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
   wantsPartner: boolean
   wantsPoseChange: boolean
   wantsMaleGenitalHand: boolean
+  wantsBackHug: boolean
 } {
   const t = polishKoreanPromptText(motion || '')
   const bits: string[] = []
@@ -148,17 +205,15 @@ export function amplifyAdultMotionForVideo(motion: string): {
     )
   }
 
-  // 백허그 / 뒤에서 안기 — 한 달 이상 마주선 자세만 반복되던 한계를 깨기 위한 포즈 전환
-  const backHug =
-    /백\s*허그|뒤에서\s*(?:안|껴안|감싸|포옹)|뒤로\s*(?:안|껴안)|등\s*뒤에서|from\s*behind|back\s*hug|hug(?:s|ging)?\s*(?:her\s*)?from\s*behind|stands?\s*behind\s*her|embrace(?:s|d)?\s*(?:her\s*)?from\s*behind/i.test(
-      t,
-    )
+  // 백허그 / 뒤에서 안기 — 옆서기+허리손만으로 대체되는 실측이 있어 포즈를 반복·강하게 잠금
+  const backHug = wantsBackHug(t)
   if (backHug) {
     wantsPartner = true
     wantsPoseChange = true
     bits.push(
-      'POSE: back-hug — the man stands BEHIND her, chest to her back, both arms wrapped around her from behind (not face-to-face)',
-      'FORBIDDEN staying in a face-to-face standing pose for the whole clip when back-hug was requested',
+      'CRITICAL POSE LOCK — BACK-HUG for the WHOLE clip: the man stands DIRECTLY BEHIND the woman, his chest pressed to her BACK, his face over her shoulder or behind her head',
+      'BOTH his arms wrap around her torso from BEHIND — not standing beside her, not side-by-side, not one hand only on her waist from the side',
+      'FORBIDDEN: face-to-face square stance; standing next to her with a hand on her hip; side-hug; passport couple pose',
     )
   }
 
@@ -170,7 +225,9 @@ export function amplifyAdultMotionForVideo(motion: string): {
   if (headTiltBack) {
     wantsPoseChange = true
     bits.push(
-      'she tilts / arches her head backward, chin up, throat exposed — not looking straight ahead the whole time',
+      backHug
+        ? 'while he stays BEHIND her: she tilts / arches her head backward onto his shoulder or toward his face, chin up, throat exposed'
+        : 'she tilts / arches her head backward, chin up, throat exposed — not looking straight ahead the whole time',
     )
   }
 
@@ -252,7 +309,8 @@ export function amplifyAdultMotionForVideo(motion: string): {
   }
 
   // 키스·기타 애무 (파트너 동작이 흔한 케이스)
-  if (/딥\s*키스|키스|입\s*(?:을\s*)?맞추|입맞춤|kiss(?:es|ing)?/i.test(t)) {
+  const kissIntensity = detectKissIntensity(t)
+  if (kissIntensity) {
     wantsPartner = true
     wantsPoseChange = true
     const kissTarget = detectKissBodyTarget(t)
@@ -270,16 +328,21 @@ export function amplifyAdultMotionForVideo(motion: string): {
       )
     } else if (backHug || headTiltBack) {
       bits.push(
+        kissIntensityActionLine(kissIntensity, { backHug: backHug || false }),
         backHug
-          ? 'from behind: she tilts her head back; he leans over her shoulder for a deep mouth-to-mouth kiss while staying behind her (back-hug kiss) — not face-to-face square stance'
-          : 'she tilts her head back; deep mouth-to-mouth kiss with her chin up — continuous, not a quick peck',
-        'last frame still in that kissed / head-back pose — do not snap to a stiff face-to-face still',
+          ? 'he stays BEHIND her the whole time while kissing — FORBIDDEN face-to-face square stance'
+          : 'she keeps her head tilted back during the kiss',
+        'last frame still in that kissed / head-back / behind pose — do not snap to a stiff side-by-side still',
       )
     } else {
       bits.push(
-        'mandatory deep mouth-to-mouth kissing for most of the clip — lips locked together, heads leaning in, continuous kiss (not a quick peck, not faces apart)',
-        'slight natural teeth OK if lips part; no wide Hollywood grin',
-        'last frame still kissing — do not return to the source still pose',
+        kissIntensityActionLine(kissIntensity),
+        kissIntensity === 'peck'
+          ? 'brief soft contact only — faces may part after the peck'
+          : 'slight natural teeth OK if lips part; no wide Hollywood grin',
+        kissIntensity === 'peck'
+          ? 'last frame may show lips just parting after the peck'
+          : 'last frame still kissing — do not return to the source still pose',
       )
     }
     if (/나체|누드|nude|naked|전라|topless/i.test(t)) {
@@ -308,5 +371,6 @@ export function amplifyAdultMotionForVideo(motion: string): {
     wantsPartner,
     wantsPoseChange,
     wantsMaleGenitalHand: maleGenitalHand,
+    wantsBackHug: backHug,
   }
 }

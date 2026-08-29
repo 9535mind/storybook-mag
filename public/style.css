@@ -2062,11 +2062,14 @@ body {
 .admin-faceswap-result__img {
   display: block;
   width: 100%;
-  max-width: 100%;
+  max-width: 480px;
   height: auto;
+  margin: 0 auto;
   border-radius: 10px;
   border: 1px solid rgba(226, 232, 240, 0.25);
-  background: rgba(15, 23, 42, 0.6);
+  background: transparent;
+  /* 로드 전 빈 검정당어리처럼 보이지 않게 */
+  min-height: 0;
 }
 
 .admin-faceswap-result__actions {

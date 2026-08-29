@@ -1,11 +1,14 @@
 import { requireAuth } from '../lib/auth'
 import { checkAdvancedFaceSwap } from '../lib/fal-client'
+import { fetchRemoteImageAsDataUrl, persistRemoteImageToR2 } from '../lib/persist-remote-image'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
   FAL_KEY?: string
+  MEDIA?: R2Bucket
+  MEDIA_PUBLIC_BASE_URL?: string
 }
 
 function jsonResponse(body: unknown, status: number): Response {
@@ -25,7 +28,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const auth = await requireAuth(request, env)
   if (auth instanceof Response) return auth
 
-  // 폴링이 몇 초마다라 얼굴 교체 몇 번이면 한도를 쉽게 넘김 — 넉넉히 잡는다.
   const limited = await enforceRateLimit(env, 'face-swap-status', rateLimitIdentity(auth), 800, 3600)
   if (limited) return limited
 
@@ -54,7 +56,21 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     })
 
     if (result.status === 'succeeded' && result.imageUrl) {
-      return jsonResponse({ ok: true, pending: false, status: 'succeeded', imageUrl: result.imageUrl }, 200)
+      const [persisted, inlined] = await Promise.all([
+        persistRemoteImageToR2(env, result.imageUrl),
+        fetchRemoteImageAsDataUrl(result.imageUrl),
+      ])
+      const imageUrl = persisted || result.imageUrl
+      return jsonResponse(
+        {
+          ok: true,
+          pending: false,
+          status: 'succeeded',
+          imageUrl,
+          ...(inlined?.dataUrl ? { dataUrl: inlined.dataUrl } : {}),
+        },
+        200,
+      )
     }
 
     if (result.status === 'failed') {

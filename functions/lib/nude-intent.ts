@@ -250,7 +250,7 @@ const NUDE_BECOMES_EXACT_COMPACT = '나체가된다.'
 
 /** Canonical revision when the 몸매 투영 button is used — no magic phrase required. */
 export const BODY_PROJECT_REVISION =
-  '몸매 투영: 얼굴·체형 그대로. 어깨·팔뚝·팔꿈치로 유두 높이를 읽고, 가슴은 옷에 볼륨이 있으면 C컵 반~D컵·처진 실루엣 가능. 배꼽·치부 기점 고정 후 상의·바지·벨트·팬티 전부 녹여 완전 나체. 가슴 아래 벨트/띠 잔상·바지/팬티 잔존·빈유 과소평가 실패.'
+  '몸매 투영: 얼굴·체형 그대로. 어깨·팔뚝·팔꿈치로 유두 높이를 읽고, 가슴은 옷 실루엣 기준(분명하면 동일, 애매하면 반컵~1컵만 더 풍만·2~3컵 과대 금지). 배꼽·치부 기점 고정 후 상의·바지·벨트·팬티 전부 녹여 완전 나체. 가슴 아래 벨트/띠 잔상·바지/팬티 잔존 실패.'
 
 export function hasNudeBecomesPhrase(text: string): boolean {
   const t = polishKoreanPromptText(text || '')

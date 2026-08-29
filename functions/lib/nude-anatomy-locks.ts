@@ -172,15 +172,17 @@ export function buildClothingSilhouetteBodyLock(text = '', bustHeight?: string):
   const t = polishKoreanPromptText(text || '')
   const heightOverride = buildBustHeightPreferenceLine(bustHeight)
   const bits = [
-    'CLOTHING SILHOUETTE → BODY LOCK: read breast size, waist, hips, and overall figure from how the clothes fit in the source photo — nude or video must match that implied body, not a generic Barbie doll',
+    'CLOTHING SILHOUETTE → BODY LOCK: read breast size, waist, hips, and overall figure from how the clothes fit in the source photo — nude or video must match that implied body, not a generic Barbie doll and not an inflated porn bust',
     heightOverride ||
       'BUST HEIGHT from arm landmarks: compare the chest mound under the shirt to the shoulder, upper arm (bicep), and elbow — if fabric volume sits low toward mid-upper-arm / near elbow height, keep LOWER-set breasts (not high Barbie bust under the collarbone)',
     heightOverride
       ? ''
       : 'if the arm/elbow landmarks are unclear or hard to read from the photo, default to a slightly LOWER, natural relaxed bust placement rather than a lifted/perky high-set one — a natural drop is safer than an artificially raised bust when in doubt',
-    'BUST VOLUME from chest print/ruffles: if lettering or lace sits on a forward-projecting chest and the tee/blouse lifts off the ribs, read FULL adult volume about full-C to D cup — FORBIDDEN collapsing to flat 빈유 or tiny A/B when the clothed chest clearly projects',
-    'if the outfit shows a full/large bust under fabric, keep LARGE full breasts when nude — FORBIDDEN tiny barbie breasts, flat doll chest, or shrinking the bust after undress',
-    'if frontal clothing makes bust hard to read, prefer soft FULL breast volume (볼륨감, ~C½–D) over flat empty 빈유 — volume is safer than underestimating',
+    // 실측: "C½–D 기본"은 2~3컵 과대, "애매하면 작게"는 빈유처럼 보임 → 애매할 때만 +½~1컵
+    'BUST VOLUME: match the clothed chest projection as the baseline — mound width under fabric ≈ nude breast width; FORBIDDEN upsizing 2–3 cup sizes or inventing full-D/E when the shirt reads modest',
+    'if the outfit clearly shows a modest/small bust, keep modest/small natural breasts when nude — do not jump to large',
+    'if the outfit clearly shows a full/large bust under fabric, keep that SAME full volume — FORBIDDEN shrinking to tiny barbie breasts',
+    'when frontal clothing is ambiguous / hard to read, prefer a soft bump of about HALF to ONE cup LARGER than the apparent clothed bulge (살짝·1컵 정도만 더 풍만) — NOT flat/under, NOT 2–3 cups oversized',
     'pendant / gourd-like (표주박) hang is OK when the clothed silhouette is long and low — do not auto-lift breasts to a perky high set',
     'if the outfit shows a narrow/slim waist, keep that slim waist — do not thicken the midsection',
     'if the outfit shows wider hips or a curvy hourglass, keep that hip/waist ratio when nude',

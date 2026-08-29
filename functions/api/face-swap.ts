@@ -83,7 +83,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const workflowType = body.workflowType === 'user_hair' ? 'user_hair' : 'target_hair'
-    const upscale = body.upscale !== false
+    // 업스케일은 얼굴을 다시 그리며 닮음이 떨어지는 실측 — 명시 체크일 때만 ON
+    const upscale = body.upscale === true
 
     let targetImageUrl: string
     let face0ImageUrl: string

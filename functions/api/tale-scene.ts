@@ -1,6 +1,6 @@
 import { requireAuth } from '../lib/auth'
 import { evaluateTaleScenePolicy, polishKoreanPromptText } from '../lib/content-policy'
-import { FAL_WILDLIFE_TIMEOUT_MS, generateFalKontextMultiImage, uploadDataUrlToFal } from '../lib/fal-client'
+import { submitFalKontextMultiImage, uploadDataUrlToFal } from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 
 interface Env {
@@ -194,6 +194,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         : 'If a reference is a face crop or half-body shot: extend to full body naturally, but the face and the visible torso proportions must stay the same person — FORBIDDEN replacing them with a different fashion model.',
       'FORBIDDEN: inventing new faces, beauty-filtered strangers, different ethnicity, different age, different body type (do not slim, bulk, enlarge, or shrink bust/shoulders/hips away from the references).',
       'FORBIDDEN: treating the scene text as permission to redesign who they are — scene text only changes pose, place, clothes if asked, and action.',
+      'Copy each reference face as faithfully as possible (same person recognition) — slight makeup change OK, different person NOT OK.',
     ].join(' ')
 
     const prompt = body.photoreal
@@ -219,17 +220,29 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         ].join('\n')
 
     try {
-      const { imageUrl } = await generateFalKontextMultiImage({
+      // 동기 대기는 Pages 벽시계·45초 fal 한도에 걸려 "서버 시간 한도"로 자주 실패함.
+      // 업로드·프롬프트 준비 후 submit만 하고, 클라이언트는 /api/tale-scene-status로 폴링.
+      // guidance: 너무 높으면 장면 텍스트에 과적합되어 참고 얼굴을 버림(실측). 정체성 우선으로 4.5.
+      const submitted = await submitFalKontextMultiImage({
         falKey: env.FAL_KEY,
         imageUrls,
         prompt,
         aspectRatio,
-        timeoutMs: FAL_WILDLIFE_TIMEOUT_MS,
-        // 정체성 보존이 최우선 — 가이던스를 너무 올리면 장면 텍스트("young couple" 등)에
-        // 과적합되어 얼굴을 갈아엎는 실측이 있었음. 행동 보강이 있어도 5.5 전후로 유지.
-        guidanceScale: body.photoreal && imageUrls.length >= 2 ? 5.5 : undefined,
+        guidanceScale: body.photoreal && imageUrls.length >= 2 ? 4.5 : undefined,
       })
-      return jsonResponse({ ok: true, imageUrl, prompt }, 200)
+      if ('imageUrl' in submitted && submitted.imageUrl) {
+        return jsonResponse({ ok: true, imageUrl: submitted.imageUrl, prompt }, 200)
+      }
+      return jsonResponse(
+        {
+          ok: true,
+          pending: true,
+          statusUrl: submitted.statusUrl,
+          responseUrl: submitted.responseUrl,
+          prompt,
+        },
+        200,
+      )
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown_error'
       if (isProviderContentBlock(message)) {

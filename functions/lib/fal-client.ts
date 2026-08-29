@@ -638,6 +638,105 @@ export async function generateFalKontextMultiImage(options: {
   )
 }
 
+function buildKontextMultiBody(options: {
+  imageUrls: string[]
+  prompt: string
+  aspectRatio?: string
+  guidanceScale?: number
+}): Record<string, unknown> {
+  return {
+    prompt: options.prompt,
+    image_urls: options.imageUrls,
+    num_images: 1,
+    output_format: 'png',
+    safety_tolerance: '5',
+    ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
+    ...(typeof options.guidanceScale === 'number' ? { guidance_scale: options.guidanceScale } : {}),
+  }
+}
+
+/**
+ * 증명사진→전신 장면(Kontext Multi)도 얼굴교체와 같이 45초를 넘기는 경우가 있어
+ * 동기 대기는 Pages 한도에 걸린다 — submit만 하고 클라이언트가 status를 폴링한다.
+ */
+export async function submitFalKontextMultiImage(options: {
+  falKey: string
+  imageUrls: string[]
+  prompt: string
+  aspectRatio?: string
+  guidanceScale?: number
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  const endpoint = 'https://queue.fal.run/fal-ai/flux-pro/kontext/multi'
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${options.falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(buildKontextMultiBody(options)),
+    },
+    20_000,
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse &
+    FalImageResultResponse
+  if (!submitResponse.ok) {
+    throw new Error(extractErrorMessage(submitPayload))
+  }
+  if (submitPayload.status_url && submitPayload.response_url) {
+    return { statusUrl: submitPayload.status_url, responseUrl: submitPayload.response_url }
+  }
+  const imageUrl = submitPayload.images?.[0]?.url?.trim()
+  if (!imageUrl) {
+    throw new Error(extractErrorMessage(submitPayload) || 'missing_image_url')
+  }
+  return { imageUrl }
+}
+
+export async function checkFalKontextMultiImage(options: {
+  falKey: string
+  statusUrl: string
+  responseUrl: string
+}): Promise<{ status: 'pending' | 'succeeded' | 'failed'; imageUrl?: string; error?: string }> {
+  const statusResponse = await fetchWithTimeout(
+    options.statusUrl,
+    { method: 'GET', headers: { Authorization: `Key ${options.falKey}` } },
+    15_000,
+  )
+  const statusPayload = (await statusResponse.json().catch(() => ({}))) as FalQueueStatusResponse
+  if (!statusResponse.ok) {
+    return { status: 'failed', error: extractErrorMessage(statusPayload) }
+  }
+
+  const status = statusPayload.status?.toUpperCase()
+  if (status === 'FAILED' || status === 'CANCELLED') {
+    return { status: 'failed', error: extractErrorMessage(statusPayload) || `fal_${status.toLowerCase()}` }
+  }
+  if (status !== 'COMPLETED') {
+    return { status: 'pending' }
+  }
+
+  const resultResponse = await fetchWithTimeout(
+    options.responseUrl,
+    { method: 'GET', headers: { Authorization: `Key ${options.falKey}` } },
+    15_000,
+  )
+  const resultPayload = (await resultResponse.json().catch(() => ({}))) as FalImageResultResponse
+  if (!resultResponse.ok) {
+    return { status: 'failed', error: extractErrorMessage(resultPayload) }
+  }
+  const policyMsg = extractErrorMessage(resultPayload)
+  if (/content.?policy|flagged|nsfw|safety/i.test(policyMsg)) {
+    return { status: 'failed', error: policyMsg }
+  }
+  const imageUrl = resultPayload.images?.[0]?.url?.trim()
+  if (!imageUrl) {
+    return { status: 'failed', error: policyMsg !== 'fal_generation_failed' ? policyMsg : 'missing_image_url' }
+  }
+  return { status: 'succeeded', imageUrl }
+}
+
 // 얼굴 1장 교체는 대개 30~40초면 끝나지만, 2인 동시 교체는 60~90초 이상 걸리는 사례가
 // 실측됨 — 45초로는 완료 전에 우리 쪽 폴링이 fal_provider_timeout을 던져버림.
 // merge-videos(90초)와 동일하게, Pages Function은 클라이언트가 붙어있는 동안
