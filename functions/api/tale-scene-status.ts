@@ -1,6 +1,6 @@
 import { requireAuth } from '../lib/auth'
 import { checkFalKontextMultiImage } from '../lib/fal-client'
-import { fetchRemoteImageAsDataUrl, persistRemoteImageToR2 } from '../lib/persist-remote-image'
+import { persistRemoteImageToR2 } from '../lib/persist-remote-image'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 
 interface Env {
@@ -56,27 +56,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     })
 
     if (result.status === 'succeeded' && result.imageUrl) {
-      // 브라우저가 fal CDN을 직접 못 읽어 검은 화면만 나오는 실측 → 서버에서 받아
-      // dataUrl / R2 URL로 바꿔 돌려준다.
-      const [persisted, inlined] = await Promise.all([
-        persistRemoteImageToR2(env, result.imageUrl),
-        fetchRemoteImageAsDataUrl(result.imageUrl),
-      ])
-      const imageUrl = persisted || result.imageUrl
-      if (!inlined?.dataUrl && !persisted) {
-        // 둘 다 실패해도 URL은 주되, 클라이언트가 다시 media-bytes 시도
-        return jsonResponse(
-          { ok: true, pending: false, status: 'succeeded', imageUrl, previewFailed: true },
-          200,
-        )
-      }
+      // 큰 dataUrl 인라인은 status 타임아웃 원인 — R2 공개 URL만 반환
+      const persisted = await persistRemoteImageToR2(env, result.imageUrl)
       return jsonResponse(
         {
           ok: true,
           pending: false,
           status: 'succeeded',
-          imageUrl,
-          ...(inlined?.dataUrl ? { dataUrl: inlined.dataUrl } : {}),
+          imageUrl: persisted || result.imageUrl,
+          persisted: Boolean(persisted),
         },
         200,
       )

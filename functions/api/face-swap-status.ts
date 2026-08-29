@@ -1,6 +1,6 @@
 import { requireAuth } from '../lib/auth'
 import { checkAdvancedFaceSwap } from '../lib/fal-client'
-import { fetchRemoteImageAsDataUrl, persistRemoteImageToR2 } from '../lib/persist-remote-image'
+import { persistRemoteImageToR2 } from '../lib/persist-remote-image'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 
 interface Env {
@@ -56,18 +56,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     })
 
     if (result.status === 'succeeded' && result.imageUrl) {
-      const [persisted, inlined] = await Promise.all([
-        persistRemoteImageToR2(env, result.imageUrl),
-        fetchRemoteImageAsDataUrl(result.imageUrl),
-      ])
-      const imageUrl = persisted || result.imageUrl
+      // dataUrl 인라인은 수 MB JSON이라 status 요청이 타임아웃 → 클라이언트는 영원히 pending.
+      // R2에만 복사해 짧은 공개 URL을 돌려준다(브라우저가 직접 표시 가능).
+      const persisted = await persistRemoteImageToR2(env, result.imageUrl)
       return jsonResponse(
         {
           ok: true,
           pending: false,
           status: 'succeeded',
-          imageUrl,
-          ...(inlined?.dataUrl ? { dataUrl: inlined.dataUrl } : {}),
+          imageUrl: persisted || result.imageUrl,
+          persisted: Boolean(persisted),
         },
         200,
       )
@@ -98,6 +96,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonResponse(
       {
         ok: false,
+        pending: false,
+        status: 'failed',
         error: 'face_swap_status_failed',
         message: error instanceof Error ? error.message : 'unknown_error',
       },

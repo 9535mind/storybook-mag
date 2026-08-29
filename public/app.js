@@ -5670,7 +5670,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
 
   async function toDisplayableImageUrl(imageUrl) {
     if (!imageUrl || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
-    // fal CDN을 브라우저에 직접 넣으면 검은 화면만 나오는 실측 — 서버 경유만 허용.
+    // 우리 R2 공개 URL은 브라우저가 바로 표시 가능
+    if (/r2\.dev|r2\.cloudflarestorage\.com/i.test(imageUrl)) return imageUrl
+    // fal CDN은 검은 화면 — 서버 경유
     try {
       const controller = new AbortController()
       const timer = window.setTimeout(() => controller.abort(), 45000)
@@ -5699,13 +5701,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       })
       window.clearTimeout(timer)
       const persistData = await persistRes.json().catch(() => ({}))
-      if (persistData.ok && persistData.url && !/fal\.media|fal\.ai/i.test(persistData.url)) {
+      if (persistData.ok && persistData.url && /r2\.dev|r2\.cloudflarestorage\.com/i.test(persistData.url)) {
         return persistData.url
       }
     } catch (_) {
       /* fail */
     }
-    // fal 원본 URL로 폴백하지 않음 — 검은 화면의 원인
     return null
   }
 
@@ -5796,37 +5797,50 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   // Function 벽시계 한도 회피). 90회(약 3.6분)는 2인 교체엔 너무 짧아 넉넉히 늘린다.
   async function pollFaceSwapStatus(statusUrl, responseUrl, startedAt, label) {
     const prefix = label ? `${label}: ` : ''
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    const HARD_LIMIT_SEC = 120
+    for (let attempt = 0; attempt < 80; attempt += 1) {
       const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
+      if (elapsedSec >= HARD_LIMIT_SEC) {
+        setStatus(
+          `${prefix}2분이 지나도 결과가 없어요. 실패한 것으로 보고 다시 시도해 주세요.`,
+          true,
+        )
+        return null
+      }
       setStatus(
         elapsedSec > 60
-          ? `${prefix}얼굴 교체 중… ${elapsedSec}초 (드물게 몇 분 걸릴 수 있어요, 기다려 주세요)`
+          ? `${prefix}얼굴 교체 중… ${elapsedSec}초 / 한도 ${HARD_LIMIT_SEC}초`
           : `${prefix}얼굴 교체 중… ${elapsedSec}초`,
         false,
       )
       await sleep(attempt < 6 ? 1500 : 2500)
-      const response = await fetch('/api/face-swap-status', {
-        method: 'POST',
-        headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ statusUrl, responseUrl }),
-      })
+      let response
+      try {
+        const controller = new AbortController()
+        const timer = window.setTimeout(() => controller.abort(), 25000)
+        response = await fetch('/api/face-swap-status', {
+          method: 'POST',
+          headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ statusUrl, responseUrl }),
+          signal: controller.signal,
+        })
+        window.clearTimeout(timer)
+      } catch (_) {
+        continue
+      }
       const data = await response.json().catch(() => ({}))
       if (response.status === 401) {
         if (typeof clearAllAuth === 'function') clearAllAuth()
         if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
         return null
       }
-      if (data.status === 'succeeded') {
-        if (typeof data.dataUrl === 'string' && data.dataUrl.startsWith('data:image/')) return data.dataUrl
-        if (data.imageUrl) return data.imageUrl
-      }
+      if (data.status === 'succeeded' && data.imageUrl) return data.imageUrl
       if (data.status === 'failed') {
         setStatus(data.message || `얼굴 교체에 실패했어요: ${data.error || 'unknown_error'}`, true)
         return null
       }
-      // pending — 계속 대기
     }
-    setStatus('얼굴 교체가 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.', true)
+    setStatus(`${prefix}2분이 지나도 결과가 없어요. 실패한 것으로 보고 다시 시도해 주세요.`, true)
     return null
   }
 
@@ -6057,32 +6071,42 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   // face-swap보다 훨씬 빠르고(생성 1회), 얼굴이 원본과 다른 사람으로 나오는 사고도 줄어든다.
   // 서버는 submit만 하고 클라이언트가 status를 폴링(Pages 시간 한도·45초 동기 타임아웃 회피).
   async function pollTaleSceneStatus(statusUrl, responseUrl) {
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    const startedAt = Date.now()
+    const HARD_LIMIT_SEC = 120
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
+      if (elapsedSec >= HARD_LIMIT_SEC) {
+        setStatus('2분이 지나도 장면 결과가 없어요. 실패한 것으로 보고 다시 시도해 주세요.', true)
+        return null
+      }
       await sleep(attempt < 6 ? 1500 : 2500)
-      const response = await fetch('/api/tale-scene-status', {
-        method: 'POST',
-        headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ statusUrl, responseUrl }),
-      })
+      let response
+      try {
+        const controller = new AbortController()
+        const timer = window.setTimeout(() => controller.abort(), 25000)
+        response = await fetch('/api/tale-scene-status', {
+          method: 'POST',
+          headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ statusUrl, responseUrl }),
+          signal: controller.signal,
+        })
+        window.clearTimeout(timer)
+      } catch (_) {
+        continue
+      }
       const data = await response.json().catch(() => ({}))
       if (response.status === 401) {
         if (typeof clearAllAuth === 'function') clearAllAuth()
         if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
         return null
       }
-      if (data.status === 'succeeded') {
-        // 서버가 이미 dataUrl로 인라인해 주면 검은 화면 없이 바로 표시
-        if (typeof data.dataUrl === 'string' && data.dataUrl.startsWith('data:image/')) {
-          return data.dataUrl
-        }
-        if (data.imageUrl) return data.imageUrl
-      }
+      if (data.status === 'succeeded' && data.imageUrl) return data.imageUrl
       if (data.status === 'failed') {
         setStatus(data.message || sceneGenerateFailMessage(response, data), true)
         return null
       }
     }
-    setStatus('장면 생성이 너무 오래 걸려요. 잠시 후 다시 시도해 주세요.', true)
+    setStatus('2분이 지나도 장면 결과가 없어요. 실패한 것으로 보고 다시 시도해 주세요.', true)
     return null
   }
 
