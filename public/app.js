@@ -5431,8 +5431,12 @@ function syncAdminWorkspaceUi() {
     formPanel.hidden = isAdminArea && panel !== 'fashion'
   }
   if (resultSection) {
-    if (isAdminArea && panel !== 'fashion') {
+    // 얼굴·장면 스튜디오에서도 메인 「생성 결과」를 유지한다 — 장면/얼굴 교체 직후
+    // 결과창이 비어 보이는 사고를 막기 위함. 갤러리 탭에서만 숨긴다.
+    if (isAdminArea && panel === 'gallery') {
       resultSection.hidden = true
+    } else if (isAdminArea && panel === 'faceswap') {
+      resultSection.hidden = !currentResult?.imageUrl
     } else if (area === 'studio' || area === 'admin') {
       syncResultVisibilityForArea(area === 'admin' ? 'fashion' : 'free')
     }
@@ -5651,6 +5655,88 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     await new Promise((resolve) => window.setTimeout(resolve, ms))
   }
 
+  /** 스튜디오 결과란 + 메인 「생성 결과」에 같이 표시 (얼굴·장면 탭에서 메인 결과가 숨겨져 안 보이던 문제 방지) */
+  let faceswapBlobUrl = null
+  function revokeFaceswapBlob() {
+    if (faceswapBlobUrl) {
+      try {
+        URL.revokeObjectURL(faceswapBlobUrl)
+      } catch (_) {
+        /* ignore */
+      }
+      faceswapBlobUrl = null
+    }
+  }
+
+  async function toDisplayableImageUrl(imageUrl) {
+    if (!imageUrl || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
+    // fal CDN이 referrer로 막히면 <img>가 검게 나옴 — no-referrer로 직접 로드를 우선하고,
+    // 가능하면 서버 persist로 우리 CDN 주소로 바꿔 안정적으로 보여 준다.
+    try {
+      const persistRes = await fetch('/api/persist-media', {
+        method: 'POST',
+        headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: imageUrl }),
+      })
+      const persistData = await persistRes.json().catch(() => ({}))
+      if (persistData.ok && persistData.url) return persistData.url
+    } catch (_) {
+      /* keep original */
+    }
+    return imageUrl
+  }
+
+  function displayFaceswapResult(imageUrl, opts) {
+    const label = opts?.engineLabel || '얼굴·장면'
+    const prompt = opts?.prompt || label
+
+    void (async () => {
+      const displayUrl = await toDisplayableImageUrl(imageUrl)
+      revokeFaceswapBlob()
+      if (resultImg) {
+        resultImg.referrerPolicy = 'no-referrer'
+        resultImg.onload = () => {
+          resultImg.hidden = false
+          if (resultPlaceholder) resultPlaceholder.hidden = true
+        }
+        resultImg.onerror = () => {
+          resultImg.hidden = true
+          if (resultPlaceholder) {
+            resultPlaceholder.hidden = false
+            resultPlaceholder.innerHTML =
+              '미리보기를 불러오지 못했어요.<br />아래 「메인 결과로 보내기」또는 다운로드를 눌러 보세요.'
+          }
+          setStatus(
+            '결과는 받았지만 미리보기 로드에 실패했어요. 「메인 결과로 보내기」를 눌러 확인해 주세요.',
+            true,
+          )
+        }
+        resultImg.src = displayUrl
+        resultImg.hidden = false
+      }
+      if (resultDownload) resultDownload.href = displayUrl
+      if (resultActions) resultActions.hidden = false
+      if (resultPlaceholder) resultPlaceholder.hidden = true
+      if (typeof showResult === 'function') {
+        showResult(displayUrl, label, false, {
+          size: typeof sizeField !== 'undefined' && sizeField ? sizeField.value : 'portrait',
+          itemId: null,
+          prompt,
+          accepted: false,
+          mood: typeof moodField !== 'undefined' && moodField ? moodField.value : 'clean',
+          engine: opts?.engine || 'tale-scene',
+          genMode: 'fashion',
+          reviseRound: 0,
+        })
+      }
+      if (resultWrap) {
+        window.setTimeout(() => {
+          resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }, 50)
+      }
+    })()
+  }
+
   // 얼굴 2장(특히 두 명 동시 교체, 또는 방금 새로 생성한 낯선 장면 위 교체)은 fal 처리가
   // 몇 분씩 걸리는 경우가 실측됐다 — 서버는 submit만 하고 status/response URL을 돌려준 뒤
   // 이 함수가 짧게 반복 조회한다(animate.ts의 predictionId 폴링과 동일한 이유 — Pages
@@ -5781,18 +5867,15 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         stepLabel: hasSecondFace ? '두 얼굴 교체' : '',
       })
       if (!imageUrl) return
-      if (resultImg) {
-        resultImg.src = imageUrl
-        resultImg.hidden = false
-      }
-      if (resultDownload) resultDownload.href = imageUrl
-      if (resultActions) resultActions.hidden = false
-      if (resultPlaceholder) resultPlaceholder.hidden = true
-      if (resultWrap) resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      displayFaceswapResult(imageUrl, {
+        engineLabel: hasSecondFace ? '두 얼굴 교체(AI)' : '얼굴 교체(AI)',
+        prompt: '얼굴 교체(간단 모드) 결과',
+        engine: 'face-swap',
+      })
       setStatus(
         hasSecondFace
-          ? '완성! 두 얼굴이 장면 성별에 맞춰 합성됐어요. 어색하면 헤어를 「기본 사진 헤어 유지」로 두고 다시 시도해 보세요.'
-          : '얼굴 교체 완료! 아래 4번 결과란을 확인하세요.',
+          ? '완성! 두 얼굴이 장면 성별에 맞춰 합성됐어요. 위 「생성 결과」와 아래 결과란을 확인하세요.'
+          : '얼굴 교체 완료! 위 「생성 결과」와 아래 결과란을 확인하세요.',
         false,
       )
     } catch (error) {
@@ -5902,7 +5985,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   function blockedByExistingTarget() {
     if (!state.target) return false
     setStatus(
-      '이미 장면 사진이 채워져 있어요. B 모드에서 새 장면을 만들면 그 칸을 덮어씁니다. 기존 장면을 쓰려면 A 모드 「얼굴만 바꾸기」를 누르세요. 새로 만들려면 장면 사진을 비운 뒤 다시 시도해 주세요.',
+      '이미 「3. 얼굴 바꾸기」원본에 장면 사진이 있어요. 새로 만들면 그 칸을 덮어씁니다. 기존 장면을 쓰려면 3번 모드에서 「얼굴 바꾸기」만 하세요. 새로 만들려면 원본을 비운 뒤 다시 시도해 주세요.',
       true,
     )
     return true
@@ -5965,17 +6048,17 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     try {
       const imageUrl = await generateCoupleScenePhotoreal(state.face0, state.face1)
       if (!imageUrl) return
-      if (resultImg) {
-        resultImg.src = imageUrl
-        resultImg.hidden = false
-      }
-      if (resultDownload) resultDownload.href = imageUrl
-      if (resultActions) resultActions.hidden = false
-      if (resultPlaceholder) resultPlaceholder.hidden = true
-      if (resultWrap) resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      setStatus('완성! B 모드 장면입니다. 얼굴이 어긋나면 「이 결과를 A 모드 장면 사진으로 쓰기」→「얼굴만 바꾸기」로 다듬으세요.', false)
+      displayFaceswapResult(imageUrl, {
+        engineLabel: faceswapMode === 'body' ? '전신·반신으로 장면' : '얼굴로 장면',
+        prompt: '증명사진으로 만든 장면',
+        engine: 'tale-scene',
+      })
       state.target = imageUrl
       setSlotPreview(targetSlot, imageUrl)
+      setStatus(
+        '완성! 위 「생성 결과」와 아래 결과란에 넣었어요. 얼굴이 어긋나면 「3. 얼굴 바꾸기」원본으로 넣어 다듬으세요.',
+        false,
+      )
     } catch (error) {
       setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
     } finally {
@@ -5996,7 +6079,15 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       if (!imageUrl) return
       state.target = imageUrl
       setSlotPreview(targetSlot, imageUrl)
-      setStatus('장면을 만들었어요. A 모드로 가서 「얼굴만 바꾸기」로 얼굴을 붙이거나, 결과가 이미 쓸 만하면 그대로 쓰세요.', false)
+      displayFaceswapResult(imageUrl, {
+        engineLabel: '장면만 생성',
+        prompt: '장면만 만들기(얼굴 미적용)',
+        engine: 'generate',
+      })
+      setStatus(
+        '장면을 만들었어요. 「3. 얼굴 바꾸기」로 얼굴을 붙이거나, 위 결과가 쓸 만하면 그대로 쓰세요.',
+        false,
+      )
     } catch (error) {
       setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
     } finally {

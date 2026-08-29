@@ -2052,10 +2052,21 @@ body {
   line-height: 1.5;
 }
 
+/* display:flex가 [hidden]의 display:none을 덮어써서 안내·버튼이 항상 보이던 버그 */
+.admin-faceswap-result__placeholder[hidden],
+.admin-faceswap-result__img[hidden],
+.admin-faceswap-result__actions[hidden] {
+  display: none !important;
+}
+
 .admin-faceswap-result__img {
+  display: block;
+  width: 100%;
   max-width: 100%;
+  height: auto;
   border-radius: 10px;
   border: 1px solid rgba(226, 232, 240, 0.25);
+  background: rgba(15, 23, 42, 0.6);
 }
 
 .admin-faceswap-result__actions {
