@@ -5470,6 +5470,97 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   if (!targetSlot || !face0Slot || !face1Slot || !runBtn) return
 
   const state = { target: null, face0: null, face1: null }
+  const FACESWAP_MODE_KEY = 'storymag.faceswapMode.v2'
+  const paneMake = document.getElementById('faceswap-pane-make')
+  const paneSwap = document.getElementById('faceswap-pane-swap')
+  const resultAsTargetBtn = document.getElementById('admin-faceswap-result-as-target')
+  const refTitle = document.getElementById('faceswap-ref-title')
+  const refHint = document.getElementById('faceswap-ref-hint')
+  const face0Label = document.getElementById('faceswap-face0-label')
+  const face1Label = document.getElementById('faceswap-face1-label')
+  const face0SlotLabel = document.getElementById('faceswap-face0-slot-label')
+  const face1SlotLabel = document.getElementById('faceswap-face1-slot-label')
+  const makeTitle = document.getElementById('faceswap-make-title')
+  const makeHint = document.getElementById('faceswap-make-hint')
+  const scenePhotorealBtnEl = document.getElementById('admin-faceswap-scene-photoreal')
+  let faceswapMode = 'face'
+
+  function setFaceswapMode(mode) {
+    const next = mode === 'body' || mode === 'swap' ? mode : 'face'
+    faceswapMode = next
+    try {
+      localStorage.setItem(FACESWAP_MODE_KEY, next)
+    } catch (_) {
+      /* ignore */
+    }
+    document.querySelectorAll('[data-faceswap-mode]').forEach((btn) => {
+      const on = btn.getAttribute('data-faceswap-mode') === next
+      btn.classList.toggle('faceswap-mode-tabs__btn--active', on)
+      btn.setAttribute('aria-selected', on ? 'true' : 'false')
+    })
+    const making = next === 'face' || next === 'body'
+    if (paneMake) paneMake.hidden = !making
+    if (paneSwap) paneSwap.hidden = next !== 'swap'
+
+    if (next === 'face') {
+      if (refTitle) refTitle.textContent = '1 · 증명사진(얼굴)'
+      if (refHint) refHint.textContent = '얼굴 위주 증명사진을 넣습니다. 커플이면 두 장 모두 필요합니다.'
+      if (face0Label) face0Label.textContent = '증명사진 1 (필수)'
+      if (face1Label) face1Label.textContent = '증명사진 2 (커플이면 필수)'
+      if (face0SlotLabel) face0SlotLabel.textContent = '증명 1'
+      if (face1SlotLabel) face1SlotLabel.textContent = '증명 2'
+      if (makeTitle) makeTitle.textContent = '얼굴로 장면 만들기'
+      if (makeHint) {
+        makeHint.textContent =
+          '증명사진만으로 새 전신 장면을 만듭니다. 얼굴 유지를 우선합니다. 어긋나면 결과를 「3. 얼굴 바꾸기」원본으로 넣어 다듬으세요.'
+      }
+      if (scenePhotorealBtnEl) scenePhotorealBtnEl.textContent = '얼굴로 장면 만들기'
+    } else if (next === 'body') {
+      if (refTitle) refTitle.textContent = '2 · 전신·반신 사진'
+      if (refHint) {
+        refHint.textContent =
+          '전신 또는 반신 사진을 넣습니다. 얼굴뿐 아니라 어깨·가슴·허리 체형도 참고합니다.'
+      }
+      if (face0Label) face0Label.textContent = '전신·반신 1 (필수)'
+      if (face1Label) face1Label.textContent = '전신·반신 2 (커플이면 필수)'
+      if (face0SlotLabel) face0SlotLabel.textContent = '전신·반신 1'
+      if (face1SlotLabel) face1SlotLabel.textContent = '전신·반신 2'
+      if (makeTitle) makeTitle.textContent = '전신·반신으로 장면 만들기'
+      if (makeHint) {
+        makeHint.textContent =
+          '전신·반신 참고로 새 장면을 만듭니다. 체형·실루엣 유지를 더 강하게 겁니다. 어긋나면 「3. 얼굴 바꾸기」로 얼굴을 고정하세요.'
+      }
+      if (scenePhotorealBtnEl) scenePhotorealBtnEl.textContent = '전신·반신으로 장면 만들기'
+    } else {
+      if (refTitle) refTitle.textContent = '3 · 새 증명사진 (바꿀 얼굴)'
+      if (refHint) {
+        refHint.textContent =
+          '원본 이미지에 붙일 새 얼굴(증명사진)입니다. 아래에서 얼굴을 바꿀 원본 이미지도 넣으세요.'
+      }
+      if (face0Label) face0Label.textContent = '새 증명사진 1 (필수)'
+      if (face1Label) face1Label.textContent = '새 증명사진 2 (커플이면 필수)'
+      if (face0SlotLabel) face0SlotLabel.textContent = '새 얼굴 1'
+      if (face1SlotLabel) face1SlotLabel.textContent = '새 얼굴 2'
+    }
+  }
+
+  document.querySelectorAll('[data-faceswap-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => setFaceswapMode(btn.getAttribute('data-faceswap-mode')))
+  })
+  const savedMode = localStorage.getItem(FACESWAP_MODE_KEY)
+  setFaceswapMode(savedMode === 'body' || savedMode === 'swap' || savedMode === 'face' ? savedMode : 'face')
+
+  resultAsTargetBtn?.addEventListener('click', () => {
+    const url = resultImg?.src
+    if (!url) {
+      setStatus('먼저 결과가 있어야 원본으로 넣을 수 있어요.', true)
+      return
+    }
+    state.target = url
+    setSlotPreview(targetSlot, url)
+    setFaceswapMode('swap')
+    setStatus('결과를 「3. 얼굴 바꾸기」원본으로 넣었어요. 새 증명사진을 맞춘 뒤 얼굴을 바꾸세요.', false)
+  })
 
   function setStatus(msg, isError) {
     if (!statusEl) return
@@ -5597,15 +5688,19 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return null
   }
 
-  // 1인 얼굴 교체 1회 호출(제출 + 필요 시 폴링). 2인 교체를 "빠른 1인 교체 2번"으로
-  // 체이닝할 때도, 평범한 1인 교체일 때도 이 함수 하나로 처리한다.
-  async function runSingleFaceSwap(opts) {
+  // 얼굴 교체 1회(제출 + 폴링). 2인이면 face0+face1을 한 번에 보내 성별 매칭.
+  // (예전 연쇄 1인×2는 잘못된 얼굴에 붙어 "전혀 다른 인물"이 되는 실측이 있었음)
+  async function runFaceSwapJob(opts) {
     const payload = {
       targetImage: opts.targetImage,
-      face0: opts.faceDataUrl,
-      gender0: opts.gender,
+      face0: opts.face0,
+      gender0: opts.gender0,
       workflowType: opts.workflowType,
       upscale: opts.upscale,
+    }
+    if (opts.face1) {
+      payload.face1 = opts.face1
+      payload.gender1 = opts.gender1
     }
     const response = await fetch('/api/face-swap', {
       method: 'POST',
@@ -5652,54 +5747,40 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       setStatus('붙일 얼굴 사진(얼굴 1)을 넣어 주세요.', true)
       return
     }
+    const g0 = gender0Select?.value || 'female'
+    const g1 = gender1Select?.value || 'male'
+    const hasSecondFace = Boolean(state.face1)
+    if (hasSecondFace && g0 === g1) {
+      setStatus(
+        '두 얼굴의 성별이 같아요. 장면의 남·여에 각각 맞춰 성별을 다르게 골라 주세요. (같으면 엔진이 얼굴을 엉뚱한 쪽에 붙입니다)',
+        true,
+      )
+      return
+    }
     runBtn.disabled = true
     if (resultImg) resultImg.hidden = true
     if (resultActions) resultActions.hidden = true
     if (resultPlaceholder) resultPlaceholder.hidden = false
-    const startedAt = Date.now()
     try {
-      const hasSecondFace = Boolean(state.face1)
-      let imageUrl
-      if (hasSecondFace) {
-        // fal의 easel-ai 모델은 "얼굴 2장 동시 교체"를 한 번에 처리하려 하면 내부적으로
-        // 훨씬 무거운 연산을 타서 몇 분씩 걸리고 가끔 타임아웃까지 나는 게 실측됐다 —
-        // 대신 "빠른 1인 교체(보통 10~30초)"를 두 번 연달아 체이닝하면 대개 훨씬 빠르고
-        // 안정적이다: 1단계 결과(얼굴1 합성 완료 사진)를 2단계의 새 기본 사진으로 넘긴다.
-        setStatus('1/2단계: 얼굴 1 교체 중…', false)
-        const step1 = await runSingleFaceSwap({
-          targetImage: state.target,
-          faceDataUrl: state.face0,
-          gender: gender0Select?.value || 'female',
-          workflowType: workflowSelect?.value || 'user_hair',
-          upscale: false, // 중간 단계는 업스케일 생략 — 2단계 이후 최종 결과만 업스케일
-          startedAt,
-          stepLabel: '1/2단계 (얼굴 1)',
-        })
-        if (!step1) return
-        setStatus('2/2단계: 얼굴 2 교체 중…', false)
-        imageUrl = await runSingleFaceSwap({
-          targetImage: step1,
-          faceDataUrl: state.face1,
-          gender: gender1Select?.value || 'male',
-          workflowType: workflowSelect?.value || 'user_hair',
-          upscale: Boolean(upscaleCheckbox?.checked),
-          startedAt,
-          stepLabel: '2/2단계 (얼굴 2)',
-        })
-        if (!imageUrl) return
-      } else {
-        setStatus('얼굴 교체 중… 0초', false)
-        imageUrl = await runSingleFaceSwap({
-          targetImage: state.target,
-          faceDataUrl: state.face0,
-          gender: gender0Select?.value || 'female',
-          workflowType: workflowSelect?.value || 'user_hair',
-          upscale: Boolean(upscaleCheckbox?.checked),
-          startedAt,
-          stepLabel: '',
-        })
-        if (!imageUrl) return
-      }
+      const workflowType = workflowSelect?.value || 'target_hair'
+      const upscale = Boolean(upscaleCheckbox?.checked)
+      setStatus(
+        hasSecondFace
+          ? '두 얼굴 교체 중… (성별 매칭으로 한 번에 처리합니다)'
+          : '얼굴 교체 중… 0초',
+        false,
+      )
+      const imageUrl = await runFaceSwapJob({
+        targetImage: state.target,
+        face0: state.face0,
+        gender0: g0,
+        face1: hasSecondFace ? state.face1 : undefined,
+        gender1: hasSecondFace ? g1 : undefined,
+        workflowType,
+        upscale,
+        stepLabel: hasSecondFace ? '두 얼굴 교체' : '',
+      })
+      if (!imageUrl) return
       if (resultImg) {
         resultImg.src = imageUrl
         resultImg.hidden = false
@@ -5708,7 +5789,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       if (resultActions) resultActions.hidden = false
       if (resultPlaceholder) resultPlaceholder.hidden = true
       if (resultWrap) resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      setStatus('얼굴 교체 완료! 아래 4번 결과란을 확인하세요.', false)
+      setStatus(
+        hasSecondFace
+          ? '완성! 두 얼굴이 장면 성별에 맞춰 합성됐어요. 어색하면 헤어를 「기본 사진 헤어 유지」로 두고 다시 시도해 보세요.'
+          : '얼굴 교체 완료! 아래 4번 결과란을 확인하세요.',
+        false,
+      )
     } catch (error) {
       setStatus(`얼굴 교체 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
     } finally {
@@ -5719,6 +5805,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   // ---- 커플 씬 자동 생성 — 얼굴 사진 2장만 있으면 데이트/포옹/키스 장면을 AI가 새로 만들고
   // 그 위에 바로 얼굴을 합성한다(기본 사진을 직접 찍거나 구할 필요가 없음). ----
   const scenePresetSelect = document.getElementById('admin-faceswap-scene-preset')
+  const sceneFreeField = document.getElementById('admin-faceswap-scene-free')
   const scenePhotorealBtn = document.getElementById('admin-faceswap-scene-photoreal')
   const sceneGenerateBtn = document.getElementById('admin-faceswap-scene-generate')
   const sceneAndSwapBtn = document.getElementById('admin-faceswap-scene-and-swap')
@@ -5735,6 +5822,43 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     hug: 'young korean man and woman couple hugging face to face, arms wrapped around back and waist, bodies pressed close, heads tilted toward each other, casual clothes, indoor or street, photorealistic fashion photo, no stiff side-by-side passport pose',
     kiss: 'young korean man and woman couple kissing on the lips, bodies leaning in, arms around waist or face, lips touching, casual clothes, photorealistic fashion photo, no stiff standing-apart pose',
   }
+  // 증명사진→전신 연출용: "young korean / fashion photo"처럼 새 인물을 발명하는 문구를 빼다.
+  // (실측: 그 태그가 참고 얼굴·체형을 덮어쓰고 완전 다른 모델로 바뀜)
+  const SCENE_PRESET_POSE_ONLY = {
+    arm_in_arm:
+      'walking arm in arm on a city street, linked arms, shoulders leaning together, looking at each other, natural casual clothes, daytime, full bodies, no stiff passport pose',
+    hug: 'face-to-face hug, arms wrapped around back and waist, bodies pressed close, heads tilted toward each other, casual clothes, no stiff side-by-side passport pose',
+    kiss: 'kissing on the lips, bodies leaning in, arms around waist or face, lips touching, casual clothes, no stiff standing-apart pose',
+  }
+
+  /** 프리셋 + 자유 기록을 합친 장면 설명. free-only인데 칸이 비면 null. */
+  function buildCoupleSceneDescription(forPhotoreal) {
+    const key = scenePresetSelect?.value || 'arm_in_arm'
+    const free = (sceneFreeField?.value || '').trim()
+    const coupleTail =
+      '두 사람 모두 전신이 보이게. 인물(얼굴·체형)은 참고 사진 두 장과 동일하게 유지하고, 아래는 장면·포즈·장소만 바꾼다.'
+    if (key === 'free') {
+      if (!free) return null
+      if (forPhotoreal) return `${free}. ${coupleTail}`
+      return `${free}. young korean man and woman couple together, full bodies visible, photorealistic fashion photo, natural pose, no stiff passport pose`
+    }
+    if (forPhotoreal) {
+      const pose = SCENE_PRESET_POSE_ONLY[key] || SCENE_PRESET_POSE_ONLY.arm_in_arm
+      if (!free) return `장면 연출(포즈·장소만): ${pose}. ${coupleTail}`
+      return `장면 연출(포즈·장소만): ${pose}. 사용자 추가 지시(최우선): ${free}. ${coupleTail}`
+    }
+    const preset = SCENE_PRESET_DESCRIPTIONS[key] || SCENE_PRESET_DESCRIPTIONS.arm_in_arm
+    if (!free) return preset
+    return `${preset}. CRITICAL user scene notes (follow closely): ${free}`
+  }
+
+  function requireSceneDescription(forPhotoreal) {
+    const description = buildCoupleSceneDescription(forPhotoreal)
+    if (description) return description
+    setStatus('「자유 기록만」을 골랐으면 아래 자유 기록 칸에 장면을 적어 주세요.', true)
+    sceneFreeField?.focus()
+    return null
+  }
 
   function sceneGenerateFailMessage(response, data) {
     if (data.message) return data.message
@@ -5748,8 +5872,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   }
 
   async function generateCoupleScene() {
-    const description =
-      SCENE_PRESET_DESCRIPTIONS[scenePresetSelect?.value] || SCENE_PRESET_DESCRIPTIONS.arm_in_arm
+    const description = requireSceneDescription(false)
+    if (!description) return null
     const response = await fetch('/api/generate', {
       method: 'POST',
       headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
@@ -5778,7 +5902,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   function blockedByExistingTarget() {
     if (!state.target) return false
     setStatus(
-      '이미 "1. 기본 사진"이 채워져 있어요 — 이 버튼은 그 사진을 새로 만든 장면으로 덮어씁니다. 기존 사진을 그대로 쓰려면 "얼굴 바로 바꾸기"를 누르세요. 새 장면으로 바꾸려면 먼저 기본 사진 슬롯을 지우고(다시 클릭 후 다른 파일 선택 또는 새로고침) 다시 시도해 주세요.',
+      '이미 장면 사진이 채워져 있어요. B 모드에서 새 장면을 만들면 그 칸을 덮어씁니다. 기존 장면을 쓰려면 A 모드 「얼굴만 바꾸기」를 누르세요. 새로 만들려면 장면 사진을 비운 뒤 다시 시도해 주세요.',
       true,
     )
     return true
@@ -5788,8 +5912,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   // 얼굴교체" 2단계 대신 한 번의 생성으로 실제 얼굴을 유지한 전신 장면을 바로 만든다.
   // face-swap보다 훨씬 빠르고(생성 1회), 얼굴이 원본과 다른 사람으로 나오는 사고도 줄어든다.
   async function generateCoupleScenePhotoreal(face0DataUrl, face1DataUrl) {
-    const preset = SCENE_PRESET_DESCRIPTIONS[scenePresetSelect?.value] || SCENE_PRESET_DESCRIPTIONS.arm_in_arm
-    const description = `${preset} 두 사람 모두 전신이 보이는 구도. 첫 번째 참고 사진의 사람과 두 번째 참고 사진의 사람, 이 두 사람이 함께 있는 장면.`
+    const description = requireSceneDescription(true)
+    if (!description) return null
     const response = await fetch('/api/tale-scene', {
       method: 'POST',
       headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
@@ -5798,6 +5922,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         description,
         aspectRatio: '3:4',
         photoreal: true,
+        gender0: gender0Select?.value || 'female',
+        gender1: gender1Select?.value || 'male',
+        refKind: faceswapMode === 'body' ? 'body' : 'face',
       }),
     })
     const data = await response.json().catch(() => ({}))
@@ -5846,7 +5973,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       if (resultActions) resultActions.hidden = false
       if (resultPlaceholder) resultPlaceholder.hidden = true
       if (resultWrap) resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      setStatus('완성! 아래 4번 결과란을 확인하세요. (얼굴이 조금 다르면 이 결과를 "기본 사진"으로 쓰고 「얼굴 바로 바꾸기」로 한 번 더 다듬을 수 있어요)', false)
+      setStatus('완성! B 모드 장면입니다. 얼굴이 어긋나면 「이 결과를 A 모드 장면 사진으로 쓰기」→「얼굴만 바꾸기」로 다듬으세요.', false)
       state.target = imageUrl
       setSlotPreview(targetSlot, imageUrl)
     } catch (error) {
@@ -5869,7 +5996,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       if (!imageUrl) return
       state.target = imageUrl
       setSlotPreview(targetSlot, imageUrl)
-      setStatus('장면을 만들었어요. 얼굴 사진을 넣고 「얼굴 바로 바꾸기」를 눌러 주세요.', false)
+      setStatus('장면을 만들었어요. A 모드로 가서 「얼굴만 바꾸기」로 얼굴을 붙이거나, 결과가 이미 쓸 만하면 그대로 쓰세요.', false)
     } catch (error) {
       setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
     } finally {

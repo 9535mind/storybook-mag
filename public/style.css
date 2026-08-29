@@ -2003,11 +2003,17 @@ body {
 }
 
 .admin-faceswap-field--scene {
-  max-width: 420px;
+  max-width: 520px;
   padding: 12px 14px;
   border: 1px dashed rgba(148, 163, 184, 0.4);
   border-radius: 10px;
   margin-bottom: 8px;
+}
+
+.admin-faceswap-field--scene .form__textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  margin-top: 4px;
 }
 
 .admin-faceswap-field--scene .review-panel__secondary,
@@ -2057,6 +2063,68 @@ body {
   gap: 10px;
   margin-top: 10px;
   flex-wrap: wrap;
+}
+
+.faceswap-mode-tabs {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px;
+  flex-wrap: wrap;
+}
+
+.faceswap-mode-tabs__btn {
+  flex: 1 1 160px;
+  padding: 10px 14px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.35);
+  color: rgba(226, 232, 240, 0.85);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.faceswap-mode-tabs__btn--active {
+  border-color: rgba(125, 211, 252, 0.7);
+  background: rgba(14, 116, 144, 0.35);
+  color: #f8fafc;
+  font-weight: 600;
+}
+
+.faceswap-block {
+  margin-bottom: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.25);
+}
+
+.faceswap-block__title {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+  color: #e2e8f0;
+}
+
+.faceswap-block__hint {
+  margin: 0 0 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.faceswap-pane[hidden] {
+  display: none !important;
+}
+
+.faceswap-legacy summary {
+  cursor: pointer;
+  color: rgba(226, 232, 240, 0.7);
+  font-size: 13px;
+}
+
+.faceswap-block .form__textarea {
+  width: 100%;
+  min-height: 4.5rem;
 }
 
 .form__submit--secondary {

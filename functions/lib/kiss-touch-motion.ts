@@ -18,8 +18,8 @@ import { polishKoreanPromptText } from './korean-text'
  * 아주 흔한 문장이 "동작 없음"으로 잘못 판정돼 모션 지시가 통째로 빠지는 사고가 난다.
  */
 export const TOUCH_ACTION_VERBS_KO =
-  '만지|만져|만진|만졌|만질|쓰다듬|어루만지|어루만져|어루만진|어루만졌|스치|스쳐|' +
-  '주무르|주물러|주물렀|주무른|문지르|문질러|문질렀|문지른|비비|비벼|비빈|비볐|' +
+  '만지|만져|만진|만졌|만질|만짐|만지고|만진다|만지작|쓰다듬|어루만지|어루만져|어루만진|어루만졌|스치|스쳐|' +
+  '주무르|주물러|주물렀|주무른|주무름|문지르|문질러|문질렀|문지른|비비|비벼|비빈|비볐|' +
   '꼬집|비틀어|비틀고|비틀었|비트는|비튼|누르|눌러|눌렀|누른|짓누르|짓눌러|짓누른|' +
   '움켜쥐|잡아당기|잡아당겨|당기|당겨|당긴|당겼|쥐어짜|쥐어짠|' +
   '긁어|긁고|긁는|깨물어|깨물고|깨무는|깨물었|튕기|튕겨|튕긴|튕겼|찌르|찔러|찔렀|찌른'
@@ -83,9 +83,29 @@ export function detectTouchVerbPhrase(t: string): string {
   if (/찌르|찔러|찔렀/i.test(t)) return 'pressing and poking with fingertips'
   if (/비비|비벼|비빈|비볐/i.test(t)) return 'rubbing in slow circles'
   if (/문지르|문질러|문질렀/i.test(t)) return 'rubbing firmly'
-  if (/주무르|주물러|주물렀/i.test(t)) return 'kneading and squeezing'
+  if (/주무르|주물러|주물렀|주무른|주무름/i.test(t)) return 'kneading and squeezing'
   if (/쓰다듬|어루만지|어루만져|어루만진|어루만졌|스치|스쳐/i.test(t)) return 'gently stroking'
+  if (/만지작|만짐|만지고|만진다|만지|만져|만진|만졌|만질/i.test(t)) {
+    return 'squeezing and stroking continuously'
+  }
   return 'squeezing and stroking continuously'
+}
+
+/**
+ * 여성이 남성의 성기를 손으로 만지는 요청.
+ * (기존 경로는 여성 가슴/보지 애무만 있어서 "자지를 만진다"가 통째로 무시됐음)
+ */
+export function wantsMaleGenitalHand(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  if (!t) return false
+  return (
+    /(?:남자|남친|애인|파트너|그의?)\s*(?:의\s*)?(?:자지|좆|페니스|성기|cock|dick|penis)/i.test(t) ||
+    /(?:자지|좆|페니스)\s*(?:을|를)?\s*(?:만지|만져|만짐|만진|만졌|애무|잡|쥐|쓰다듬|문지|비비)/i.test(t) ||
+    /(?:여자가?|그녀가?)\s*.{0,12}(?:자지|좆|페니스|cock|dick|penis)/i.test(t) ||
+    /hand\s*job|stroke(?:s|ing)?\s*(?:his\s*)?(?:cock|dick|penis)|(?:her\s*)?hand\s*(?:on|around)\s*(?:his\s*)?(?:cock|dick|penis)/i.test(
+      t,
+    )
+  )
 }
 
 /**
@@ -96,11 +116,13 @@ export function amplifyAdultMotionForVideo(motion: string): {
   addon: string
   wantsPartner: boolean
   wantsPoseChange: boolean
+  wantsMaleGenitalHand: boolean
 } {
   const t = polishKoreanPromptText(motion || '')
   const bits: string[] = []
   let wantsPartner = false
   let wantsPoseChange = false
+  const maleGenitalHand = wantsMaleGenitalHand(t)
 
   // 가슴/유두 빨기 — 빤다/빨아/빨아라/빨다 + 강도 부사("힘껏/세게/강하게/격하게") 반영
   if (
@@ -126,6 +148,32 @@ export function amplifyAdultMotionForVideo(motion: string): {
     )
   }
 
+  // 백허그 / 뒤에서 안기 — 한 달 이상 마주선 자세만 반복되던 한계를 깨기 위한 포즈 전환
+  const backHug =
+    /백\s*허그|뒤에서\s*(?:안|껴안|감싸|포옹)|뒤로\s*(?:안|껴안)|등\s*뒤에서|from\s*behind|back\s*hug|hug(?:s|ging)?\s*(?:her\s*)?from\s*behind|stands?\s*behind\s*her|embrace(?:s|d)?\s*(?:her\s*)?from\s*behind/i.test(
+      t,
+    )
+  if (backHug) {
+    wantsPartner = true
+    wantsPoseChange = true
+    bits.push(
+      'POSE: back-hug — the man stands BEHIND her, chest to her back, both arms wrapped around her from behind (not face-to-face)',
+      'FORBIDDEN staying in a face-to-face standing pose for the whole clip when back-hug was requested',
+    )
+  }
+
+  // 고개 젖히기 (뒤로) — 백허그 키스/목선 노출과 자주 함께 씀
+  const headTiltBack =
+    /고개\s*(?:를\s*)?(?:젖|뒤로)|고개를?\s*뒤로|머리\s*(?:를\s*)?젖|목을\s*젖|tilt(?:s|ing)?\s*(?:her\s*)?head\s*back|leans?\s*(?:her\s*)?head\s*back|head\s*thrown\s*back|arches?\s*(?:her\s*)?neck/i.test(
+      t,
+    )
+  if (headTiltBack) {
+    wantsPoseChange = true
+    bits.push(
+      'she tilts / arches her head backward, chin up, throat exposed — not looking straight ahead the whole time',
+    )
+  }
+
   // 배 위에 올라탄다 / 걸터앉다
   if (
     /배\s*위|올라\s*타|올라탄|올라타|걸터|타고\s*앉|straddl|mount(?:s|ing)?(?:\s+(?:her|on))?|on\s*(?:her\s*)?(?:belly|stomach|abdomen|torso)/i.test(
@@ -139,11 +187,28 @@ export function amplifyAdultMotionForVideo(motion: string): {
     )
   }
 
+  // 여성이 남성 성기를 손으로 — 여성 보지 애무와 분리 (「성기」단어 오인 방지)
+  // 실측: "penis/handjob"만 쓰면 Wan이 나체 여성 크롯치에 자지를 그려 넣음 → 소유주·금지를 명시.
+  if (maleGenitalHand) {
+    wantsPartner = true
+    wantsPoseChange = true
+    const verbPhrase = detectTouchVerbPhrase(t)
+    bits.push(
+      `MUTUAL HAND OWNERSHIP: the WOMAN keeps female anatomy only — bare vulva/mons, NO penis on her body`,
+      `HIS penis only: the suited MAN's penis (open fly if needed). Her hand ${verbPhrase} HIS penis — not her own crotch`,
+      'FORBIDDEN: drawing a penis on the woman, futa, hermaphrodite, gender-swap, turning her crotch male',
+      'LAST FRAME: her hand still on HIS (the man in the suit) penis; her crotch stays female vulva',
+    )
+  }
+
   // 보지/크롯치 애무 — 가슴 애무로 오인되면 허벅지만 스치는 실패가 남음(실측)
-  const crotchTouch = new RegExp(
-    `(?:보지|음부|성기|클리토리스|클리|외음|사타구니|가랑이|크롯치|crotch|pussy|vulva|clit(?:oris)?|labia|mons)\\s*(?:을|를|을\\s*|를\\s*)?(?:${TOUCH_ACTION_VERBS_KO}|애무|자극)|(?:${TOUCH_ACTION_VERBS_KO}|애무)\\s*(?:는\\s*|고\\s*)?(?:보지|음부|성기|크롯치)|fondl(?:e|es|ing)\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)|rub(?:s|bing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva)|finger(?:s|ing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)|pinch(?:es|ing)?\\s*(?:her\\s*)?(?:clit|labia)|press(?:es|ing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)`,
-    'i',
-  ).test(t)
+  // 남성 성기 만짐과 구분: 「남자의 성기/자지」는 여기로 보내지 않음
+  const crotchTouch =
+    !maleGenitalHand &&
+    new RegExp(
+      `(?:보지|음부|클리토리스|클리|외음|사타구니|가랑이|크롯치|crotch|pussy|vulva|clit(?:oris)?|labia|mons)\\s*(?:을|를|을\\s*|를\\s*)?(?:${TOUCH_ACTION_VERBS_KO}|애무|자극)|(?:${TOUCH_ACTION_VERBS_KO}|애무)\\s*(?:는\\s*|고\\s*)?(?:보지|음부|크롯치)|fondl(?:e|es|ing)\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)|rub(?:s|bing)?\s*(?:her\\s*)?(?:crotch|pussy|vulva)|finger(?:s|ing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)|pinch(?:es|ing)?\\s*(?:her\\s*)?(?:clit|labia)|press(?:es|ing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)`,
+      'i',
+    ).test(t)
   if (crotchTouch) {
     wantsPoseChange = true
     const verbPhrase = detectTouchVerbPhrase(t)
@@ -166,7 +231,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
   }
 
   // 가슴 만짐/애무 — 「만지면서」활용형·가슴+만지 조합을 명시적으로 (키스만 되고 손은 빠지는 실측)
-  // 보지 애무만 있을 때는 가슴으로 가로채지 않음.
+  // 보지 애무만 있을 때는 가슴으로 가로채지 않음. 상호 만짐(자지)과는 병행 가능.
   const breastTouch =
     !crotchTouch &&
     new RegExp(
@@ -175,29 +240,23 @@ export function amplifyAdultMotionForVideo(motion: string): {
     ).test(t)
   if (breastTouch) {
     wantsPoseChange = true
-    // 크롯치 애무와 동일 규칙 — 파트너 명시가 없으면 본인 손으로 본다.
-    // 예전엔 무조건 wantsPartner=true였어서 "자신의 가슴을 주무른다"(자가 애무) 같은
-    // 솔로 요청에도 coupleRequested가 켜져 "남자가 보이면…" 같은 무관한 문구가 섞였다.
-    if (/파트너|남자|남친|애인|상대|partner|man\s+hand|his\s+hand/i.test(t)) {
+    if (/파트너|남자|남친|애인|상대|partner|man\s+hand|his\s+hand|여자(?:의)?\s*가슴|뒤에서/i.test(t)) {
       wantsPartner = true
     }
     const verbPhrase = detectTouchVerbPhrase(t)
     bits.push(
-      `sustained breast play for most of the clip: hand stays on her bare breast, ${verbPhrase} continuously — not a one-second tap`,
+      backHug
+        ? `from behind: both his hands reach around her torso onto her bare breasts, ${verbPhrase} continuously — back-hug breast fondle, not a face-to-face tap`
+        : `sustained breast play for most of the clip: hand stays on her bare breast, ${verbPhrase} continuously — not a one-second tap`,
     )
   }
 
   // 키스·기타 애무 (파트너 동작이 흔한 케이스)
-  // 「키스」단어만 보고 무조건 입-입으로 고정하면 「보지에 키스」/「가슴에 키스」같이
-  // 대상 부위가 명시된 요청이 무시되는 실측이 있었다 — 대상이 명시되면 그 부위로 분기.
   if (/딥\s*키스|키스|입\s*(?:을\s*)?맞추|입맞춤|kiss(?:es|ing)?/i.test(t)) {
     wantsPartner = true
     wantsPoseChange = true
     const kissTarget = detectKissBodyTarget(t)
     const kissVulva = kissTarget === 'vulva'
-    // 가슴을 손으로 만지는 동작(breastTouch)이 이미 별도로 감지·처리됐으면, 이 문장의
-    // "가슴"은 키스 대상이 아니라 손터치 대상이다 — 입-입 딥키스 쪽으로 남겨둔다
-    // ("가슴을 만지고 입술에 딮키스한다" 실측 오분류 수정, 2026-08-28).
     const kissBreast = kissTarget === 'breast' && !breastTouch
     if (kissVulva) {
       bits.push(
@@ -208,6 +267,13 @@ export function amplifyAdultMotionForVideo(motion: string): {
       bits.push(
         'mandatory mouth-to-breast kissing for most of the clip — a consenting adult partner\'s lips make continuous oral contact with her bare breast/nipple, not a hand-only touch, not a peck elsewhere',
         'last frame still kissing the bare breast/nipple — do not return to the source still pose',
+      )
+    } else if (backHug || headTiltBack) {
+      bits.push(
+        backHug
+          ? 'from behind: she tilts her head back; he leans over her shoulder for a deep mouth-to-mouth kiss while staying behind her (back-hug kiss) — not face-to-face square stance'
+          : 'she tilts her head back; deep mouth-to-mouth kiss with her chin up — continuous, not a quick peck',
+        'last frame still in that kissed / head-back pose — do not snap to a stiff face-to-face still',
       )
     } else {
       bits.push(
@@ -223,6 +289,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
   if (
     !breastTouch &&
     !crotchTouch &&
+    !maleGenitalHand &&
     new RegExp(`애무|caress|fondl|grope|${TOUCH_ACTION_VERBS_KO}|rub(?:s|bing)?\\s*(?:her\\s*)?(?:breast|body|chest)`, 'i').test(
       t,
     )
@@ -236,5 +303,10 @@ export function amplifyAdultMotionForVideo(motion: string): {
     )
   }
 
-  return { addon: bits.join('. '), wantsPartner, wantsPoseChange }
+  return {
+    addon: bits.join('. '),
+    wantsPartner,
+    wantsPoseChange,
+    wantsMaleGenitalHand: maleGenitalHand,
+  }
 }

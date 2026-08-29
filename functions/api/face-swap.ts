@@ -82,7 +82,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return jsonResponse({ ok: false, error: 'gender1_required' }, 400)
     }
 
-    const workflowType = body.workflowType === 'target_hair' ? 'target_hair' : 'user_hair'
+    const workflowType = body.workflowType === 'user_hair' ? 'user_hair' : 'target_hair'
     const upscale = body.upscale !== false
 
     let targetImageUrl: string

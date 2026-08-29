@@ -682,7 +682,7 @@ export async function runAdvancedFaceSwap(options: {
     face_image_0: options.face0ImageUrl,
     gender_0: options.gender0,
     target_image: options.targetImageUrl,
-    workflow_type: options.workflowType ?? 'user_hair',
+    workflow_type: options.workflowType ?? 'target_hair',
     upscale: options.upscale !== false,
   }
   if (hasSecondFace) {
@@ -750,7 +750,7 @@ export async function submitAdvancedFaceSwap(options: {
     face_image_0: options.face0ImageUrl,
     gender_0: options.gender0,
     target_image: options.targetImageUrl,
-    workflow_type: options.workflowType ?? 'user_hair',
+    workflow_type: options.workflowType ?? 'target_hair',
     upscale: options.upscale !== false,
   }
   if (options.face1ImageUrl && options.gender1) {

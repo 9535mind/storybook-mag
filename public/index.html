@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag · 자유 일러스트</title>
-  <link rel="stylesheet" href="/style.css?v=20260822twoperson1" />
+  <link rel="stylesheet" href="/style.css?v=20260829faceswap-ia2" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -689,7 +689,7 @@
         화보 만들기
       </button>
       <button type="button" class="admin-subnav__btn" data-admin-panel="faceswap" role="tab" aria-selected="false">
-        얼굴 교체(간단)
+        얼굴·장면
       </button>
       <button type="button" class="admin-subnav__btn" data-admin-panel="gallery" role="tab" aria-selected="false">
         관리자 갤러리
@@ -697,132 +697,169 @@
     </nav>
 
     <section id="admin-faceswap-panel" class="admin-fuse-panel" hidden>
-      <h2 class="admin-fuse-panel__title">얼굴 교체 (간단 모드)</h2>
+      <h2 class="admin-fuse-panel__title">얼굴·장면 스튜디오</h2>
       <p class="admin-fuse-panel__lead">
-        올가미·잘라내기·맞추기 없이, 사진 2~3장만 넣으면 AI가 배경·포즈·조명은 그대로 두고
-        <strong>얼굴만 자동으로</strong> 바꿔줘요. 한 명(단독 사진) 또는 두 명(커플 사진) 모두 가능합니다.
+        원하는 작업을 <strong>하나만</strong> 고르세요. 모드마다 필요한 사진과 버튼이 달라집니다.
       </p>
 
-      <div class="admin-faceswap-field admin-faceswap-field--scene">
-        <label class="form__label" for="admin-faceswap-scene-preset">기본 사진이 없다면 — 장면부터 AI로 만들기</label>
-        <select id="admin-faceswap-scene-preset" class="form__select">
-          <option value="arm_in_arm" selected>팔짱 끼고 데이트</option>
-          <option value="hug">서로 포옹</option>
-          <option value="kiss">서로 키스</option>
-        </select>
-        <button type="button" id="admin-faceswap-scene-photoreal" class="form__submit">
-          증명사진 2장으로 전신 장면 바로 만들기(추천 · 더 빠르고 정확함)
+      <div class="faceswap-mode-tabs" role="tablist" aria-label="얼굴·장면 모드">
+        <button type="button" class="faceswap-mode-tabs__btn faceswap-mode-tabs__btn--active" data-faceswap-mode="face" role="tab" aria-selected="true">
+          1. 얼굴로 장면
         </button>
-        <p class="admin-fuse-panel__lead" style="margin-top: 4px">
-          얼굴 1·2에 본인·상대 증명사진(얼굴 사진)을 넣고 위 버튼을 누르면, AI가 두 사람의
-          <strong>실제 얼굴을 그대로 유지</strong>한 채 전신 데이트 장면을 한 번에 만들어요.
-          (별도 얼굴교체 단계 없이 바로 완성 — 훨씬 빠르고 얼굴이 더 정확해요.)
-        </p>
-        <details style="margin-top: 8px">
-          <summary style="cursor: pointer; color: rgba(226,232,240,0.7); font-size: 13px">
-            예전 방식(장면 먼저 만들고 얼굴 나중에 교체) 쓰기
-          </summary>
-          <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap">
-            <button type="button" id="admin-faceswap-scene-generate" class="review-panel__secondary">
-              장면 만들기(기본 사진 자동 채움)
-            </button>
-            <button type="button" id="admin-faceswap-scene-and-swap" class="form__submit form__submit--secondary">
-              장면 생성 + 얼굴 합성 한번에
-            </button>
-          </div>
-        </details>
+        <button type="button" class="faceswap-mode-tabs__btn" data-faceswap-mode="body" role="tab" aria-selected="false">
+          2. 전신·반신으로 장면
+        </button>
+        <button type="button" class="faceswap-mode-tabs__btn" data-faceswap-mode="swap" role="tab" aria-selected="false">
+          3. 얼굴 바꾸기
+        </button>
       </div>
 
-      <div class="admin-faceswap-grid">
-        <div class="admin-faceswap-field">
-          <label class="form__label" for="admin-faceswap-target-input">1. 기본 사진 (장면·포즈)</label>
-          <div
-            id="admin-faceswap-target-slot"
-            class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
-            role="button"
-            tabindex="0"
-            title="얼굴을 붙일 장면 사진"
-          >
-            <span class="admin-fuse-slot__label">기본 사진</span>
-            <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+      <!-- 공통 참고 사진 (모드별 안내만 바뀜) -->
+      <div class="faceswap-block">
+        <h3 class="faceswap-block__title" id="faceswap-ref-title">참고 사진</h3>
+        <p class="faceswap-block__hint" id="faceswap-ref-hint">모드에 맞는 사진을 넣어 주세요.</p>
+        <div class="admin-faceswap-grid admin-faceswap-grid--faces">
+          <div class="admin-faceswap-field">
+            <label class="form__label" for="admin-faceswap-face0-input" id="faceswap-face0-label">사진 1 (필수)</label>
+            <div
+              id="admin-faceswap-face0-slot"
+              class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
+              role="button"
+              tabindex="0"
+              title="참고 사진 1"
+            >
+              <span class="admin-fuse-slot__label" id="faceswap-face0-slot-label">사진 1</span>
+              <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+            </div>
+            <input id="admin-faceswap-face0-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            <select id="admin-faceswap-gender0" class="form__select">
+              <option value="female" selected>여성</option>
+              <option value="male">남성</option>
+              <option value="non-binary">논바이너리</option>
+            </select>
           </div>
-          <input id="admin-faceswap-target-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
-          <button type="button" id="admin-faceswap-target-clear" class="review-panel__secondary">기본 사진 비우기</button>
+          <div class="admin-faceswap-field">
+            <label class="form__label" for="admin-faceswap-face1-input" id="faceswap-face1-label">사진 2 (커플이면 필수)</label>
+            <div
+              id="admin-faceswap-face1-slot"
+              class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
+              role="button"
+              tabindex="0"
+              title="참고 사진 2"
+            >
+              <span class="admin-fuse-slot__label" id="faceswap-face1-slot-label">사진 2</span>
+              <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+            </div>
+            <input id="admin-faceswap-face1-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            <select id="admin-faceswap-gender1" class="form__select">
+              <option value="male" selected>남성</option>
+              <option value="female">여성</option>
+              <option value="non-binary">논바이너리</option>
+            </select>
+            <button type="button" id="admin-faceswap-face1-clear" class="review-panel__secondary">사진 2 비우기</button>
+          </div>
         </div>
+      </div>
 
-        <div class="admin-faceswap-field">
-          <label class="form__label" for="admin-faceswap-face0-input">2. 얼굴 사진 1 (필수)</label>
-          <div
-            id="admin-faceswap-face0-slot"
-            class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
-            role="button"
-            tabindex="0"
-            title="붙일 얼굴 사진 1"
-          >
-            <span class="admin-fuse-slot__label">얼굴 1</span>
-            <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
-          </div>
-          <input id="admin-faceswap-face0-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
-          <select id="admin-faceswap-gender0" class="form__select">
-            <option value="female" selected>여성</option>
-            <option value="male">남성</option>
-            <option value="non-binary">논바이너리</option>
+      <!-- 1·2 공통: 장면 연출 옵션 -->
+      <div id="faceswap-pane-make" class="faceswap-pane" data-faceswap-pane="make">
+        <div class="faceswap-block">
+          <h3 class="faceswap-block__title" id="faceswap-make-title">장면 만들기</h3>
+          <p class="faceswap-block__hint" id="faceswap-make-hint"></p>
+          <label class="form__label" for="admin-faceswap-scene-preset">장면 종류</label>
+          <select id="admin-faceswap-scene-preset" class="form__select">
+            <option value="arm_in_arm" selected>팔짱 끼고 데이트</option>
+            <option value="hug">서로 포옹</option>
+            <option value="kiss">서로 키스</option>
+            <option value="free">자유 기록만 (아래 칸 필수)</option>
           </select>
+          <label class="form__label" for="admin-faceswap-scene-free" style="margin-top: 10px">자유 기록 (장소·포즈)</label>
+          <textarea
+            id="admin-faceswap-scene-free"
+            class="form__textarea"
+            rows="3"
+            maxlength="800"
+            placeholder="예: 비 오는 밤 골목에서 백허그, 카페 창가에 앉아 손 잡고…"
+          ></textarea>
+          <button type="button" id="admin-faceswap-scene-photoreal" class="form__submit" style="margin-top: 10px">
+            장면 만들기
+          </button>
+          <details class="faceswap-legacy" style="margin-top: 12px">
+            <summary>고급 · 장면만 생성(얼굴 없이) 후 3번 모드에서 교체</summary>
+            <div style="margin-top: 8px; display: flex; gap: 8px; flex-wrap: wrap">
+              <button type="button" id="admin-faceswap-scene-generate" class="review-panel__secondary">
+                장면만 만들기
+              </button>
+              <button type="button" id="admin-faceswap-scene-and-swap" class="form__submit form__submit--secondary">
+                장면 생성 후 바로 얼굴 교체
+              </button>
+            </div>
+          </details>
         </div>
+      </div>
 
-        <div class="admin-faceswap-field">
-          <label class="form__label" for="admin-faceswap-face1-input">3. 얼굴 사진 2 (선택 — 두 명 동시 교체)</label>
-          <div
-            id="admin-faceswap-face1-slot"
-            class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
-            role="button"
-            tabindex="0"
-            title="붙일 얼굴 사진 2 (선택)"
-          >
-            <span class="admin-fuse-slot__label">얼굴 2 (선택)</span>
-            <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+      <!-- 3. 얼굴 바꾸기 -->
+      <div id="faceswap-pane-swap" class="faceswap-pane" data-faceswap-pane="swap" hidden>
+        <div class="faceswap-block">
+          <h3 class="faceswap-block__title">3 · 얼굴 바꾸기</h3>
+          <p class="faceswap-block__hint">
+            <strong>이미 있는 이미지</strong>(장면·화보 등)의 얼굴을, 위에서 넣은 <strong>새 증명사진</strong>으로 바꿉니다.
+            배경·포즈·옷은 유지됩니다.
+          </p>
+          <div class="admin-faceswap-field">
+            <label class="form__label" for="admin-faceswap-target-input">원본 이미지 (얼굴이 바뀌길 원하는 사진)</label>
+            <div
+              id="admin-faceswap-target-slot"
+              class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot"
+              role="button"
+              tabindex="0"
+              title="얼굴을 바꿀 원본 이미지"
+            >
+              <span class="admin-fuse-slot__label">원본 이미지</span>
+              <span class="admin-fuse-slot__hint">클릭=불러오기<br />Ctrl+V·드롭</span>
+            </div>
+            <input id="admin-faceswap-target-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            <button type="button" id="admin-faceswap-target-clear" class="review-panel__secondary">원본 비우기</button>
           </div>
-          <input id="admin-faceswap-face1-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
-          <select id="admin-faceswap-gender1" class="form__select">
-            <option value="male" selected>남성</option>
-            <option value="female">여성</option>
-            <option value="non-binary">논바이너리</option>
-          </select>
-          <button type="button" id="admin-faceswap-face1-clear" class="review-panel__secondary">얼굴 2 비우기</button>
+          <div class="admin-faceswap-options">
+            <label class="form__label" for="admin-faceswap-workflow">헤어스타일</label>
+            <select id="admin-faceswap-workflow" class="form__select">
+              <option value="target_hair" selected>원본 이미지 헤어 유지 (추천)</option>
+              <option value="user_hair">증명사진 쪽 헤어로 교체</option>
+            </select>
+            <label class="form__checkbox-row" for="admin-faceswap-upscale">
+              <input id="admin-faceswap-upscale" type="checkbox" />
+              <span>업스케일 (얼굴이 살짝 달라질 수 있음)</span>
+            </label>
+          </div>
+          <p class="faceswap-block__hint">
+            성별: 원본의 여성 ↔ 사진1=여성, 원본의 남성 ↔ 사진2=남성.
+          </p>
+          <button type="button" id="admin-faceswap-run" class="form__submit">새 증명사진으로 얼굴 바꾸기</button>
         </div>
       </div>
 
-      <div class="admin-faceswap-options">
-        <label class="form__label" for="admin-faceswap-workflow">헤어스타일</label>
-        <select id="admin-faceswap-workflow" class="form__select">
-          <option value="user_hair" selected>얼굴 사진 쪽 헤어스타일 유지</option>
-          <option value="target_hair">기본 사진 쪽 헤어스타일 유지</option>
-        </select>
-        <label class="form__checkbox-row" for="admin-faceswap-upscale">
-          <input id="admin-faceswap-upscale" type="checkbox" checked />
-          <span>업스케일(더 선명하게)</span>
-        </label>
-      </div>
-
-      <button type="button" id="admin-faceswap-run" class="form__submit">얼굴 바로 바꾸기</button>
       <p id="admin-faceswap-status" class="form__status" hidden></p>
 
-      <div class="admin-faceswap-field">
-        <label class="form__label">4. 결과 (새로 합성된 사진 — 여기에 나타나요)</label>
+      <div class="faceswap-block faceswap-block--result">
+        <h3 class="faceswap-block__title">결과</h3>
         <div id="admin-faceswap-result-wrap" class="admin-faceswap-result">
           <div id="admin-faceswap-result-placeholder" class="admin-faceswap-result__placeholder">
-            아직 결과가 없어요.<br />위에서 「얼굴 바로 바꾸기」를 누르면 완성된 사진이 이 자리에 나타납니다.
+            아직 결과가 없어요.<br />위 모드에서 실행하면 여기에 나타납니다.
           </div>
           <img
             id="admin-faceswap-result-img"
             class="admin-faceswap-result__img"
-            alt="얼굴 교체 결과"
+            alt="얼굴·장면 결과"
             hidden
           />
           <div id="admin-faceswap-result-actions" class="admin-faceswap-result__actions" hidden>
             <a id="admin-faceswap-result-download" class="review-panel__secondary" download="face-swap.png">다운로드</a>
             <button type="button" id="admin-faceswap-result-to-main" class="form__submit form__submit--secondary">
-              메인 결과로 보내기(갤러리 저장 가능)
+              메인 결과로 보내기(갤러리·쇼츠 가능)
+            </button>
+            <button type="button" id="admin-faceswap-result-as-target" class="review-panel__secondary">
+              이 결과를 「3. 얼굴 바꾸기」원본으로 쓰기
             </button>
           </div>
         </div>
@@ -1409,6 +1446,6 @@
   <script src="/tale-layout.js?v=20260720d"></script>
   <script src="/observe.js?v=20260722b"></script>
   <script src="/poly-lasso.js?v=20260802lasso4"></script>
-  <script src="/app.js?v=20260822faceswapfix1"></script>
+  <script src="/app.js?v=20260829faceswap-ia2"></script>
 </body>
 </html>

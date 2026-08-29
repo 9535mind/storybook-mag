@@ -38,7 +38,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return jsonResponse({ ok: false, error: 'fal_key_not_configured' }, 500)
     }
 
-    let body: { images?: string[]; description?: string; aspectRatio?: string; photoreal?: boolean }
+    let body: {
+      images?: string[]
+      description?: string
+      aspectRatio?: string
+      photoreal?: boolean
+      gender0?: string
+      gender1?: string
+      refKind?: string
+    }
     try {
       body = await request.json()
     } catch {
@@ -62,7 +70,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (!description) {
       return jsonResponse({ ok: false, error: 'description_required' }, 400)
     }
-    if (description.length > 800) {
+    if (description.length > 1200) {
       return jsonResponse({ ok: false, error: 'description_too_long' }, 400)
     }
 
@@ -118,43 +126,88 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // 다른 사람이어야 한다"는 조건 자체가 명시돼 있지 않았기 때문. 이 조건을 별도
     // 문장으로 명시한다.
     const mentionsManWoman = /남녀|남자.{0,4}여자|여자.{0,4}남자|man\s+and\s+woman|couple/i.test(description)
+    const genderWord = (g?: string) => {
+      const v = (g || '').trim().toLowerCase()
+      if (v === 'male') return 'man'
+      if (v === 'female') return 'woman'
+      if (v === 'non-binary') return 'non-binary adult'
+      return ''
+    }
+    const g0 = genderWord(body.gender0)
+    const g1 = genderWord(body.gender1)
+    const genderHint =
+      g0 && g1
+        ? `Person A (first reference) is a ${g0}; Person B (second reference) is a ${g1}. Keep those sexes/body types — do not swap genders.`
+        : g0
+          ? `Person A (first reference) is a ${g0}.`
+          : ''
     const antiDuplicationClause = [
-      'CRITICAL: Person A and Person B are two DIFFERENT, DISTINCT individuals — FORBIDDEN cloning/duplicating one person twice, FORBIDDEN showing the same face/body on both sides — one person must come from EACH of the two reference photos, clearly recognizable as two separate people.',
-      mentionsManWoman
-        ? 'The scene is a man and a woman together — whichever reference photo shows the man keeps a male body/face, whichever shows the woman keeps a female body/face. FORBIDDEN two men, FORBIDDEN two women.'
+      'CRITICAL: Person A and Person B are two DIFFERENT, DISTINCT individuals — FORBIDDEN cloning/duplicating one person twice — one person must come from EACH of the two reference photos.',
+      genderHint,
+      mentionsManWoman || (g0 === 'man' && g1 === 'woman') || (g0 === 'woman' && g1 === 'man')
+        ? 'Keep male and female as in the references. FORBIDDEN two men, FORBIDDEN two women, FORBIDDEN gender-swap.'
         : '',
     ]
       .filter(Boolean)
       .join(' ')
     const wantsKissAction = /키스|입맞춤|입\s*(?:을\s*)?맞추|kiss/i.test(description)
-    const wantsHugAction = !wantsKissAction && /포옹|안(?:다|고|은|아)|껴안|hug|embrace/i.test(description)
+    const wantsBackHugAction =
+      !wantsKissAction &&
+      /백\s*허그|뒤에서\s*(?:안|껴안|감싸)|등\s*뒤에서|back\s*hug|hug(?:s|ging)?\s*(?:her\s*)?from\s*behind|from\s*behind/i.test(
+        description,
+      )
+    const wantsHugAction =
+      !wantsKissAction &&
+      !wantsBackHugAction &&
+      /포옹|안(?:다|고|은|아)|껴안|hug|embrace/i.test(description)
+    const wantsArmInArmAction =
+      !wantsKissAction &&
+      !wantsBackHugAction &&
+      !wantsHugAction &&
+      /팔짱|데이트|arm\s*in\s*arm|walking\s*(?:arm\s*in\s*arm|together)/i.test(description)
     const actionReinforcement = wantsKissAction
       ? [
-          'CRITICAL ACTION (this is the main subject of the photo, not a side detail): Person A and Person B are kissing on the lips right now — their faces are turned toward each other, heads tilted, eyes closed or nearly closed, and their lips are actually touching/pressed together.',
-          'FORBIDDEN: both people facing the camera; FORBIDDEN: faces not touching; FORBIDDEN: any gap between their mouths; FORBIDDEN: looking at the camera instead of each other.',
+          'CRITICAL ACTION: they are kissing on the lips now — heads tilted toward each other, lips touching. FORBIDDEN both facing camera with faces apart.',
         ]
-      : wantsHugAction
+      : wantsBackHugAction
         ? [
-            'CRITICAL ACTION (this is the main subject of the photo, not a side detail): Person A and Person B are hugging each other right now — at least one arm of each person is wrapped around the other person\'s back/shoulders, and their chests/bodies are pressed close together.',
-            'FORBIDDEN: both people facing the camera with arms at their sides; FORBIDDEN: standing apart without any arm contact.',
+            'CRITICAL ACTION: back-hug — one stands BEHIND the other, arms wrapped from behind. FORBIDDEN face-to-face square stance.',
           ]
-        : []
+        : wantsHugAction
+          ? [
+              'CRITICAL ACTION: hugging now — arms around each other, bodies close. FORBIDDEN arms hanging at sides facing camera.',
+            ]
+          : wantsArmInArmAction
+            ? [
+                'CRITICAL ACTION: arm-in-arm / linked arms on a date, bodies leaning together. FORBIDDEN stiff passport pose.',
+              ]
+            : []
+
+    const refKind = body.refKind === 'body' ? 'body' : 'face'
+    const identityFirstLock = [
+      'HIGHEST PRIORITY — IDENTITY & BODY LOCK (do this before anything else):',
+      'The first reference photo IS Person A. The second reference photo IS Person B.',
+      "Keep Person A's exact face (bone structure, eyes, nose, mouth, age), skin tone, hairstyle, and body build from reference 1 — same shoulder width, chest/bust volume, waist, and overall silhouette visible in that photo.",
+      "Keep Person B's exact face, skin tone, hairstyle, and body build from reference 2 — same proportions visible in that photo.",
+      refKind === 'body'
+        ? 'References are half-body or full-body photos: preserve torso proportions, breast/chest size, waist-hip silhouette, and limb thickness exactly — FORBIDDEN inventing a slimmer or bulkier fashion-model body.'
+        : 'If a reference is a face crop or half-body shot: extend to full body naturally, but the face and the visible torso proportions must stay the same person — FORBIDDEN replacing them with a different fashion model.',
+      'FORBIDDEN: inventing new faces, beauty-filtered strangers, different ethnicity, different age, different body type (do not slim, bulk, enlarge, or shrink bust/shoulders/hips away from the references).',
+      'FORBIDDEN: treating the scene text as permission to redesign who they are — scene text only changes pose, place, clothes if asked, and action.',
+    ].join(' ')
+
     const prompt = body.photoreal
       ? [
-          `Edit these two reference photos into one single new photorealistic photo: ${description}`,
-          '',
-          'The first reference photo shows Person A. The second reference photo shows Person B.',
-          'Add Person B standing together with Person A in the same new photo, both fully visible at full-body length, positioned and posed exactly as described above.',
+          identityFirstLock,
           antiDuplicationClause,
+          '',
+          `Scene direction ONLY (pose / place / action — do NOT change identity or body type): ${description}`,
           ...actionReinforcement,
-          "Keep Person A's exact face, identity, skin tone, and hairstyle unchanged from the first reference photo.",
-          "Keep Person B's exact face, identity, skin tone, and hairstyle unchanged from the second reference photo.",
-          'Do not omit either person. Both Person A and Person B must appear together in the final image, photographed together in real life — not a cropped or extended version of only one reference photo.',
-          'Both people must have natural, relaxed body language that matches the pose described above (arms actually touching/wrapped around each other, bodies leaning together, weight shifted naturally) — FORBIDDEN: a stiff ID-photo-like pose with both arms straight down at the sides, standing rigidly apart facing forward like a passport photo.',
+          'Both Person A and Person B appear together in one photorealistic photo, full body visible when possible.',
+          'Match the photographic look of the reference photos (real camera photo, not illustration).',
           actionReinforcement.length
-            ? 'Reminder: the required action above (kiss/hug) MUST be visibly happening in the final image — a photo of two people merely standing near each other does NOT satisfy this request.'
+            ? 'The requested action must be visible, but NEVER at the cost of swapping faces or body types.'
             : '',
-          'Photorealistic photo, not an illustration, painting, or drawing.',
         ]
           .filter(Boolean)
           .join('\n')
@@ -172,10 +225,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         prompt,
         aspectRatio,
         timeoutMs: FAL_WILDLIFE_TIMEOUT_MS,
-        // 2인 합성 시 "둘 다 빠짐없이 넣어라" 지시를 더 강하게 지키도록 기본보다 높임.
-        // 키스/포옹처럼 신체 접촉이 필요한 행동은 정체성 보존 편향 때문에 더 쉽게 무시되므로
-        // (실측: "둘 다 정면 보고 서 있기만 함") 가이던스를 한 단계 더 올린다.
-        guidanceScale: body.photoreal && imageUrls.length >= 2 ? (actionReinforcement.length ? 7.5 : 6) : undefined,
+        // 정체성 보존이 최우선 — 가이던스를 너무 올리면 장면 텍스트("young couple" 등)에
+        // 과적합되어 얼굴을 갈아엎는 실측이 있었음. 행동 보강이 있어도 5.5 전후로 유지.
+        guidanceScale: body.photoreal && imageUrls.length >= 2 ? 5.5 : undefined,
       })
       return jsonResponse({ ok: true, imageUrl, prompt }, 200)
     } catch (error) {

@@ -18,7 +18,7 @@ import {
   resolveWanI2vDuration,
   startReplicateVideo,
 } from '../lib/replicate-client'
-import { translateDescriptionForImagePrompt } from '../lib/translate'
+import { translateDescriptionForImagePrompt, translateMotionForVideo } from '../lib/translate'
 
 interface Env {
   DB?: D1Database
@@ -187,28 +187,41 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
   }
 
-  // Wan I2V도 영어 위주 모델이라, 모션 힌트를 한글 그대로 넣으면 잘 안 따라간다 — 번역해서 넣는다.
-  const [{ text: promptForVideo }, { text: motionForVideo }] = await Promise.all([
-    translateDescriptionForImagePrompt(originalPrompt, env),
-    translateDescriptionForImagePrompt(motion, env),
+  // Wan I2V는 영어 동작 지시를 따른다.
+  // 예전: 한글+영어를 둘 다 붙여 프롬프트가 비대해지고, 정지화 의상 설명이 모션을 덮어
+  // 이상한 결과(미소 클로즈업·옷 유지)가 남. → 영어만 넣고, 부위 판별용 한글은 rawMotion.
+  // 중요: ensureNudeHoldMotionPhrase가 붙인 팬티/포그 상용구는 번역하지 않는다 —
+  // 그걸 같이 번역하면 사용자 모션이 희석되고 1500자 예산이 잠금문으로 샌다.
+  // 잠금은 buildAnimationPrompt 구역(BODY/END)에서 짧게 다시 넣는다.
+  const continuitySource = originalPrompt
+  const [{ text: promptForVideo }, motionTx] = await Promise.all([
+    continuitySource
+      ? translateDescriptionForImagePrompt(continuitySource, env)
+      : Promise.resolve({ text: '', translated: false as const }),
+    translateMotionForVideo(rawMotion, env),
   ])
+  const motionForVideo = (motionTx.text || rawMotion).trim()
+  const motionTranslateEngine = motionTx.translated
+    ? motionTx.engine || 'heuristic'
+    : /[\uac00-\ud7a3]/.test(rawMotion)
+      ? 'ko-untranslated'
+      : 'en-as-is'
   const clipRoleRaw = (body.clipRole ?? '').trim().toLowerCase()
   const clipRole =
     clipRoleRaw === 'dual-a' || clipRoleRaw === 'dual-b' ? clipRoleRaw : ('single' as const)
   const landmarks = bodyProjectFlag ? normalizeBodyLandmarks(body.landmarks) : null
-  // 몸매 투영: 긴 화보 설명(블라우스·벨트·바지)이 I2V에 다시 옷을 먹이는 걸 막기 위해
-  // 원문 프롬프트는 넣지 않고, 짧은 become 비트 + 타점만 사용.
-  // 타점 %를 motion 문자열에도 넣어 프롬프트 경로가 달라도 좌표가 빠지지 않게 한다.
+  // 몸매 투영: 긴 화보 설명이 I2V에 다시 옷을 먹이지 않도록 짧은 become + 타점만 사용.
   const landmarkMotion = landmarks
     ? [
-        '몸매 투영 full nude reveal.',
+        'body-projection full nude reveal.',
         `LEFT mound x=${((landmarks.moundL ?? landmarks.nippleL).x * 100).toFixed(1)}% y=${((landmarks.moundL ?? landmarks.nippleL).y * 100).toFixed(1)}%.`,
         `LEFT nipple x=${(landmarks.nippleL.x * 100).toFixed(1)}% y=${(landmarks.nippleL.y * 100).toFixed(1)}% (may be off-center).`,
         `RIGHT mound x=${((landmarks.moundR ?? landmarks.nippleR).x * 100).toFixed(1)}% y=${((landmarks.moundR ?? landmarks.nippleR).y * 100).toFixed(1)}%.`,
         `RIGHT nipple x=${(landmarks.nippleR.x * 100).toFixed(1)}% y=${(landmarks.nippleR.y * 100).toFixed(1)}% (may be off-center).`,
         'Remove bra, brown waist belt, pants, and all panties (including double layers).',
       ].join(' ')
-    : '몸매 투영 full nude reveal. Remove bra, brown waist belt, pants, and all panties.'
+    : 'body-projection full nude reveal. Remove bra, brown waist belt, pants, and all panties.'
+  const continuityForVideo = (promptForVideo || continuitySource).trim()
   const prompt = bodyProjectFlag
     ? buildAnimationPrompt({
         prompt: '',
@@ -220,8 +233,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         bustHeight,
       })
     : buildAnimationPrompt({
-        prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
-        motion: [motionForVideo, motion].filter(Boolean).join('\n'),
+        prompt: continuityForVideo,
+        motion: motionForVideo,
         rawMotion,
         clipRole,
         landmarks,
@@ -235,8 +248,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const nudeOrUndress =
     bodyProjectFlag ||
     nudeIntent.nudeBecomes ||
-    wantsUndressAction(motion) ||
-    wantsNudeOrUndress(motion) ||
+    wantsUndressAction(rawMotion) ||
+    wantsNudeOrUndress(rawMotion) ||
     wantsUndressAction(motionForVideo) ||
     wantsNudeOrUndress(motionForVideo)
 
@@ -273,6 +286,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           pending: false,
           videoUrl: started.videoUrl,
           prompt,
+          promptChars: prompt.length,
+          motionTranslateEngine,
           durationSec: started.durationSec || approxSec,
           predictionId: started.predictionId,
           engine: 'replicate',
@@ -289,6 +304,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         pending: true,
         predictionId: started.predictionId,
         prompt,
+        promptChars: prompt.length,
+        motionTranslateEngine,
         durationSec: started.durationSec || approxSec,
         engine: 'replicate',
         engineLabel: `Replicate · ${modelOwner}/${modelName}`,

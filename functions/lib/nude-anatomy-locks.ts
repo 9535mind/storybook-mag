@@ -70,6 +70,35 @@ export function buildAdultPubicHairLock(text = ''): string {
   ].join('. ')
 }
 
+/**
+ * Wan I2V 1500자용 — 음모 모양 한 줄. 장문 buildAdultPubicHairLock 대신 BODY 칸에만 넣는다.
+ * 사용자가 민무늬/넓은/얇은 등을 쓰면 그걸 우선한다.
+ */
+export function buildWanPubicLine(text = ''): string {
+  const t = polishKoreanPromptText(text || '')
+  if (wantsExplicitPubicShave(t)) {
+    return 'Pubic: smooth shaved as requested. ZERO panties/fog.'
+  }
+  if (/넓은\s*음모|사타구니\s*까지|허벅지\s*(?:안|쪽)|wide\s*(?:bush|pubic)/i.test(t)) {
+    return 'Pubic: fuller dark curly bush on mons (slightly wider as requested). ZERO panties/fog.'
+  }
+  if (/얇은\s*음모|희미한\s*음모|sparse|thin\s*(?:bush|pubic)/i.test(t)) {
+    return 'Pubic: thin sparse dark curls on mons only. ZERO panties/fog.'
+  }
+  if (/역삼각|삼각형\s*음모|landing\s*strip|brazilian/i.test(t)) {
+    return 'Pubic: neat triangular dark curls centered on mons. ZERO panties/fog.'
+  }
+  // 기본: 치골 위 콤팩트 곱슬 (장문 락의 핵심만)
+  return 'Pubic: compact dense dark curls on mons — not fog blotch, not blank doll skin. ZERO panties.'
+}
+
+/**
+ * Wan용 짧은 여성 해부 잠금 — 「자지 만짐」요청 시 여성 몸에 자지를 그려 넣는 회귀 방지.
+ */
+export function buildWanFemaleSexLock(): string {
+  return 'SEX LOCK: she is an adult WOMAN — female breasts + female vulva only. FORBIDDEN penis/scrotum on her body, futa, hermaphrodite, gender-swap.'
+}
+
 /** 체모만 사실적으로 — 마스크 inpaint / 국소 img2img용 짧은 프롬프트 */
 export function buildRealisticPubicHairRefinePrompt(revision: string): string {
   const t = polishKoreanPromptText(revision || '')
