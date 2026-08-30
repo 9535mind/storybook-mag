@@ -2585,6 +2585,30 @@ async function cacheImageForAnimate(imageUrl) {
   if (!imageUrl || !isLoggedIn()) return
   const token = imageUrl
   try {
+    // blob/data는 서버로 보내지 않음 (media-bytes 400 / image_url_not_allowed)
+    if (imageUrl.startsWith('data:image/')) {
+      if (currentResult.imageUrl === token || currentResult.imageUrl?.startsWith('http')) {
+        currentResult.imageDataUrl = imageUrl
+      }
+      return
+    }
+    if (imageUrl.startsWith('blob:')) {
+      const blob = await fetch(imageUrl).then((r) => r.blob())
+      if (!blob || blob.size < 64) return
+      const dataUrl = await new Promise((resolve, reject) => {
+        const fr = new FileReader()
+        fr.onload = () => resolve(fr.result)
+        fr.onerror = () => reject(new Error('read_failed'))
+        fr.readAsDataURL(blob)
+      })
+      if (typeof dataUrl === 'string' && dataUrl.startsWith('data:image/')) {
+        // 미리보기는 blob이어도 쇼츠용 캐시는 data로 보관
+        currentResult.imageDataUrl = dataUrl
+      }
+      return
+    }
+    if (!/^https?:\/\//i.test(imageUrl)) return
+
     const response = await fetch('/api/media-bytes', {
       method: 'POST',
       headers: authHeaders(),
@@ -4271,7 +4295,7 @@ async function prepareImageDataUrl(file, maxDim = 2200) {
   canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
   const ctx = canvas.getContext('2d')
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', 0.9)
+  return canvas.toDataURL('image/jpeg', 0.95)
 }
 
 async function loadImageFromFile(file) {
@@ -5449,122 +5473,107 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   })
 })
 
-// ---- 얼굴 교체(간단 모드) — 올가미/맞추기 없이 한 번의 AI 호출로 얼굴만 교체 ----
+// ---- 얼굴·장면 (재구축) — 1단계: 얼굴 바꾸기만 동작 ----
 ;(() => {
-  const targetSlot = document.getElementById('admin-faceswap-target-slot')
-  const face0Slot = document.getElementById('admin-faceswap-face0-slot')
-  const face1Slot = document.getElementById('admin-faceswap-face1-slot')
-  const targetInput = document.getElementById('admin-faceswap-target-input')
-  const targetClearBtn = document.getElementById('admin-faceswap-target-clear')
-  const face0Input = document.getElementById('admin-faceswap-face0-input')
-  const face1Input = document.getElementById('admin-faceswap-face1-input')
-  const gender0Select = document.getElementById('admin-faceswap-gender0')
-  const gender1Select = document.getElementById('admin-faceswap-gender1')
-  const face1ClearBtn = document.getElementById('admin-faceswap-face1-clear')
-  const workflowSelect = document.getElementById('admin-faceswap-workflow')
-  const upscaleCheckbox = document.getElementById('admin-faceswap-upscale')
-  const runBtn = document.getElementById('admin-faceswap-run')
-  const statusEl = document.getElementById('admin-faceswap-status')
-  const resultWrap = document.getElementById('admin-faceswap-result-wrap')
-  const resultPlaceholder = document.getElementById('admin-faceswap-result-placeholder')
-  const resultImg = document.getElementById('admin-faceswap-result-img')
-  const resultActions = document.getElementById('admin-faceswap-result-actions')
-  const resultDownload = document.getElementById('admin-faceswap-result-download')
-  const resultToMainBtn = document.getElementById('admin-faceswap-result-to-main')
-  if (!targetSlot || !face0Slot || !face1Slot || !runBtn) return
+  const MODE_KEY = 'storymag.fsMode.v3'
+  const face0Slot = document.getElementById('fs-face0-slot')
+  const face1Slot = document.getElementById('fs-face1-slot')
+  const targetSlot = document.getElementById('fs-target-slot')
+  const face0Input = document.getElementById('fs-face0-input')
+  const face1Input = document.getElementById('fs-face1-input')
+  const targetInput = document.getElementById('fs-target-input')
+  const gender0Select = document.getElementById('fs-gender0')
+  const gender1Select = document.getElementById('fs-gender1')
+  const face0ClearBtn = document.getElementById('fs-face0-clear')
+  const face1ClearBtn = document.getElementById('fs-face1-clear')
+  const targetClearBtn = document.getElementById('fs-target-clear')
+  const workflowSelect = document.getElementById('fs-workflow')
+  const upscaleCheckbox = document.getElementById('fs-upscale')
+  const engineSelect = document.getElementById('fs-engine')
+  const targetSideSelect = document.getElementById('fs-target-side')
+  const easelOptions = document.getElementById('fs-easel-options')
+  const runBtn = document.getElementById('fs-run-swap')
+  const statusEl = document.getElementById('fs-status')
+  const resultWrap = document.getElementById('fs-result-wrap')
+  const resultPlaceholder = document.getElementById('fs-result-placeholder')
+  const resultImg = document.getElementById('fs-result-img')
+  const resultActions = document.getElementById('fs-result-actions')
+  const resultDownload = document.getElementById('fs-result-download')
+  const resultToMainBtn = document.getElementById('fs-result-to-main')
+  const resultAsTargetBtn = document.getElementById('fs-result-as-target')
+  const paneSwap = document.getElementById('fs-pane-swap')
+  const paneFace = document.getElementById('fs-pane-face')
+  const paneBody = document.getElementById('fs-pane-body')
+
+  if (!targetSlot || !face0Slot || !runBtn) return
 
   const state = { target: null, face0: null, face1: null }
-  const FACESWAP_MODE_KEY = 'storymag.faceswapMode.v2'
-  const paneMake = document.getElementById('faceswap-pane-make')
-  const paneSwap = document.getElementById('faceswap-pane-swap')
-  const resultAsTargetBtn = document.getElementById('admin-faceswap-result-as-target')
-  const refTitle = document.getElementById('faceswap-ref-title')
-  const refHint = document.getElementById('faceswap-ref-hint')
-  const face0Label = document.getElementById('faceswap-face0-label')
-  const face1Label = document.getElementById('faceswap-face1-label')
-  const face0SlotLabel = document.getElementById('faceswap-face0-slot-label')
-  const face1SlotLabel = document.getElementById('faceswap-face1-slot-label')
-  const makeTitle = document.getElementById('faceswap-make-title')
-  const makeHint = document.getElementById('faceswap-make-hint')
-  const scenePhotorealBtnEl = document.getElementById('admin-faceswap-scene-photoreal')
-  let faceswapMode = 'face'
+  let blobUrl = null
+  let lastRemoteUrl = null
 
-  function setFaceswapMode(mode) {
-    const next = mode === 'body' || mode === 'swap' ? mode : 'face'
-    faceswapMode = next
-    try {
-      localStorage.setItem(FACESWAP_MODE_KEY, next)
-    } catch (_) {
-      /* ignore */
+  function syncEngineUi() {
+    const raw = targetSideSelect?.value || 'all'
+    const side = raw === 'left' || raw === 'right' || raw === 'all' ? raw : 'gender'
+    if (easelOptions) easelOptions.hidden = side !== 'gender'
+    if (upscaleCheckbox?.closest('.form__checkbox-row')) {
+      upscaleCheckbox.closest('.form__checkbox-row').hidden = side !== 'gender'
     }
-    document.querySelectorAll('[data-faceswap-mode]').forEach((btn) => {
-      const on = btn.getAttribute('data-faceswap-mode') === next
-      btn.classList.toggle('faceswap-mode-tabs__btn--active', on)
-      btn.setAttribute('aria-selected', on ? 'true' : 'false')
-    })
-    const making = next === 'face' || next === 'body'
-    if (paneMake) paneMake.hidden = !making
-    if (paneSwap) paneSwap.hidden = next !== 'swap'
+    if (engineSelect) {
+      engineSelect.value = side === 'gender' ? 'easel' : 'replicate'
+    }
+  }
+  targetSideSelect?.addEventListener('change', syncEngineUi)
+  engineSelect?.addEventListener('change', syncEngineUi)
+  syncEngineUi()
 
-    if (next === 'face') {
-      if (refTitle) refTitle.textContent = '1 · 증명사진(얼굴)'
-      if (refHint) refHint.textContent = '얼굴 위주 증명사진을 넣습니다. 커플이면 두 장 모두 필요합니다.'
-      if (face0Label) face0Label.textContent = '증명사진 1 (필수)'
-      if (face1Label) face1Label.textContent = '증명사진 2 (커플이면 필수)'
-      if (face0SlotLabel) face0SlotLabel.textContent = '증명 1'
-      if (face1SlotLabel) face1SlotLabel.textContent = '증명 2'
-      if (makeTitle) makeTitle.textContent = '얼굴로 장면 만들기'
-      if (makeHint) {
-        makeHint.textContent =
-          '증명사진만으로 새 전신 장면을 만듭니다. 얼굴 유지를 우선합니다. 어긋나면 결과를 「3. 얼굴 바꾸기」원본으로 넣어 다듬으세요.'
-      }
-      if (scenePhotorealBtnEl) scenePhotorealBtnEl.textContent = '얼굴로 장면 만들기'
-    } else if (next === 'body') {
-      if (refTitle) refTitle.textContent = '2 · 전신·반신 사진'
-      if (refHint) {
-        refHint.textContent =
-          '전신 또는 반신 사진을 넣습니다. 얼굴뿐 아니라 어깨·가슴·허리 체형도 참고합니다.'
-      }
-      if (face0Label) face0Label.textContent = '전신·반신 1 (필수)'
-      if (face1Label) face1Label.textContent = '전신·반신 2 (커플이면 필수)'
-      if (face0SlotLabel) face0SlotLabel.textContent = '전신·반신 1'
-      if (face1SlotLabel) face1SlotLabel.textContent = '전신·반신 2'
-      if (makeTitle) makeTitle.textContent = '전신·반신으로 장면 만들기'
-      if (makeHint) {
-        makeHint.textContent =
-          '전신·반신 참고로 새 장면을 만듭니다. 체형·실루엣 유지를 더 강하게 겁니다. 어긋나면 「3. 얼굴 바꾸기」로 얼굴을 고정하세요.'
-      }
-      if (scenePhotorealBtnEl) scenePhotorealBtnEl.textContent = '전신·반신으로 장면 만들기'
-    } else {
-      if (refTitle) refTitle.textContent = '3 · 새 증명사진 (바꿀 얼굴)'
-      if (refHint) {
-        refHint.textContent =
-          '원본 이미지에 붙일 새 얼굴(증명사진)입니다. 아래에서 얼굴을 바꿀 원본 이미지도 넣으세요.'
-      }
-      if (face0Label) face0Label.textContent = '새 증명사진 1 (필수)'
-      if (face1Label) face1Label.textContent = '새 증명사진 2 (커플이면 필수)'
-      if (face0SlotLabel) face0SlotLabel.textContent = '새 얼굴 1'
-      if (face1SlotLabel) face1SlotLabel.textContent = '새 얼굴 2'
+  /**
+   * 최대 2칸. 「사용 안 함」은 제외. slot 0=왼쪽, 1=오른쪽.
+   */
+  function resolveFaceSlots() {
+    const candidates = [
+      { dataUrl: state.face0, gender: gender0Select?.value || 'female', slot: 0 },
+      { dataUrl: state.face1, gender: gender1Select?.value || 'none', slot: 1 },
+    ]
+    const packed = candidates.filter((c) => c.dataUrl && c.gender && c.gender !== 'none')
+    if (!packed.length) return null
+    return {
+      list: packed,
+      face0: packed[0].dataUrl,
+      gender0: packed[0].gender,
+      face1: packed[1] ? packed[1].dataUrl : null,
+      gender1: packed[1] ? packed[1].gender : null,
+      count: packed.length,
     }
   }
 
-  document.querySelectorAll('[data-faceswap-mode]').forEach((btn) => {
-    btn.addEventListener('click', () => setFaceswapMode(btn.getAttribute('data-faceswap-mode')))
-  })
-  const savedMode = localStorage.getItem(FACESWAP_MODE_KEY)
-  setFaceswapMode(savedMode === 'body' || savedMode === 'swap' || savedMode === 'face' ? savedMode : 'face')
-
-  resultAsTargetBtn?.addEventListener('click', () => {
-    const url = resultImg?.src
-    if (!url) {
-      setStatus('먼저 결과가 있어야 원본으로 넣을 수 있어요.', true)
-      return
+  function clearFaceSlot(key, slotEl, genderSelect) {
+    state[key] = null
+    setSlotPreview(slotEl, null)
+    if (genderSelect && key === 'face1') {
+      genderSelect.value = 'none'
     }
-    state.target = url
-    setSlotPreview(targetSlot, url)
-    setFaceswapMode('swap')
-    setStatus('결과를 「3. 얼굴 바꾸기」원본으로 넣었어요. 새 증명사진을 맞춘 뒤 얼굴을 바꾸세요.', false)
-  })
+  }
+
+  function wireGenderUnused(genderSelect, key, slotEl) {
+    if (!genderSelect) return
+    genderSelect.addEventListener('change', () => {
+      if (genderSelect.value === 'none') {
+        clearFaceSlot(key, slotEl, genderSelect)
+        setStatus(`${key === 'face0' ? '칸1(왼쪽)' : '칸2(오른쪽)'} 사용 안 함`, false)
+      }
+    })
+  }
+
+  function sideLabel(side) {
+    if (side === 'left') return '왼쪽'
+    if (side === 'right') return '오른쪽'
+    if (side === 'all') return '좌·우'
+    return '성별'
+  }
+
+  function indexToSide(index) {
+    return index === 1 ? 'right' : 'left'
+  }
 
   function setStatus(msg, isError) {
     if (!statusEl) return
@@ -5572,6 +5581,29 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     statusEl.textContent = msg || ''
     statusEl.classList.toggle('form__status--error', Boolean(isError))
   }
+
+  function setMode(mode) {
+    const next = mode === 'face' || mode === 'body' ? mode : 'swap'
+    try {
+      localStorage.setItem(MODE_KEY, next)
+    } catch (_) {
+      /* ignore */
+    }
+    document.querySelectorAll('[data-fs-mode]').forEach((btn) => {
+      const on = btn.getAttribute('data-fs-mode') === next
+      btn.classList.toggle('faceswap-mode-tabs__btn--active', on)
+      btn.setAttribute('aria-selected', on ? 'true' : 'false')
+    })
+    if (paneSwap) paneSwap.hidden = next !== 'swap'
+    if (paneFace) paneFace.hidden = next !== 'face'
+    if (paneBody) paneBody.hidden = next !== 'body'
+  }
+
+  document.querySelectorAll('[data-fs-mode]').forEach((btn) => {
+    btn.addEventListener('click', () => setMode(btn.getAttribute('data-fs-mode')))
+  })
+  const saved = localStorage.getItem(MODE_KEY)
+  setMode(saved === 'face' || saved === 'body' || saved === 'swap' ? saved : 'swap')
 
   function setSlotPreview(slotEl, dataUrl) {
     if (!slotEl) return
@@ -5592,9 +5624,14 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return
     }
     try {
-      const dataUrl = await prepareImageDataUrl(file)
+      // 증명사진은 고화질 유지(압축↓) — 닮음에 직결
+      const dataUrl =
+        key === 'target' ? await prepareImageDataUrl(file) : await prepareImageDataUrl(file, 1800)
       state[key] = dataUrl
       setSlotPreview(slotEl, dataUrl)
+      // 사진 올리면 「사용 안 함」이면 성별을 기본값으로 올림 (칸1=좌·남성 기본)
+      if (key === 'face0' && gender0Select?.value === 'none') gender0Select.value = 'male'
+      if (key === 'face1' && gender1Select?.value === 'none') gender1Select.value = 'female'
       setStatus('', false)
     } catch (error) {
       setStatus(`사진을 불러오지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
@@ -5602,14 +5639,15 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   }
 
   function wireSlot(key, slotEl, inputEl) {
-    slotEl.addEventListener('click', () => inputEl?.click())
+    if (!slotEl || !inputEl) return
+    slotEl.addEventListener('click', () => inputEl.click())
     slotEl.addEventListener('keydown', (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault()
-        inputEl?.click()
+        inputEl.click()
       }
     })
-    inputEl?.addEventListener('change', () => {
+    inputEl.addEventListener('change', () => {
       const file = inputEl.files?.[0]
       if (file) void assignFile(key, slotEl, file)
       inputEl.value = ''
@@ -5618,9 +5656,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       event.preventDefault()
       slotEl.classList.add('admin-fuse-slot--drag')
     })
-    slotEl.addEventListener('dragleave', () => {
-      slotEl.classList.remove('admin-fuse-slot--drag')
-    })
+    slotEl.addEventListener('dragleave', () => slotEl.classList.remove('admin-fuse-slot--drag'))
     slotEl.addEventListener('drop', (event) => {
       event.preventDefault()
       slotEl.classList.remove('admin-fuse-slot--drag')
@@ -5636,181 +5672,372 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     })
   }
 
-  wireSlot('target', targetSlot, targetInput)
   wireSlot('face0', face0Slot, face0Input)
   wireSlot('face1', face1Slot, face1Input)
+  wireSlot('target', targetSlot, targetInput)
+  wireGenderUnused(gender0Select, 'face0', face0Slot)
+  wireGenderUnused(gender1Select, 'face1', face1Slot)
 
-  face1ClearBtn?.addEventListener('click', () => {
-    state.face1 = null
-    setSlotPreview(face1Slot, null)
+  face0ClearBtn?.addEventListener('click', () => {
+    clearFaceSlot('face0', face0Slot, gender0Select)
+    if (gender0Select) gender0Select.value = 'none'
   })
-
+  face1ClearBtn?.addEventListener('click', () => clearFaceSlot('face1', face1Slot, gender1Select))
   targetClearBtn?.addEventListener('click', () => {
     state.target = null
     setSlotPreview(targetSlot, null)
-    setStatus('', false)
   })
 
-  async function sleep(ms) {
-    await new Promise((resolve) => window.setTimeout(resolve, ms))
+  function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms))
   }
 
-  /** 스튜디오 결과란 + 메인 「생성 결과」에 같이 표시 (얼굴·장면 탭에서 메인 결과가 숨겨져 안 보이던 문제 방지) */
-  let faceswapBlobUrl = null
-  function revokeFaceswapBlob() {
-    if (faceswapBlobUrl) {
+  function revokeBlob() {
+    if (blobUrl) {
       try {
-        URL.revokeObjectURL(faceswapBlobUrl)
+        URL.revokeObjectURL(blobUrl)
       } catch (_) {
         /* ignore */
       }
-      faceswapBlobUrl = null
+      blobUrl = null
     }
   }
 
-  async function toDisplayableImageUrl(imageUrl) {
-    if (!imageUrl || imageUrl.startsWith('data:') || imageUrl.startsWith('blob:')) return imageUrl
-    // 우리 R2 공개 URL은 브라우저가 바로 표시 가능
-    if (/r2\.dev|r2\.cloudflarestorage\.com/i.test(imageUrl)) return imageUrl
-    // fal CDN은 검은 화면 — 서버 경유
+  async function toDisplayUrl(imageUrl) {
+    if (!imageUrl) return null
+    if (imageUrl.startsWith('blob:')) return imageUrl
+    if (imageUrl.startsWith('data:image/')) {
+      try {
+        const blob = await (await fetch(imageUrl)).blob()
+        if (blob.size < 2000) return null
+        revokeBlob()
+        blobUrl = URL.createObjectURL(blob)
+        return blobUrl
+      } catch (_) {
+        return imageUrl
+      }
+    }
     try {
       const controller = new AbortController()
-      const timer = window.setTimeout(() => controller.abort(), 45000)
-      const bytesRes = await fetch('/api/media-bytes', {
+      const timer = window.setTimeout(() => controller.abort(), 90000)
+      const res = await fetch('/api/media-proxy', {
         method: 'POST',
         headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
         body: JSON.stringify({ imageUrl }),
         signal: controller.signal,
       })
       window.clearTimeout(timer)
-      const bytesData = await bytesRes.json().catch(() => ({}))
-      if (bytesData.ok && typeof bytesData.dataUrl === 'string' && bytesData.dataUrl.startsWith('data:image/')) {
-        if ((bytesData.bytes || 0) >= 2000) return bytesData.dataUrl
-      }
+      const ctype = (res.headers.get('content-type') || '').toLowerCase()
+      if (!res.ok || !ctype.startsWith('image/')) return null
+      const blob = await res.blob()
+      if (!blob || blob.size < 2000) return null
+      revokeBlob()
+      blobUrl = URL.createObjectURL(blob)
+      return blobUrl
     } catch (_) {
-      /* try persist */
+      return null
     }
-    try {
-      const controller = new AbortController()
-      const timer = window.setTimeout(() => controller.abort(), 20000)
-      const persistRes = await fetch('/api/persist-media', {
-        method: 'POST',
-        headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: imageUrl }),
-        signal: controller.signal,
-      })
-      window.clearTimeout(timer)
-      const persistData = await persistRes.json().catch(() => ({}))
-      if (persistData.ok && persistData.url && /r2\.dev|r2\.cloudflarestorage\.com/i.test(persistData.url)) {
-        return persistData.url
-      }
-    } catch (_) {
-      /* fail */
-    }
-    return null
   }
 
-  function paintFaceswapResult(displayUrl, opts) {
-    const label = opts?.engineLabel || '얼굴·장면'
-    const prompt = opts?.prompt || label
-    revokeFaceswapBlob()
+  function paintResult(displayUrl, remoteUrl) {
+    if (displayUrl !== blobUrl) revokeBlob()
     if (resultImg) {
-      resultImg.referrerPolicy = 'no-referrer'
-      resultImg.onload = () => {
-        resultImg.hidden = false
-        if (resultPlaceholder) resultPlaceholder.hidden = true
-        // 로드됐는데 사실상 빈 검정이면(아주 작은 natural size) 안내
-        if (resultImg.naturalWidth > 0 && resultImg.naturalWidth < 8 && resultImg.naturalHeight < 8) {
-          resultImg.hidden = true
-          if (resultPlaceholder) {
-            resultPlaceholder.hidden = false
-            resultPlaceholder.textContent =
-              '결과가 비어 있거나 깨졌어요. 장면을 다시 만들어 주세요.'
-          }
-        }
-      }
-      resultImg.onerror = () => {
-        resultImg.hidden = true
-        if (resultPlaceholder) {
-          resultPlaceholder.hidden = false
-          resultPlaceholder.innerHTML =
-            '미리보기를 불러오지 못했어요.<br />아래 「다운로드」또는 「메인 결과로 보내기」를 눌러 보세요.'
-        }
-        setStatus(
-          '결과는 받았지만 미리보기 로드에 실패했어요. 「다운로드」로 확인해 주세요.',
-          true,
-        )
-      }
-      resultImg.removeAttribute('src')
+      resultImg.onload = null
+      resultImg.onerror = null
       resultImg.src = displayUrl
       resultImg.hidden = false
     }
+    if (resultPlaceholder) resultPlaceholder.hidden = true
+    if (resultActions) resultActions.hidden = false
     if (resultDownload) {
       resultDownload.href = displayUrl
       resultDownload.removeAttribute('hidden')
     }
-    if (resultActions) resultActions.hidden = false
-    if (resultPlaceholder) resultPlaceholder.hidden = true
+    if (remoteUrl && (remoteUrl.startsWith('http') || remoteUrl.startsWith('data:'))) {
+      lastRemoteUrl = remoteUrl
+    }
     if (typeof showResult === 'function') {
-      showResult(displayUrl, label, false, {
+      showResult(displayUrl, '얼굴 바꾸기', false, {
         size: typeof sizeField !== 'undefined' && sizeField ? sizeField.value : 'portrait',
         itemId: null,
-        prompt,
+        prompt: '얼굴 바꾸기 결과',
         accepted: false,
         mood: typeof moodField !== 'undefined' && moodField ? moodField.value : 'clean',
-        engine: opts?.engine || 'tale-scene',
+        engine: 'face-swap',
         genMode: 'fashion',
         reviseRound: 0,
       })
+      if (lastRemoteUrl && typeof currentResult !== 'undefined' && currentResult) {
+        currentResult.imageUrl = lastRemoteUrl
+        if (typeof cacheImageForAnimate === 'function') void cacheImageForAnimate(lastRemoteUrl)
+      }
     }
     if (resultWrap) {
-      window.setTimeout(() => {
-        resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      }, 50)
+      window.setTimeout(() => resultWrap.scrollIntoView({ behavior: 'smooth', block: 'center' }), 40)
     }
   }
 
-  /** 스튜디오 결과란 + 메인 「생성 결과」. 원격 URL은 서버 프록시로 받은 뒤 표시(검은 화면 방지). */
-  async function displayFaceswapResult(imageUrl, opts) {
-    if (!imageUrl) return false
-    setStatus('결과 이미지를 불러오는 중…', false)
-    const displayUrl = await toDisplayableImageUrl(imageUrl)
+  async function displayResult(imageUrl) {
+    setStatus('결과 불러오는 중…', false)
+    logFs('display_start', { kind: imageUrl?.startsWith('http') ? 'http' : 'other' })
+    const displayUrl = await toDisplayUrl(imageUrl)
     if (!displayUrl) {
-      setStatus(
-        '장면은 만들어졌지만 미리보기를 받지 못했어요. 잠시 후 다시 시도해 주세요.',
-        true,
-      )
-      if (resultPlaceholder) {
-        resultPlaceholder.hidden = false
-        resultPlaceholder.textContent =
-          '미리보기 로드 실패. 다시 「장면 만들기」를 눌러 주세요.'
-      }
+      logFs('display_failed', { imageUrl: String(imageUrl || '').slice(0, 120) })
+      setStatus('결과는 받았지만 미리보기에 실패했어요. 「다운로드」로 확인해 보세요.', true)
       return false
     }
-    paintFaceswapResult(displayUrl, opts)
+    paintResult(displayUrl, imageUrl)
+    logFs('display_ok', {})
     return true
   }
 
-  // 얼굴 2장(특히 두 명 동시 교체, 또는 방금 새로 생성한 낯선 장면 위 교체)은 fal 처리가
-  // 몇 분씩 걸리는 경우가 실측됐다 — 서버는 submit만 하고 status/response URL을 돌려준 뒤
-  // 이 함수가 짧게 반복 조회한다(animate.ts의 predictionId 폴링과 동일한 이유 — Pages
-  // Function 벽시계 한도 회피). 90회(약 3.6분)는 2인 교체엔 너무 짧아 넉넉히 늘린다.
-  async function pollFaceSwapStatus(statusUrl, responseUrl, startedAt, label) {
-    const prefix = label ? `${label}: ` : ''
-    const HARD_LIMIT_SEC = 120
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
-      if (elapsedSec >= HARD_LIMIT_SEC) {
+  function logFs(step, detail) {
+    try {
+      console.info('[faceswap]', step, detail || '')
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  function engineLabel(engine) {
+    if (engine === 'easel') return 'Easel(성별)'
+    if (engine === 'insight') return 'fal InsightFace'
+    if (engine === 'indexed') return '좌우 인덱스'
+    if (engine === 'replicate') return '증명사진 교체'
+    return 'Replicate'
+  }
+
+  function loadHtmlImage(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image()
+      img.onload = () => resolve(img)
+      img.onerror = () => reject(new Error('image_load_failed'))
+      img.src = src
+    })
+  }
+
+  /** 얼굴 박스 휴리스틱 — API 실패 시 */
+  function heuristicFaceBox(kind) {
+    if (kind === 'id') return { x: 0.18, y: 0.12, w: 0.64, h: 0.72 }
+    return { x: 0.22, y: 0.08, w: 0.56, h: 0.55 }
+  }
+
+  async function detectFaceBox(imageDataUrl, kind) {
+    try {
+      const response = await fetch('/api/face-box', {
+        method: 'POST',
+        headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageDataUrl }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (data?.ok && data.face && typeof data.face.w === 'number') return data.face
+    } catch (_) {
+      /* fall through */
+    }
+    return heuristicFaceBox(kind)
+  }
+
+  /** 원본을 좌/우 반으로 잘라 1명만 남김 */
+  async function cropTargetSide(imageSrc, side) {
+    const display = imageSrc.startsWith('data:') || imageSrc.startsWith('blob:')
+      ? imageSrc
+      : await toDisplayUrl(imageSrc)
+    if (!display) throw new Error('crop_source_unavailable')
+    const img = await loadHtmlImage(display)
+    const w = img.naturalWidth
+    const h = img.naturalHeight
+    const cut = Math.max(8, Math.round(w * 0.54))
+    const sx = side === 'right' ? Math.max(0, w - cut) : 0
+    const canvas = document.createElement('canvas')
+    canvas.width = cut
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, sx, 0, cut, h, 0, 0, cut, h)
+    return { dataUrl: canvas.toDataURL('image/jpeg', 0.95), cut, fullW: w, fullH: h }
+  }
+
+  /** 교체된 반쪽을 전체 사진 해당 위치에 다시 붙임 */
+  async function pasteSideOntoFull(fullSrc, swappedSrc, side) {
+    const fullDisplay =
+      fullSrc.startsWith('data:') || fullSrc.startsWith('blob:') ? fullSrc : await toDisplayUrl(fullSrc)
+    const swappedDisplay =
+      swappedSrc.startsWith('data:') || swappedSrc.startsWith('blob:')
+        ? swappedSrc
+        : await toDisplayUrl(swappedSrc)
+    if (!fullDisplay || !swappedDisplay) throw new Error('stitch_source_unavailable')
+    const base = await loadHtmlImage(fullDisplay)
+    const piece = await loadHtmlImage(swappedDisplay)
+    const w = base.naturalWidth
+    const h = base.naturalHeight
+    const cut = Math.max(8, Math.round(w * 0.54))
+    const dx = side === 'right' ? Math.max(0, w - cut) : 0
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(base, 0, 0, w, h)
+    ctx.drawImage(piece, dx, 0, cut, h)
+    return canvas.toDataURL('image/jpeg', 0.95)
+  }
+
+  /**
+   * 완전 교체: 증명사진 얼굴 픽셀을 원본 얼굴 위치에 덮어씀 (InsightFace 합성 아님).
+   * 가장자리만 얇게 페더 — 정체성 혼합이 아니라 이음새만 가림.
+   */
+  async function hardReplaceFaceOnCrop(targetCropDataUrl, idFaceDataUrl) {
+    const [targetImg, idImg, targetFace, idFace] = await Promise.all([
+      loadHtmlImage(targetCropDataUrl),
+      loadHtmlImage(idFaceDataUrl),
+      detectFaceBox(targetCropDataUrl, 'target'),
+      detectFaceBox(idFaceDataUrl, 'id'),
+    ])
+    const tw = targetImg.naturalWidth
+    const th = targetImg.naturalHeight
+    const iw = idImg.naturalWidth
+    const ih = idImg.naturalHeight
+
+    const padX = idFace.w * 0.08
+    const padY = idFace.h * 0.06
+    const sx = Math.max(0, Math.round((idFace.x - padX) * iw))
+    const sy = Math.max(0, Math.round((idFace.y - padY) * ih))
+    const sw = Math.min(iw - sx, Math.round((idFace.w + padX * 2) * iw))
+    const sh = Math.min(ih - sy, Math.round((idFace.h + padY * 2) * ih))
+
+    const cover = 1.12
+    const dw = Math.round(targetFace.w * tw * cover)
+    const dh = Math.round(targetFace.h * th * cover)
+    const dx = Math.round(targetFace.x * tw + (targetFace.w * tw - dw) / 2)
+    const dy = Math.round(targetFace.y * th + (targetFace.h * th - dh) / 2)
+
+    let rotation = 0
+    if (targetFace.leftEye && targetFace.rightEye && idFace.leftEye && idFace.rightEye) {
+      const tAng = Math.atan2(
+        targetFace.rightEye.y - targetFace.leftEye.y,
+        targetFace.rightEye.x - targetFace.leftEye.x,
+      )
+      const sAng = Math.atan2(
+        idFace.rightEye.y - idFace.leftEye.y,
+        idFace.rightEye.x - idFace.leftEye.x,
+      )
+      rotation = tAng - sAng
+    }
+
+    const out = document.createElement('canvas')
+    out.width = tw
+    out.height = th
+    const ctx = out.getContext('2d')
+    ctx.drawImage(targetImg, 0, 0, tw, th)
+
+    const layer = document.createElement('canvas')
+    layer.width = tw
+    layer.height = th
+    const lctx = layer.getContext('2d')
+    const cx = dx + dw / 2
+    const cy = dy + dh / 2
+    lctx.save()
+    lctx.translate(cx, cy)
+    lctx.rotate(rotation)
+    lctx.drawImage(idImg, sx, sy, sw, sh, -dw / 2, -dh / 2, dw, dh)
+    lctx.restore()
+
+    const mask = document.createElement('canvas')
+    mask.width = tw
+    mask.height = th
+    const mctx = mask.getContext('2d')
+    const grad = mctx.createRadialGradient(
+      cx,
+      cy,
+      Math.min(dw, dh) * 0.38,
+      cx,
+      cy,
+      Math.min(dw, dh) * 0.52,
+    )
+    grad.addColorStop(0, 'rgba(0,0,0,1)')
+    grad.addColorStop(0.72, 'rgba(0,0,0,1)')
+    grad.addColorStop(1, 'rgba(0,0,0,0)')
+    mctx.fillStyle = grad
+    mctx.beginPath()
+    mctx.ellipse(cx, cy, dw * 0.52, dh * 0.56, rotation, 0, Math.PI * 2)
+    mctx.fill()
+
+    lctx.globalCompositeOperation = 'destination-in'
+    lctx.drawImage(mask, 0, 0)
+    lctx.globalCompositeOperation = 'source-over'
+
+    ctx.drawImage(layer, 0, 0)
+    return out.toDataURL('image/jpeg', 0.95)
+  }
+
+  /**
+   * 증명사진 → 완전 교체 (픽셀 덮어쓰기). InsightFace/Easel 합성 미사용.
+   */
+  async function runIdPhotoBySlots(faces) {
+    let currentTarget = state.target
+    for (let i = 0; i < faces.list.length; i += 1) {
+      const item = faces.list[i]
+      const side = indexToSide(item.slot)
+      setStatus(
+        `${i + 1}/${faces.list.length} · 칸${item.slot + 1} 증명사진 → ${sideLabel(side)} 완전 교체(덮어쓰기)…`,
+        false,
+      )
+      let crop
+      try {
+        crop = await cropTargetSide(currentTarget, side)
+      } catch (err) {
         setStatus(
-          `${prefix}2분이 지나도 결과가 없어요. 실패한 것으로 보고 다시 시도해 주세요.`,
+          `원본 ${sideLabel(side)}을 자르지 못했어요: ${err instanceof Error ? err.message : String(err)}`,
           true,
         )
         return null
       }
+      try {
+        setStatus(`${sideLabel(side)} 얼굴 위치 찾는 중…`, false)
+        const replaced = await hardReplaceFaceOnCrop(crop.dataUrl, item.dataUrl)
+        currentTarget = await pasteSideOntoFull(currentTarget, replaced, side)
+      } catch (err) {
+        setStatus(`완전 교체 실패: ${err instanceof Error ? err.message : String(err)}`, true)
+        return null
+      }
+    }
+    return currentTarget
+  }
+
+  async function pollFaceSwapStatus(job, startedAt) {
+    // job: { statusUrl, responseUrl, predictionId, baseImageUrl, engine }
+    const HARD_LIMIT_SEC = job.engine === 'easel' ? 90 : 180
+    const QUEUE_STUCK_SEC = job.engine === 'easel' ? 45 : 120
+    const engTag = engineLabel(job.engine)
+    let consecutiveNetFails = 0
+    let lastFalStatus = ''
+    let queueSince = Date.now()
+    let lastQueueStatus = ''
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
+      if (elapsedSec >= HARD_LIMIT_SEC) {
+        setStatus(
+          `${engTag}: ${HARD_LIMIT_SEC}초가 지나도 결과가 없어요. (마지막 큐: ${lastFalStatus || '없음'})`,
+          true,
+        )
+        logFs('poll_timeout', { elapsedSec, lastFalStatus, attempt, engine: job.engine })
+        return { __failed: true, error: 'poll_timeout', message: '시간 초과', falStatus: lastFalStatus }
+      }
+      if (
+        lastFalStatus === 'IN_QUEUE' &&
+        Math.round((Date.now() - queueSince) / 1000) >= QUEUE_STUCK_SEC
+      ) {
+        logFs('queue_stuck', { elapsedSec, QUEUE_STUCK_SEC, engine: job.engine })
+        return {
+          __failed: true,
+          error: 'queue_stuck',
+          message: `${engTag} 대기열이 ${QUEUE_STUCK_SEC}초 이상이에요. 증명사진 순차 교체로 바꿉니다.`,
+          falStatus: lastFalStatus,
+        }
+      }
+      const queueLabel = lastFalStatus ? ` · 큐 ${lastFalStatus}` : ''
       setStatus(
-        elapsedSec > 60
-          ? `${prefix}얼굴 교체 중… ${elapsedSec}초 / 한도 ${HARD_LIMIT_SEC}초`
-          : `${prefix}얼굴 교체 중… ${elapsedSec}초`,
+        elapsedSec > 40
+          ? `${engTag} 교체 중… ${elapsedSec}초 / 한도 ${HARD_LIMIT_SEC}초${queueLabel}`
+          : `${engTag} 교체 중… ${elapsedSec}초${queueLabel}`,
         false,
       )
       await sleep(attempt < 6 ? 1500 : 2500)
@@ -5818,52 +6045,116 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       try {
         const controller = new AbortController()
         const timer = window.setTimeout(() => controller.abort(), 25000)
+        const body = {
+          engine: job.engine,
+          baseImageUrl: job.baseImageUrl || undefined,
+        }
+        if (job.predictionId) body.predictionId = job.predictionId
+        else {
+          body.statusUrl = job.statusUrl
+          body.responseUrl = job.responseUrl
+        }
         response = await fetch('/api/face-swap-status', {
           method: 'POST',
           headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ statusUrl, responseUrl }),
+          body: JSON.stringify(body),
           signal: controller.signal,
         })
         window.clearTimeout(timer)
-      } catch (_) {
+        consecutiveNetFails = 0
+      } catch (err) {
+        consecutiveNetFails += 1
+        logFs('poll_network_error', {
+          attempt,
+          consecutiveNetFails,
+          message: err instanceof Error ? err.message : String(err),
+        })
+        if (consecutiveNetFails >= 8) {
+          setStatus('상태 조회가 반복 실패했어요. 네트워크를 확인한 뒤 다시 시도해 주세요.', true)
+          return null
+        }
+        setStatus(`상태 조회 재시도 중… (${consecutiveNetFails}/8)`, false)
         continue
       }
       const data = await response.json().catch(() => ({}))
+      if (typeof data.falStatus === 'string' && data.falStatus) {
+        if (data.falStatus !== lastQueueStatus) {
+          lastQueueStatus = data.falStatus
+          queueSince = Date.now()
+        }
+        lastFalStatus = data.falStatus
+      }
+      logFs('poll', {
+        attempt,
+        elapsedSec,
+        http: response.status,
+        status: data.status,
+        falStatus: data.falStatus,
+        hasImage: Boolean(data.imageUrl),
+        engine: job.engine,
+        error: data.error,
+      })
       if (response.status === 401) {
         if (typeof clearAllAuth === 'function') clearAllAuth()
         if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
         return null
       }
-      if (data.status === 'succeeded' && data.imageUrl) return data.imageUrl
+      if (data.status === 'succeeded' && data.imageUrl) {
+        logFs('poll_succeeded', { elapsedSec, falStatus: data.falStatus, engine: job.engine })
+        return data.imageUrl
+      }
       if (data.status === 'failed') {
-        setStatus(data.message || `얼굴 교체에 실패했어요: ${data.error || 'unknown_error'}`, true)
-        return null
+        setStatus(data.message || `얼굴 교체 실패: ${data.error || 'unknown'}`, true)
+        return { __failed: true, error: data.error, message: data.message }
       }
     }
-    setStatus(`${prefix}2분이 지나도 결과가 없어요. 실패한 것으로 보고 다시 시도해 주세요.`, true)
-    return null
+    setStatus('시간이 지나도 결과가 없어요. 다시 시도해 주세요.', true)
+    return { __failed: true, error: 'poll_timeout', message: '시간 초과' }
   }
 
-  // 얼굴 교체 1회(제출 + 폴링). 2인이면 face0+face1을 한 번에 보내 성별 매칭.
-  // (예전 연쇄 1인×2는 잘못된 얼굴에 붙어 "전혀 다른 인물"이 되는 실측이 있었음)
-  async function runFaceSwapJob(opts) {
+  async function submitFaceSwapOnce(options) {
+    const { engine, targetSide, targetImage, face0, gender0, face1, gender1 } = options
     const payload = {
-      targetImage: opts.targetImage,
-      face0: opts.face0,
-      gender0: opts.gender0,
-      workflowType: opts.workflowType,
-      upscale: opts.upscale,
+      targetImage,
+      face0,
+      gender0: gender0 || 'female',
+      workflowType: workflowSelect?.value || 'target_hair',
+      // 체크박스 없으면 기본 on (닮음). 사용자가 끈 경우만 false.
+      upscale: upscaleCheckbox ? Boolean(upscaleCheckbox.checked) : true,
+      engine,
+      targetSide,
     }
-    if (opts.face1) {
-      payload.face1 = opts.face1
-      payload.gender1 = opts.gender1
+    if (face1) {
+      payload.face1 = face1
+      payload.gender1 = gender1 || 'male'
     }
+    logFs('submit_start', {
+      engine,
+      targetSide,
+      hasFace1: Boolean(face1),
+      gender0: payload.gender0,
+      targetKind: String(targetImage || '').startsWith('data:') ? 'data' : 'url',
+    })
+    setStatus(`${engineLabel(engine)} · ${sideLabel(targetSide)} 등록 중…`, false)
     const response = await fetch('/api/face-swap', {
       method: 'POST',
       headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
     const data = await response.json().catch(() => ({}))
+    logFs('submit_response', {
+      http: response.status,
+      ok: data.ok,
+      pending: data.pending,
+      engine: data.engine,
+      hasImage: Boolean(data.imageUrl),
+      error: data.error,
+    })
+    return { response, data }
+  }
+
+  async function runOneJob(options) {
+    const { response, data } = await submitFaceSwapOnce(options)
     if (response.status === 401) {
       if (typeof clearAllAuth === 'function') clearAllAuth()
       if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
@@ -5873,21 +6164,99 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       setStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
       return null
     }
-    if (data.ok && data.imageUrl) return data.imageUrl
-    if (data.ok && data.pending && data.statusUrl && data.responseUrl) {
-      return await pollFaceSwapStatus(data.statusUrl, data.responseUrl, Date.now(), opts.stepLabel)
+    if (!data.ok) {
+      setStatus(data.message || `얼굴 교체 실패: ${data.error || response.status}`, true)
+      return { __failed: true, error: data.error, message: data.message }
     }
-    const prefix = opts.stepLabel ? `${opts.stepLabel}: ` : ''
-    setStatus(
-      `${prefix}${
-        data.message ||
-        (data.error === 'fal_key_not_configured'
-          ? '얼굴 교체 기능이 서버에 아직 설정되지 않았어요 (FAL_KEY 필요).'
-          : `얼굴 교체에 실패했어요: ${data.error || response.status}`)
-      }`,
-      true,
-    )
-    return null
+    if (data.imageUrl) return data.imageUrl
+    if (data.pending) {
+      const polled = await pollFaceSwapStatus(
+        {
+          statusUrl: data.statusUrl,
+          responseUrl: data.responseUrl,
+          predictionId: data.predictionId,
+          baseImageUrl: data.baseImageUrl,
+          engine: data.engine || options.engine,
+        },
+        Date.now(),
+      )
+      return polled
+    }
+    setStatus(data.message || '얼굴 교체 실패', true)
+    return { __failed: true, error: 'unknown', message: data.message }
+  }
+
+  /** 슬롯 번호(0/1) = 원본 좌/우. 레거시 인덱스 경로(폴백용). */
+  async function runIndexedBySlots(faces) {
+    let currentTarget = state.target
+    for (let i = 0; i < faces.list.length; i += 1) {
+      const item = faces.list[i]
+      const side = indexToSide(item.slot)
+      setStatus(
+        `${i + 1}/${faces.list.length} · 칸${item.slot + 1}→${sideLabel(side)} 교체 중…`,
+        false,
+      )
+      const imageUrl = await runOneJob({
+        engine: 'indexed',
+        targetSide: side,
+        targetImage: currentTarget,
+        face0: item.dataUrl,
+        gender0: item.gender,
+      })
+      if (!imageUrl || (typeof imageUrl === 'object' && imageUrl.__failed)) {
+        if (imageUrl && imageUrl.message) setStatus(imageUrl.message, true)
+        return null
+      }
+      currentTarget = imageUrl
+    }
+    return currentTarget
+  }
+
+  async function runFaceSwapJob(faces) {
+    let targetSide = targetSideSelect?.value || 'all'
+    if (!['gender', 'left', 'right', 'all'].includes(targetSide)) {
+      targetSide = 'all'
+    }
+
+    const sameGender = faces.count === 2 && faces.gender0 === faces.gender1
+
+    // 성별 매칭(Easel)은 사용자가 명시 선택할 때만 — 2인 동시라 인물 섞임이 잦음.
+    if (faces.count === 2 && targetSide === 'gender') {
+      if (sameGender) {
+        setStatus('같은 성별 두 명은 증명사진 순차 교체로 진행해요…', false)
+        return await runIdPhotoBySlots(faces)
+      }
+      const imageUrl = await runOneJob({
+        engine: 'easel',
+        targetSide: 'gender',
+        targetImage: state.target,
+        face0: faces.face0,
+        gender0: faces.gender0,
+        face1: faces.face1,
+        gender1: faces.gender1,
+      })
+      if (imageUrl && typeof imageUrl === 'object' && imageUrl.__failed) {
+        setStatus(`${imageUrl.message || 'Easel 실패'} → 증명사진 순차 교체로 재시도…`, false)
+        return await runIdPhotoBySlots(faces)
+      }
+      if (imageUrl) return imageUrl
+      return await runIdPhotoBySlots(faces)
+    }
+
+    // 기본(슬롯 좌·우) · 왼쪽만 · 오른쪽만 → 반쪽 잘라 증명사진 완전 교체
+    if (targetSide === 'left' || targetSide === 'right') {
+      const only = {
+        list: faces.list.filter((f) => indexToSide(f.slot) === targetSide).slice(0, 1),
+        count: 1,
+      }
+      if (!only.list.length) {
+        // 칸1만 있고 오른쪽만 고른 경우 등 → 첫 증명사진을 그 면에
+        only.list = [{ dataUrl: faces.face0, gender: faces.gender0, slot: targetSide === 'right' ? 1 : 0 }]
+      }
+      return await runIdPhotoBySlots(only)
+    }
+
+    return await runIdPhotoBySlots(faces)
   }
 
   runBtn.addEventListener('click', async () => {
@@ -5896,394 +6265,76 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return
     }
     if (!state.target) {
-      setStatus('먼저 기본 사진(장면)을 넣어 주세요.', true)
+      setStatus('원본 이미지를 넣어 주세요.', true)
       return
     }
-    if (!state.face0) {
-      setStatus('붙일 얼굴 사진(얼굴 1)을 넣어 주세요.', true)
+    const faces = resolveFaceSlots()
+    if (!faces) {
+      setStatus('증명사진을 1~2장 넣어 주세요. (안 쓰는 칸은 「사용 안 함」)', true)
       return
     }
-    const g0 = gender0Select?.value || 'female'
-    const g1 = gender1Select?.value || 'male'
-    const hasSecondFace = Boolean(state.face1)
-    if (hasSecondFace && g0 === g1) {
-      setStatus(
-        '두 얼굴의 성별이 같아요. 장면의 남·여에 각각 맞춰 성별을 다르게 골라 주세요. (같으면 엔진이 얼굴을 엉뚱한 쪽에 붙입니다)',
-        true,
-      )
-      return
-    }
+    const side = targetSideSelect?.value || 'all'
     runBtn.disabled = true
     if (resultImg) resultImg.hidden = true
     if (resultActions) resultActions.hidden = true
     if (resultPlaceholder) resultPlaceholder.hidden = false
     try {
-      const workflowType = workflowSelect?.value || 'target_hair'
-      const upscale = Boolean(upscaleCheckbox?.checked)
       setStatus(
-        hasSecondFace
-          ? '두 얼굴 교체 중… (성별 매칭으로 한 번에 처리합니다)'
-          : '얼굴 교체 중… 0초',
+        faces.count === 2 ? '2명 · 좌·우 교체 중…' : `${sideLabel(side)} 얼굴 교체 중…`,
         false,
       )
-      const imageUrl = await runFaceSwapJob({
-        targetImage: state.target,
-        face0: state.face0,
-        gender0: g0,
-        face1: hasSecondFace ? state.face1 : undefined,
-        gender1: hasSecondFace ? g1 : undefined,
-        workflowType,
-        upscale,
-        stepLabel: hasSecondFace ? '두 얼굴 교체' : '',
-      })
+      const imageUrl = await runFaceSwapJob(faces)
       if (!imageUrl) return
-      const shown = await displayFaceswapResult(imageUrl, {
-        engineLabel: hasSecondFace ? '두 얼굴 교체(AI)' : '얼굴 교체(AI)',
-        prompt: '얼굴 교체(간단 모드) 결과',
-        engine: 'face-swap',
-      })
+      const shown = await displayResult(imageUrl)
       if (!shown) return
-      setStatus(
-        hasSecondFace
-          ? '완성! 두 얼굴이 장면 성별에 맞춰 합성됐어요. 위 「생성 결과」와 아래 결과란을 확인하세요.'
-          : '얼굴 교체 완료! 위 「생성 결과」와 아래 결과란을 확인하세요.',
-        false,
-      )
+      setStatus('완성! 아래 결과와 메인 「생성 결과」를 확인하세요.', false)
     } catch (error) {
-      setStatus(`얼굴 교체 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
+      setStatus(`오류: ${error instanceof Error ? error.message : String(error)}`, true)
     } finally {
       runBtn.disabled = false
     }
   })
 
-  // ---- 커플 씬 자동 생성 — 얼굴 사진 2장만 있으면 데이트/포옹/키스 장면을 AI가 새로 만들고
-  // 그 위에 바로 얼굴을 합성한다(기본 사진을 직접 찍거나 구할 필요가 없음). ----
-  const scenePresetSelect = document.getElementById('admin-faceswap-scene-preset')
-  const sceneFreeField = document.getElementById('admin-faceswap-scene-free')
-  const scenePhotorealBtn = document.getElementById('admin-faceswap-scene-photoreal')
-  const sceneGenerateBtn = document.getElementById('admin-faceswap-scene-generate')
-  const sceneAndSwapBtn = document.getElementById('admin-faceswap-scene-and-swap')
-
-  // "차렷 자세로 뻣뻣하게 서 있다"는 실측 실패 사례 — 팔짱/포옹/키스라는 단어만으로는
-  // 부족해서, 팔의 구체적 위치·몸의 기울임·체중 이동까지 명시하고 "차렷 자세 금지"를
-  // 직접 못박아야 자연스러운 커플 포즈가 나온다.
-  // 예전 방식(/api/generate)은 Cloudflare 30초 한도 안에서 번역+생성을 끝내야 한다.
-  // 긴 한글 문장을 보내면 Claude 압축에 5~15초가 빠져 Replicate가 502로 죽는다.
-  // 이미 영어 태그이고 55단어 안이면 서버가 번역을 건너뛰므로, 여기서 바로 태그를 보낸다.
-  const SCENE_PRESET_DESCRIPTIONS = {
-    arm_in_arm:
-      'young korean man and woman couple, walking arm in arm on city street, woman holding man arm with both hands, shoulders leaning together, looking at each other smiling, casual clothes, daytime, full bodies facing camera, photorealistic fashion photo, no stiff passport pose, no arms hanging at sides',
-    hug: 'young korean man and woman couple hugging face to face, arms wrapped around back and waist, bodies pressed close, heads tilted toward each other, casual clothes, indoor or street, photorealistic fashion photo, no stiff side-by-side passport pose',
-    back_hug:
-      'young korean man and woman couple in a back-hug: the man stands DIRECTLY BEHIND the woman, his chest against her back, both arms wrapped around her torso from behind, her head may tilt back toward him, casual clothes, photorealistic fashion photo, FORBIDDEN standing side-by-side or face-to-face square stance',
-    kiss: 'young korean man and woman couple kissing on the lips, bodies leaning in, arms around waist or face, lips touching, casual clothes, photorealistic fashion photo, no stiff standing-apart pose',
-  }
-  // 증명사진→전신 연출용: "young korean / fashion photo"처럼 새 인물을 발명하는 문구를 빼다.
-  // (실측: 그 태그가 참고 얼굴·체형을 덮어쓰고 완전 다른 모델로 바뀜)
-  const SCENE_PRESET_POSE_ONLY = {
-    arm_in_arm:
-      'walking arm in arm on a city street, linked arms, shoulders leaning together, looking at each other, natural casual clothes, daytime, full bodies, no stiff passport pose',
-    hug: 'face-to-face hug, arms wrapped around back and waist, bodies pressed close, heads tilted toward each other, casual clothes, no stiff side-by-side passport pose',
-    back_hug:
-      'BACK-HUG pose: man stands DIRECTLY BEHIND the woman, chest to her back, both arms wrapped around her from behind — not side-by-side, not face-to-face; she may tilt her head back toward him; casual clothes; full bodies',
-    kiss: 'kissing on the lips, bodies leaning in, arms around waist or face, lips touching, casual clothes, no stiff standing-apart pose',
-  }
-
-  /** 프리셋 + 자유 기록을 합친 장면 설명. free-only인데 칸이 비면 null. */
-  function buildCoupleSceneDescription(forPhotoreal) {
-    const key = scenePresetSelect?.value || 'arm_in_arm'
-    const free = (sceneFreeField?.value || '').trim()
-    const coupleTail =
-      '두 사람 모두 전신이 보이게. 인물(얼굴·체형)은 참고 사진 두 장과 동일하게 유지하고, 아래는 장면·포즈·장소만 바꾼다.'
-    if (key === 'free') {
-      if (!free) return null
-      if (forPhotoreal) return `${free}. ${coupleTail}`
-      return `${free}. young korean man and woman couple together, full bodies visible, photorealistic fashion photo, natural pose, no stiff passport pose`
-    }
-    if (forPhotoreal) {
-      const pose = SCENE_PRESET_POSE_ONLY[key] || SCENE_PRESET_POSE_ONLY.arm_in_arm
-      if (!free) return `장면 연출(포즈·장소만): ${pose}. ${coupleTail}`
-      return `장면 연출(포즈·장소만): ${pose}. 사용자 추가 지시(최우선): ${free}. ${coupleTail}`
-    }
-    const preset = SCENE_PRESET_DESCRIPTIONS[key] || SCENE_PRESET_DESCRIPTIONS.arm_in_arm
-    if (!free) return preset
-    return `${preset}. CRITICAL user scene notes (follow closely): ${free}`
-  }
-
-  function requireSceneDescription(forPhotoreal) {
-    const description = buildCoupleSceneDescription(forPhotoreal)
-    if (description) return description
-    setStatus('「자유 기록만」을 골랐으면 아래 자유 기록 칸에 장면을 적어 주세요.', true)
-    sceneFreeField?.focus()
-    return null
-  }
-
-  function sceneGenerateFailMessage(response, data) {
-    if (data.message) return data.message
-    if (data.error === 'provider_content_blocked') {
-      return '장면 생성이 안전 필터에 걸렸어요. 다른 장면을 골라 다시 시도해 주세요.'
-    }
-    if (response.status === 502 || data.error === 'generation_failed') {
-      return '장면 생성이 서버 시간 한도를 넘겼어요. 잠시 후 다시 시도해 주세요.'
-    }
-    return `장면 생성에 실패했어요: ${data.error || response.status}`
-  }
-
-  async function generateCoupleScene() {
-    const description = requireSceneDescription(false)
-    if (!description) return null
-    const response = await fetch('/api/generate', {
-      method: 'POST',
-      headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ description, mood: 'clean', size: 'portrait', mode: 'fashion' }),
-    })
-    const data = await response.json().catch(() => ({}))
-    if (response.status === 401) {
-      if (typeof clearAllAuth === 'function') clearAllAuth()
-      if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
-      return null
-    }
-    if (response.status === 429) {
-      setStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
-      return null
-    }
-    if (!data.ok || !data.imageUrl) {
-      setStatus(sceneGenerateFailMessage(response, data), true)
-      return null
-    }
-    return data.imageUrl
-  }
-
-  // 이미 본인이 "1. 기본 사진"을 직접 넣어둔 상태에서 장면 생성 버튼을 누르면, 그 사진을
-  // 그대로 덮어써버려서 "엉뚱한 사진이 나왔다"는 혼란이 생긴다 — 기본 사진이 이미 있으면
-  // 확인 없이 진행하지 않고 안내만 하고 멈춘다.
-  function blockedByExistingTarget() {
-    if (!state.target) return false
-    setStatus(
-      '이미 「3. 얼굴 바꾸기」원본에 장면 사진이 있어요. 새로 만들면 그 칸을 덮어씁니다. 기존 장면을 쓰려면 3번 모드에서 「얼굴 바꾸기」만 하세요. 새로 만들려면 원본을 비운 뒤 다시 시도해 주세요.',
-      true,
-    )
-    return true
-  }
-
-  // 증명사진 2장을 참고 이미지로 그대로 Flux Kontext Multi에 넘겨서, "장면 생성 + 별도
-  // 얼굴교체" 2단계 대신 한 번의 생성으로 실제 얼굴을 유지한 전신 장면을 바로 만든다.
-  // face-swap보다 훨씬 빠르고(생성 1회), 얼굴이 원본과 다른 사람으로 나오는 사고도 줄어든다.
-  // 서버는 submit만 하고 클라이언트가 status를 폴링(Pages 시간 한도·45초 동기 타임아웃 회피).
-  async function pollTaleSceneStatus(statusUrl, responseUrl) {
-    const startedAt = Date.now()
-    const HARD_LIMIT_SEC = 120
-    for (let attempt = 0; attempt < 80; attempt += 1) {
-      const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
-      if (elapsedSec >= HARD_LIMIT_SEC) {
-        setStatus('2분이 지나도 장면 결과가 없어요. 실패한 것으로 보고 다시 시도해 주세요.', true)
-        return null
-      }
-      await sleep(attempt < 6 ? 1500 : 2500)
-      let response
-      try {
-        const controller = new AbortController()
-        const timer = window.setTimeout(() => controller.abort(), 25000)
-        response = await fetch('/api/tale-scene-status', {
-          method: 'POST',
-          headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ statusUrl, responseUrl }),
-          signal: controller.signal,
-        })
-        window.clearTimeout(timer)
-      } catch (_) {
-        continue
-      }
-      const data = await response.json().catch(() => ({}))
-      if (response.status === 401) {
-        if (typeof clearAllAuth === 'function') clearAllAuth()
-        if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
-        return null
-      }
-      if (data.status === 'succeeded' && data.imageUrl) return data.imageUrl
-      if (data.status === 'failed') {
-        setStatus(data.message || sceneGenerateFailMessage(response, data), true)
-        return null
-      }
-    }
-    setStatus('2분이 지나도 장면 결과가 없어요. 실패한 것으로 보고 다시 시도해 주세요.', true)
-    return null
-  }
-
-  async function generateCoupleScenePhotoreal(face0DataUrl, face1DataUrl) {
-    const description = requireSceneDescription(true)
-    if (!description) return null
-    const response = await fetch('/api/tale-scene', {
-      method: 'POST',
-      headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        images: [face0DataUrl, face1DataUrl],
-        description,
-        aspectRatio: '3:4',
-        photoreal: true,
-        gender0: gender0Select?.value || 'female',
-        gender1: gender1Select?.value || 'male',
-        refKind: faceswapMode === 'body' ? 'body' : 'face',
-      }),
-    })
-    const data = await response.json().catch(() => ({}))
-    if (response.status === 401) {
-      if (typeof clearAllAuth === 'function') clearAllAuth()
-      if (typeof showPinGate === 'function') showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
-      return null
-    }
-    if (response.status === 429) {
-      setStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
-      return null
-    }
-    if (data.pending && data.statusUrl && data.responseUrl) {
-      return await pollTaleSceneStatus(data.statusUrl, data.responseUrl)
-    }
-    if (!data.ok || !data.imageUrl) {
-      setStatus(sceneGenerateFailMessage(response, data), true)
-      return null
-    }
-    return data.imageUrl
-  }
-
-  scenePhotorealBtn?.addEventListener('click', async () => {
-    if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
-      if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
+  resultAsTargetBtn?.addEventListener('click', () => {
+    const url =
+      lastRemoteUrl && (lastRemoteUrl.startsWith('http') || lastRemoteUrl.startsWith('data:'))
+        ? lastRemoteUrl
+        : null
+    if (!url) {
+      setStatus('원본으로 넣을 주소가 없어요. 다운로드 후 원본 칸에 다시 올려 주세요.', true)
       return
     }
-    if (!state.face0) {
-      setStatus('얼굴 1(본인) 증명사진을 먼저 넣어 주세요.', true)
-      return
-    }
-    if (!state.face1) {
-      setStatus('얼굴 2(상대) 증명사진도 넣어야 커플 장면을 만들 수 있어요.', true)
-      return
-    }
-    scenePhotorealBtn.disabled = true
-    if (resultImg) resultImg.hidden = true
-    if (resultActions) resultActions.hidden = true
-    if (resultPlaceholder) resultPlaceholder.hidden = false
-    const progressLabel =
-      faceswapMode === 'body'
-        ? '전신·반신으로 장면을 만들고 있어요…'
-        : '두 사람의 얼굴을 유지한 채 장면을 만들고 있어요…'
-    const stopTimer = startProgressTimer(setStatus, progressLabel)
-    try {
-      const imageUrl = await generateCoupleScenePhotoreal(state.face0, state.face1)
-      stopTimer()
-      if (!imageUrl) return
-      const shown = await displayFaceswapResult(imageUrl, {
-        engineLabel: faceswapMode === 'body' ? '전신·반신으로 장면' : '얼굴로 장면',
-        prompt: '증명사진으로 만든 장면',
-        engine: 'tale-scene',
-      })
-      if (!shown) return
-      state.target = imageUrl
-      setSlotPreview(targetSlot, imageUrl)
-      setStatus(
-        '완성! 위 「생성 결과」와 아래 결과란에 넣었어요. 얼굴이 어긋나면 「3. 얼굴 바꾸기」원본으로 넣어 다듬으세요.',
-        false,
-      )
-    } catch (error) {
-      stopTimer()
-      setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
-    } finally {
-      stopTimer()
-      scenePhotorealBtn.disabled = false
-    }
-  })
-
-  sceneGenerateBtn?.addEventListener('click', async () => {
-    if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
-      if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
-      return
-    }
-    if (blockedByExistingTarget()) return
-    sceneGenerateBtn.disabled = true
-    const stopTimer = startProgressTimer(setStatus, '데이트 장면을 만들고 있어요…')
-    try {
-      const imageUrl = await generateCoupleScene()
-      stopTimer()
-      if (!imageUrl) return
-      state.target = imageUrl
-      setSlotPreview(targetSlot, imageUrl)
-      const shown = await displayFaceswapResult(imageUrl, {
-        engineLabel: '장면만 생성',
-        prompt: '장면만 만들기(얼굴 미적용)',
-        engine: 'generate',
-      })
-      if (!shown) return
-      setStatus(
-        '장면을 만들었어요. 「3. 얼굴 바꾸기」로 얼굴을 붙이거나, 위 결과가 쓸 만하면 그대로 쓰세요.',
-        false,
-      )
-    } catch (error) {
-      stopTimer()
-      setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
-    } finally {
-      stopTimer()
-      sceneGenerateBtn.disabled = false
-    }
-  })
-
-  sceneAndSwapBtn?.addEventListener('click', async () => {
-    if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
-      if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
-      return
-    }
-    if (blockedByExistingTarget()) return
-    if (!state.face0) {
-      setStatus('얼굴 1(본인) 사진을 먼저 넣어 주세요.', true)
-      return
-    }
-    if (!state.face1) {
-      setStatus('얼굴 2(상대) 사진도 넣어야 커플 장면을 만들 수 있어요.', true)
-      return
-    }
-    sceneAndSwapBtn.disabled = true
-    const stopTimer = startProgressTimer(setStatus, '데이트 장면을 만들고 있어요…')
-    try {
-      const imageUrl = await generateCoupleScene()
-      stopTimer()
-      if (!imageUrl) return
-      state.target = imageUrl
-      setSlotPreview(targetSlot, imageUrl)
-      runBtn.click()
-    } catch (error) {
-      stopTimer()
-      setStatus(`장면 생성 중 오류: ${error instanceof Error ? error.message : String(error)}`, true)
-    } finally {
-      stopTimer()
-      sceneAndSwapBtn.disabled = false
-    }
+    state.target = url
+    setSlotPreview(targetSlot, url)
+    setMode('swap')
+    setStatus('결과를 원본으로 넣었어요. 새 증명사진으로 다시 바꿀 수 있어요.', false)
   })
 
   resultToMainBtn?.addEventListener('click', () => {
-    const url = resultImg?.src
+    const url = resultImg?.src || lastRemoteUrl
     if (!url) {
-      // 예전엔 여기서 조용히 return만 해서 "클릭했는데 아무 반응 없다"는 혼란이 있었다.
-      setStatus('아직 결과 이미지가 없어요 — 먼저 위에서 얼굴 교체를 실행해 주세요.', true)
+      setStatus('아직 결과 이미지가 없어요.', true)
       return
     }
-    // 얼굴 교체(간단 모드)는 관리자 전용 패널에서만 접근 가능한 기능이라 항상 '화보(관리자)'
-    // 결과로 취급해야 한다. getGenMode()는 화면의 gen-mode 라디오 상태에 의존하는데, 그 라디오가
-    // 어떤 이유로든 'free'로 남아있으면 이 결과가 "내 갤러리"로 저장되어 버려서 사용자가 기대하는
-    // "관리자 전용 갤러리"에서 보이지 않는 회귀가 있었다 — 항상 'fashion'으로 고정한다.
     if (typeof setAppArea === 'function') setAppArea('admin')
     setAdminPanel('fashion')
-    showResult(url, '얼굴 교체(AI)', false, {
+    showResult(url, '얼굴 바꾸기', false, {
       size: sizeField.value,
       itemId: null,
-      prompt: '얼굴 교체(간단 모드) 결과',
+      prompt: '얼굴 바꾸기 결과',
       accepted: false,
       mood: moodField.value,
       engine: 'face-swap',
       genMode: 'fashion',
       reviseRound: 0,
     })
-    setFormStatus('얼굴 교체 결과를 메인 결과로 가져왔어요. 「이미지 수정」·「쇼츠」·갤러리 저장이 바로 가능해요.', false)
+    if (lastRemoteUrl && typeof currentResult !== 'undefined' && currentResult) {
+      currentResult.imageUrl = lastRemoteUrl
+    }
+    setFormStatus('메인 결과로 가져왔어요. 수정·쇼츠·갤러리 저장이 가능해요.', false)
   })
 })()
+
 
 bootAuth()
 renderGallery()

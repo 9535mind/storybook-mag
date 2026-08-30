@@ -1,12 +1,20 @@
 import { requireAuth } from '../lib/auth'
-import { submitAdvancedFaceSwap, uploadDataUrlToFal, type FaceSwapGender } from '../lib/fal-client'
+import {
+  isUnchangedFaceSwapResult,
+  submitFaceSwapJob,
+  uploadDataUrlToFal,
+  type FaceSwapEngine,
+  type FaceSwapGender,
+} from '../lib/fal-client'
 import { mediaUrlError } from '../lib/media-url'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
+import { startReplicateFaceSwap, startReplicateIndexedFaceSwap } from '../lib/replicate-client'
 
 interface Env {
   DB?: D1Database
   ADMIN_PIN?: string
   FAL_KEY?: string
+  REPLICATE_API_TOKEN?: string
 }
 
 const MAX_IMAGE_BYTES = 12 * 1024 * 1024
@@ -27,6 +35,62 @@ function normalizeGender(value: unknown): FaceSwapGender | null {
   return null
 }
 
+/** gender = Easel · left/right = 좌→우 인덱스 0/1 */
+function normalizeTargetSide(value: unknown): 'gender' | 'left' | 'right' {
+  if (value === 'left' || value === 'right') return value
+  return 'gender'
+}
+
+function normalizeEngine(value: unknown, targetSide: 'gender' | 'left' | 'right'): FaceSwapEngine {
+  if (targetSide === 'left' || targetSide === 'right') return 'indexed'
+  if (value === 'replicate' || value === 'insight') return value
+  return 'easel'
+}
+
+function destinationIndexForSide(side: 'left' | 'right'): number {
+  return side === 'right' ? 1 : 0
+}
+
+async function respondReplicateResult(
+  started: { status: 'succeeded' | 'processing'; predictionId: string; imageUrl?: string },
+  targetImageUrl: string,
+  engine: FaceSwapEngine,
+): Promise<Response> {
+  if (started.status === 'succeeded' && started.imageUrl) {
+    if (await isUnchangedFaceSwapResult(started.imageUrl, targetImageUrl)) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'face_not_detected_noop',
+          message:
+            '얼굴을 바꾸지 못하고 원본이 그대로 나왔어요. 좌·우를 바꿔 보거나, 성별 매칭(Easel)을 써 보세요.',
+        },
+        422,
+      )
+    }
+    return jsonResponse(
+      {
+        ok: true,
+        pending: false,
+        imageUrl: started.imageUrl,
+        engine,
+        baseImageUrl: targetImageUrl,
+      },
+      200,
+    )
+  }
+  return jsonResponse(
+    {
+      ok: true,
+      pending: true,
+      predictionId: started.predictionId,
+      engine,
+      baseImageUrl: targetImageUrl,
+    },
+    200,
+  )
+}
+
 export const onRequestPost: PagesFunction<Env> = async (context) => {
   const { request, env } = context
 
@@ -37,10 +101,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const limited = await enforceRateLimit(env, 'face-swap', rateLimitIdentity(auth), 20, 3600)
     if (limited) return limited
 
-    if (!env.FAL_KEY?.trim()) {
-      return jsonResponse({ ok: false, error: 'fal_key_not_configured' }, 500)
-    }
-
     let body: {
       targetImage?: string
       face0?: string
@@ -49,6 +109,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       gender1?: string
       workflowType?: string
       upscale?: boolean
+      engine?: string
+      targetSide?: string
     }
     try {
       body = await request.json()
@@ -57,10 +119,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const targetImage = typeof body.targetImage === 'string' ? body.targetImage.trim() : ''
-    const face0 = typeof body.face0 === 'string' ? body.face0.trim() : ''
+    let face0 = typeof body.face0 === 'string' ? body.face0.trim() : ''
+    let gender0Raw = body.gender0
+    let face1 = typeof body.face1 === 'string' ? body.face1.trim() : ''
+    let gender1Raw = body.gender1
+
+    if (!face0.startsWith('data:') && face1.startsWith('data:')) {
+      face0 = face1
+      gender0Raw = gender1Raw
+      face1 = ''
+      gender1Raw = undefined
+    }
+
     const targetIsDataUrl = targetImage.startsWith('data:')
-    // AI로 방금 생성한 장면(예: /api/generate 결과)은 data URL이 아니라 원격 https URL로
-    // 온다 — 커플 씬 자동 생성 + 얼굴 합성 원클릭 플로우를 위해 둘 다 허용한다.
     if (!targetIsDataUrl) {
       const urlErr = mediaUrlError(targetImage)
       if (urlErr) {
@@ -68,52 +139,135 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
     }
     if (!face0.startsWith('data:')) {
-      return jsonResponse({ ok: false, error: 'face0_required' }, 400)
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'face0_required',
+          message: '증명사진을 왼쪽 또는 오른쪽에 넣어 주세요.',
+        },
+        400,
+      )
     }
-    const gender0 = normalizeGender(body.gender0)
+    const gender0 = normalizeGender(gender0Raw)
     if (!gender0) {
       return jsonResponse({ ok: false, error: 'gender0_required' }, 400)
     }
 
-    const face1 = typeof body.face1 === 'string' ? body.face1.trim() : ''
     const hasSecondFace = face1.startsWith('data:')
-    const gender1 = hasSecondFace ? normalizeGender(body.gender1) : null
+    const gender1 = hasSecondFace ? normalizeGender(gender1Raw) : null
     if (hasSecondFace && !gender1) {
       return jsonResponse({ ok: false, error: 'gender1_required' }, 400)
     }
+    if (hasSecondFace && gender1 && gender0 === gender1) {
+      // 남남·여여: Easel 성별 매칭으로는 구분이 안 되므로 indexed만 허용
+      if (normalizeTargetSide(body.targetSide) === 'gender') {
+        return jsonResponse(
+          {
+            ok: false,
+            error: 'same_gender_use_slots',
+            message:
+              '같은 성별 두 명(남남·여여)은 「슬롯 위치대로(좌·우)」로 바꿔 주세요. 성별 매칭은 남·여가 다를 때만 됩니다.',
+          },
+          400,
+        )
+      }
+    }
+
+    let targetSide = normalizeTargetSide(body.targetSide)
+    let engine = normalizeEngine(body.engine, targetSide)
+    // 클라이언트가 replicate(증명사진)를 명시하면 존중. 2장+성별만 Easel 강제.
+    if (hasSecondFace && targetSide === 'gender' && body.engine !== 'replicate') {
+      engine = 'easel'
+    } else if ((targetSide === 'left' || targetSide === 'right') && body.engine !== 'replicate') {
+      engine = 'indexed'
+    } else if (body.engine === 'replicate') {
+      engine = 'replicate'
+    }
 
     const workflowType = body.workflowType === 'user_hair' ? 'user_hair' : 'target_hair'
-    // 업스케일은 얼굴을 다시 그리며 닮음이 떨어지는 실측 — 명시 체크일 때만 ON
-    const upscale = body.upscale === true
+    // 미지정·true → on (닮음 강화). 클라이언트가 명시적으로 false일 때만 off.
+    const upscale = body.upscale !== false
+
+    if ((engine === 'replicate' || engine === 'indexed') && !env.REPLICATE_API_TOKEN?.trim()) {
+      if (engine === 'indexed') {
+        return jsonResponse(
+          {
+            ok: false,
+            error: 'replicate_token_not_configured',
+            message: '좌·우 교체는 Replicate가 필요해요. 지금은 성별 매칭(Easel)을 써 주세요.',
+          },
+          500,
+        )
+      }
+      engine = 'insight'
+    }
+    if ((engine === 'insight' || engine === 'easel') && !env.FAL_KEY?.trim()) {
+      return jsonResponse({ ok: false, error: 'fal_key_not_configured' }, 500)
+    }
 
     let targetImageUrl: string
     let face0ImageUrl: string
     let face1ImageUrl: string | undefined
     try {
-      targetImageUrl = targetIsDataUrl
-        ? await uploadDataUrlToFal(env.FAL_KEY, targetImage, `faceswap-target-${Date.now()}.png`, {
-            maxBytes: MAX_IMAGE_BYTES,
-            tooLargeError: 'target_image_too_large',
-          })
-        : targetImage
-      face0ImageUrl = await uploadDataUrlToFal(env.FAL_KEY, face0, `faceswap-face0-${Date.now()}.png`, {
-        maxBytes: MAX_IMAGE_BYTES,
-        tooLargeError: 'face0_image_too_large',
-      })
-      if (hasSecondFace) {
-        face1ImageUrl = await uploadDataUrlToFal(env.FAL_KEY, face1, `faceswap-face1-${Date.now()}.png`, {
-          maxBytes: MAX_IMAGE_BYTES,
-          tooLargeError: 'face1_image_too_large',
-        })
+      if (!env.FAL_KEY?.trim()) {
+        return jsonResponse(
+          { ok: false, error: 'fal_key_not_configured', message: '이미지 업로드용 FAL_KEY가 필요해요.' },
+          500,
+        )
       }
+      const falKey = env.FAL_KEY
+      const [targetUrl, face0Url, face1Url] = await Promise.all([
+        targetIsDataUrl
+          ? uploadDataUrlToFal(falKey, targetImage, `faceswap-target-${Date.now()}.png`, {
+              maxBytes: MAX_IMAGE_BYTES,
+              tooLargeError: 'target_image_too_large',
+            })
+          : Promise.resolve(targetImage),
+        uploadDataUrlToFal(falKey, face0, `faceswap-face0-${Date.now()}.png`, {
+          maxBytes: MAX_IMAGE_BYTES,
+          tooLargeError: 'face0_image_too_large',
+        }),
+        hasSecondFace
+          ? uploadDataUrlToFal(falKey, face1, `faceswap-face1-${Date.now()}.png`, {
+              maxBytes: MAX_IMAGE_BYTES,
+              tooLargeError: 'face1_image_too_large',
+            })
+          : Promise.resolve(undefined as string | undefined),
+      ])
+      targetImageUrl = targetUrl
+      face0ImageUrl = face0Url
+      face1ImageUrl = face1Url
     } catch (error) {
       const message = error instanceof Error ? error.message : 'image_upload_failed'
       return jsonResponse({ ok: false, error: message }, 400)
     }
 
     try {
-      const submitted = await submitAdvancedFaceSwap({
-        falKey: env.FAL_KEY,
+      if (engine === 'indexed') {
+        const destIndex =
+          targetSide === 'left' || targetSide === 'right' ? destinationIndexForSide(targetSide) : 0
+        const started = await startReplicateIndexedFaceSwap({
+          apiToken: env.REPLICATE_API_TOKEN as string,
+          targetImageUrl,
+          faceImageUrl: face0ImageUrl,
+          destinationFaceIndex: destIndex,
+          sourceFaceIndex: 0,
+        })
+        return await respondReplicateResult(started, targetImageUrl, 'indexed')
+      }
+
+      if (engine === 'replicate') {
+        const started = await startReplicateFaceSwap({
+          apiToken: env.REPLICATE_API_TOKEN as string,
+          targetImageUrl,
+          faceImageUrl: face0ImageUrl,
+        })
+        return await respondReplicateResult(started, targetImageUrl, 'replicate')
+      }
+
+      const submitted = await submitFaceSwapJob({
+        falKey: env.FAL_KEY as string,
+        engine: engine === 'insight' ? 'insight' : 'easel',
         targetImageUrl,
         face0ImageUrl,
         gender0,
@@ -122,14 +276,39 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         workflowType,
         upscale,
       })
-      // 드물게 큐 없이 즉시 완료되는 경우(짧은 1인 얼굴 교체 등) — 바로 결과 반환.
       if ('imageUrl' in submitted) {
-        return jsonResponse({ ok: true, pending: false, imageUrl: submitted.imageUrl }, 200)
+        if (await isUnchangedFaceSwapResult(submitted.imageUrl, targetImageUrl)) {
+          return jsonResponse(
+            {
+              ok: false,
+              error: 'face_not_detected_noop',
+              message:
+                '얼굴을 바꾸지 못하고 원본이 그대로 나왔어요. 「원본 왼쪽/오른쪽」으로 바꿔 보거나 성별을 확인해 주세요.',
+              engine: submitted.engine,
+            },
+            422,
+          )
+        }
+        return jsonResponse(
+          {
+            ok: true,
+            pending: false,
+            imageUrl: submitted.imageUrl,
+            engine: submitted.engine,
+            baseImageUrl: targetImageUrl,
+          },
+          200,
+        )
       }
-      // 얼굴 2장 교체 등 큐 처리가 오래 걸리는 경우 — job만 반환하고
-      // 클라이언트가 /api/face-swap-status로 폴링(Pages Function 벽시계 한도 회피).
       return jsonResponse(
-        { ok: true, pending: true, statusUrl: submitted.statusUrl, responseUrl: submitted.responseUrl },
+        {
+          ok: true,
+          pending: true,
+          statusUrl: submitted.statusUrl,
+          responseUrl: submitted.responseUrl,
+          engine: submitted.engine,
+          baseImageUrl: targetImageUrl,
+        },
         200,
       )
     } catch (error) {

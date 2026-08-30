@@ -26,6 +26,7 @@ type FalImageResultResponse = {
   images?: Array<{ url?: string }>
   detail?: string | Array<{ msg?: string }>
   error?: string
+  has_nsfw_concepts?: boolean[]
 }
 
 type FalVideoResultResponse = {
@@ -305,7 +306,7 @@ export async function generateFalImage(options: {
       num_images: 1,
       output_format: 'png',
       enable_safety_checker: false,
-      safety_tolerance: '5',
+      safety_tolerance: '6',
     },
     options.timeoutMs ?? FAL_TIMEOUT_MS,
   )
@@ -490,7 +491,7 @@ export async function refineFalKontextEdit(options: {
       image_url: options.imageUrl,
       num_images: 1,
       output_format: 'png',
-      safety_tolerance: '5',
+      safety_tolerance: '6',
       guidance_scale: 3.5,
     },
     options.timeoutMs ?? FAL_KONTEXT_EDIT_TIMEOUT_MS,
@@ -630,7 +631,7 @@ export async function generateFalKontextMultiImage(options: {
       image_urls: options.imageUrls,
       num_images: 1,
       output_format: 'png',
-      safety_tolerance: '5',
+      safety_tolerance: '6',
       ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
       ...(typeof options.guidanceScale === 'number' ? { guidance_scale: options.guidanceScale } : {}),
     },
@@ -649,7 +650,7 @@ function buildKontextMultiBody(options: {
     image_urls: options.imageUrls,
     num_images: 1,
     output_format: 'png',
-    safety_tolerance: '5',
+    safety_tolerance: '6',
     ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
     ...(typeof options.guidanceScale === 'number' ? { guidance_scale: options.guidanceScale } : {}),
   }
@@ -698,7 +699,12 @@ export async function checkFalKontextMultiImage(options: {
   falKey: string
   statusUrl: string
   responseUrl: string
-}): Promise<{ status: 'pending' | 'succeeded' | 'failed'; imageUrl?: string; error?: string }> {
+}): Promise<{
+  status: 'pending' | 'succeeded' | 'failed'
+  imageUrl?: string
+  error?: string
+  nsfwFlagged?: boolean
+}> {
   const statusResponse = await fetchWithTimeout(
     options.statusUrl,
     { method: 'GET', headers: { Authorization: `Key ${options.falKey}` } },
@@ -734,7 +740,10 @@ export async function checkFalKontextMultiImage(options: {
   if (!imageUrl) {
     return { status: 'failed', error: policyMsg !== 'fal_generation_failed' ? policyMsg : 'missing_image_url' }
   }
-  return { status: 'succeeded', imageUrl }
+  // 성인 전용: has_nsfw_concepts만으로 실패 처리하지 않음(오탐·정상 NSFW 모두 이미지 반환)
+  const nsfwFlagged =
+    Array.isArray(resultPayload.has_nsfw_concepts) && resultPayload.has_nsfw_concepts.some(Boolean)
+  return { status: 'succeeded', imageUrl, nsfwFlagged }
 }
 
 // 얼굴 1장 교체는 대개 30~40초면 끝나지만, 2인 동시 교체는 60~90초 이상 걸리는 사례가
@@ -746,11 +755,65 @@ const FAL_FACE_SWAP_TWO_FACE_TIMEOUT_MS = 110_000
 
 type FalFaceSwapResponse = {
   image?: { url?: string }
+  images?: Array<{ url?: string }>
   detail?: string | Array<{ msg?: string }>
   error?: string
 }
 
+function extractFaceSwapImageUrl(payload: FalFaceSwapResponse): string | null {
+  const direct = payload.image?.url?.trim()
+  if (direct) return direct
+  const fromList = payload.images?.[0]?.url?.trim()
+  return fromList || null
+}
+
 export type FaceSwapGender = 'male' | 'female' | 'non-binary'
+
+/** insight | easel | replicate | indexed(좌우 인덱스) */
+export type FaceSwapEngine = 'insight' | 'easel' | 'replicate' | 'indexed'
+
+/**
+ * InsightFace 계열 1인 얼굴 교체 — fal-ai/face-swap.
+ * easel(구형 H100 큐)보다 대기열이 짧고, 증명사진→장면 닮음이 실무에서 더 안정적인 경우가 많다.
+ */
+export async function submitInsightFaceSwap(options: {
+  falKey: string
+  targetImageUrl: string
+  faceImageUrl: string
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  const endpoint = 'https://queue.fal.run/fal-ai/face-swap'
+  const body = {
+    base_image_url: options.targetImageUrl,
+    swap_image_url: options.faceImageUrl,
+  }
+
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${options.falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+    20_000,
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse &
+    FalFaceSwapResponse
+  if (!submitResponse.ok) {
+    throw new Error(extractErrorMessage(submitPayload))
+  }
+
+  if (submitPayload.status_url && submitPayload.response_url) {
+    return { statusUrl: submitPayload.status_url, responseUrl: submitPayload.response_url }
+  }
+  const imageUrl = extractFaceSwapImageUrl(submitPayload)
+  if (!imageUrl) {
+    throw new Error(extractErrorMessage(submitPayload) || 'missing_image_url')
+  }
+  return { imageUrl }
+}
 
 /**
  * 원클릭 얼굴 교체 — easel-ai/advanced-face-swap (fal.ai).
@@ -782,7 +845,9 @@ export async function runAdvancedFaceSwap(options: {
     gender_0: options.gender0,
     target_image: options.targetImageUrl,
     workflow_type: options.workflowType ?? 'target_hair',
+    // 기본 on — 닮음·피부톤 보존에 유리 (호출측에서 false로 끌 수 있음)
     upscale: options.upscale !== false,
+    detailer: true,
   }
   if (hasSecondFace) {
     body.face_image_1 = options.face1ImageUrl
@@ -819,7 +884,7 @@ export async function runAdvancedFaceSwap(options: {
     resultPayload = submitPayload as FalFaceSwapResponse
   }
 
-  const imageUrl = resultPayload.image?.url?.trim()
+  const imageUrl = extractFaceSwapImageUrl(resultPayload)
   if (!imageUrl) {
     throw new Error(extractErrorMessage(resultPayload) || 'missing_image_url')
   }
@@ -851,6 +916,7 @@ export async function submitAdvancedFaceSwap(options: {
     target_image: options.targetImageUrl,
     workflow_type: options.workflowType ?? 'target_hair',
     upscale: options.upscale !== false,
+    detailer: true,
   }
   if (options.face1ImageUrl && options.gender1) {
     body.face_image_1 = options.face1ImageUrl
@@ -878,11 +944,85 @@ export async function submitAdvancedFaceSwap(options: {
   if (submitPayload.status_url && submitPayload.response_url) {
     return { statusUrl: submitPayload.status_url, responseUrl: submitPayload.response_url }
   }
-  const imageUrl = submitPayload.image?.url?.trim()
+  const imageUrl = extractFaceSwapImageUrl(submitPayload)
   if (!imageUrl) {
     throw new Error(extractErrorMessage(submitPayload) || 'missing_image_url')
   }
   return { imageUrl }
+}
+
+/** 엔진 선택 후 submit — status 폴링은 checkAdvancedFaceSwap 공통. fal 엔진만. */
+export async function submitFaceSwapJob(options: {
+  falKey: string
+  engine: 'insight' | 'easel'
+  targetImageUrl: string
+  face0ImageUrl: string
+  gender0: FaceSwapGender
+  face1ImageUrl?: string
+  gender1?: FaceSwapGender
+  workflowType?: 'user_hair' | 'target_hair'
+  upscale?: boolean
+}): Promise<
+  | { statusUrl: string; responseUrl: string; engine: 'insight' | 'easel' }
+  | { imageUrl: string; engine: 'insight' | 'easel' }
+> {
+  if (options.engine === 'insight') {
+    const submitted = await submitInsightFaceSwap({
+      falKey: options.falKey,
+      targetImageUrl: options.targetImageUrl,
+      faceImageUrl: options.face0ImageUrl,
+    })
+    return { ...submitted, engine: 'insight' }
+  }
+  const submitted = await submitAdvancedFaceSwap({
+    falKey: options.falKey,
+    targetImageUrl: options.targetImageUrl,
+    face0ImageUrl: options.face0ImageUrl,
+    gender0: options.gender0,
+    face1ImageUrl: options.face1ImageUrl,
+    gender1: options.gender1,
+    workflowType: options.workflowType,
+    upscale: options.upscale,
+  })
+  return { ...submitted, engine: 'easel' }
+}
+
+/** fal-ai/face-swap은 얼굴 미검출 시 원본 URL/바이트를 그대로 돌려줌 — 무변경 “가짜 성공” 차단. */
+export async function isUnchangedFaceSwapResult(
+  resultUrl: string,
+  baseImageUrl: string,
+): Promise<boolean> {
+  const a = resultUrl.trim()
+  const b = baseImageUrl.trim()
+  if (!a || !b) return false
+  if (a === b) return true
+  try {
+    const [ra, rb] = await Promise.all([
+      fetchWithTimeout(a, { method: 'GET' }, 12_000),
+      fetchWithTimeout(b, { method: 'GET' }, 12_000),
+    ])
+    if (!ra.ok || !rb.ok) return false
+    const [ba, bb] = await Promise.all([ra.arrayBuffer(), rb.arrayBuffer()])
+    if (ba.byteLength < 64 || bb.byteLength < 64) return false
+    if (ba.byteLength === bb.byteLength) {
+      const ha = await crypto.subtle.digest('SHA-256', ba)
+      const hb = await crypto.subtle.digest('SHA-256', bb)
+      const ua = new Uint8Array(ha)
+      const ub = new Uint8Array(hb)
+      if (ua.length === ub.length && ua.every((v, i) => v === ub[i])) return true
+    }
+    // 동일 파일이 재인코딩되면 해시가 달라질 수 있어, 앞부분+크기가 거의 같으면 무변경으로 본다.
+    const sizeRatio = Math.min(ba.byteLength, bb.byteLength) / Math.max(ba.byteLength, bb.byteLength)
+    if (sizeRatio < 0.98) return false
+    const sample = Math.min(4096, ba.byteLength, bb.byteLength)
+    const sa = new Uint8Array(ba, 0, sample)
+    const sb = new Uint8Array(bb, 0, sample)
+    let same = 0
+    for (let i = 0; i < sample; i += 1) if (sa[i] === sb[i]) same += 1
+    return same / sample > 0.995
+  } catch {
+    return false
+  }
 }
 
 /** 위 submit이 돌려준 status_url/response_url을 한 번만 조회 — 짧은 폴링 루프는 호출부(status 엔드포인트)가 맡는다. */
@@ -890,7 +1030,12 @@ export async function checkAdvancedFaceSwap(options: {
   falKey: string
   statusUrl: string
   responseUrl: string
-}): Promise<{ status: 'pending' | 'succeeded' | 'failed'; imageUrl?: string; error?: string }> {
+}): Promise<{
+  status: 'pending' | 'succeeded' | 'failed'
+  imageUrl?: string
+  error?: string
+  falStatus?: string
+}> {
   const statusResponse = await fetchWithTimeout(
     options.statusUrl,
     { method: 'GET', headers: { Authorization: `Key ${options.falKey}` } },
@@ -898,15 +1043,25 @@ export async function checkAdvancedFaceSwap(options: {
   )
   const statusPayload = (await statusResponse.json().catch(() => ({}))) as FalQueueStatusResponse
   if (!statusResponse.ok) {
-    return { status: 'failed', error: extractErrorMessage(statusPayload) }
+    return {
+      status: 'failed',
+      error: extractErrorMessage(statusPayload),
+      falStatus: statusPayload.status,
+    }
   }
 
-  const status = statusPayload.status?.toUpperCase()
+  const falStatus = String(statusPayload.status || '').trim()
+  const status = falStatus.toUpperCase()
   if (status === 'FAILED' || status === 'CANCELLED') {
-    return { status: 'failed', error: extractErrorMessage(statusPayload) || `fal_${status.toLowerCase()}` }
+    return {
+      status: 'failed',
+      error: extractErrorMessage(statusPayload) || `fal_${status.toLowerCase()}`,
+      falStatus,
+    }
   }
+  // IN_QUEUE / IN_PROGRESS / 빈 값 — 아직 결과 없음
   if (status !== 'COMPLETED') {
-    return { status: 'pending' }
+    return { status: 'pending', falStatus: falStatus || 'WAITING' }
   }
 
   const resultResponse = await fetchWithTimeout(
@@ -916,13 +1071,23 @@ export async function checkAdvancedFaceSwap(options: {
   )
   const resultPayload = (await resultResponse.json().catch(() => ({}))) as FalFaceSwapResponse
   if (!resultResponse.ok) {
-    return { status: 'failed', error: extractErrorMessage(resultPayload) }
+    return {
+      status: 'failed',
+      error: extractErrorMessage(resultPayload),
+      falStatus: 'COMPLETED',
+    }
   }
-  const imageUrl = resultPayload.image?.url?.trim()
+  const imageUrl = extractFaceSwapImageUrl(resultPayload)
   if (!imageUrl) {
-    return { status: 'failed', error: extractErrorMessage(resultPayload) || 'missing_image_url' }
+    // 스키마가 image{} / images[] 둘 다 아닐 때 — 응답 키를 남겨 디버깅
+    const keys = Object.keys(resultPayload || {}).slice(0, 12).join(',')
+    return {
+      status: 'failed',
+      error: extractErrorMessage(resultPayload) || `missing_image_url${keys ? `:${keys}` : ''}`,
+      falStatus: 'COMPLETED',
+    }
   }
-  return { status: 'succeeded', imageUrl }
+  return { status: 'succeeded', imageUrl, falStatus: 'COMPLETED' }
 }
 
 export function resolveFalImageSize(size: string | undefined): FalImageSize {

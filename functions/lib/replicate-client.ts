@@ -302,6 +302,155 @@ export async function generateReplicateImage(options: {
 }
 
 /**
+ * 이미지 생성 시작만 — 완료 대기는 클라이언트가 /api/generate-status 로 폴링.
+ * Pages ~30초 벽시계 안에서 20~45초 생성을 sync로 끝내려다 "서버 시간 한도"로 죽던 사고 방지.
+ */
+export async function startReplicateImage(options: {
+  apiToken: string
+  modelOwner: string
+  modelName: string
+  modelVersion?: string
+  prompt: string
+  negativePrompt?: string
+  width: number
+  height: number
+  disableSafetyChecker?: boolean
+  numInferenceSteps?: number
+  guidanceScale?: number
+}): Promise<{ status: 'succeeded' | 'processing'; predictionId: string; imageUrl?: string }> {
+  if (!options.apiToken?.trim()) throw new Error('missing_replicate_token')
+
+  const versionId =
+    options.modelVersion?.trim() ||
+    (await resolveLatestVersion(options.apiToken, options.modelOwner, options.modelName))
+
+  const fullInput: Record<string, unknown> = {
+    prompt: options.prompt,
+    negative_prompt: options.negativePrompt,
+    width: options.width,
+    height: options.height,
+    num_inference_steps: options.numInferenceSteps ?? 10,
+    guidance_scale: options.guidanceScale ?? 3.2,
+    number_of_images: 1,
+    num_outputs: 1,
+  }
+  if (options.disableSafetyChecker) {
+    fullInput.disable_safety_checker = true
+  }
+
+  const prediction = await createPrediction(options.apiToken, versionId, fullInput, 15_000, {
+    waitSec: null,
+  })
+
+  if (prediction.status === 'failed') {
+    throw new Error(extractReplicateError(prediction))
+  }
+  if (!prediction.id) throw new Error('replicate_missing_prediction_id')
+
+  if (prediction.status === 'succeeded') {
+    const doneUrl = extractImageUrl(prediction.output)
+    if (doneUrl) return { status: 'succeeded', predictionId: prediction.id, imageUrl: doneUrl }
+  }
+  return { status: 'processing', predictionId: prediction.id }
+}
+
+export async function checkReplicateImage(options: {
+  apiToken: string
+  predictionId: string
+}): Promise<{ status: 'succeeded' | 'processing' | 'failed'; imageUrl?: string; error?: string }> {
+  const prediction = await fetchReplicatePrediction(options.apiToken, options.predictionId)
+  if (prediction.status === 'succeeded') {
+    const doneUrl = extractImageUrl(prediction.output)
+    if (!doneUrl) return { status: 'failed', error: 'replicate_missing_image_url' }
+    return { status: 'succeeded', imageUrl: doneUrl }
+  }
+  if (prediction.status === 'failed' || prediction.status === 'canceled') {
+    return {
+      status: 'failed',
+      error: extractReplicateError(prediction) || `replicate_${prediction.status}`,
+    }
+  }
+  return { status: 'processing' }
+}
+
+/**
+ * 1인 얼굴 교체 — codeplugtech/face-swap (InsightFace 계열, Replicate).
+ * fal-ai/face-swap은 얼굴 미검출 시 원본을 그대로 “성공”으로 돌려 무변경 결과가 나오는 사례가 있어
+ * 기본 엔진으로 Replicate 쪽을 쓴다.
+ */
+export async function startReplicateFaceSwap(options: {
+  apiToken: string
+  targetImageUrl: string
+  faceImageUrl: string
+  modelOwner?: string
+  modelName?: string
+}): Promise<{ status: 'succeeded' | 'processing'; predictionId: string; imageUrl?: string }> {
+  if (!options.apiToken?.trim()) throw new Error('missing_replicate_token')
+  const owner = options.modelOwner?.trim() || 'codeplugtech'
+  const name = options.modelName?.trim() || 'face-swap'
+  const versionId = await resolveLatestVersion(options.apiToken, owner, name)
+  const prediction = await createPrediction(
+    options.apiToken,
+    versionId,
+    {
+      input_image: options.targetImageUrl,
+      swap_image: options.faceImageUrl,
+    },
+    15_000,
+    { waitSec: null },
+  )
+  if (prediction.status === 'failed') {
+    throw new Error(extractReplicateError(prediction))
+  }
+  if (!prediction.id) throw new Error('replicate_missing_prediction_id')
+  if (prediction.status === 'succeeded') {
+    const doneUrl = extractImageUrl(prediction.output)
+    if (doneUrl) return { status: 'succeeded', predictionId: prediction.id, imageUrl: doneUrl }
+  }
+  return { status: 'processing', predictionId: prediction.id }
+}
+
+/**
+ * 좌→우 순 얼굴 인덱스로 특정 인물만 교체 — mertguvencli/face-swap-with-indexes.
+ * destination_face_index 0 = 원본에서 가장 왼쪽 얼굴, 1 = 그다음(대개 오른쪽).
+ */
+export async function startReplicateIndexedFaceSwap(options: {
+  apiToken: string
+  targetImageUrl: string
+  faceImageUrl: string
+  /** 0 = 왼쪽, 1 = 오른쪽(좌→우 두 번째) */
+  destinationFaceIndex: number
+  sourceFaceIndex?: number
+}): Promise<{ status: 'succeeded' | 'processing'; predictionId: string; imageUrl?: string }> {
+  if (!options.apiToken?.trim()) throw new Error('missing_replicate_token')
+  const versionId = await resolveLatestVersion(options.apiToken, 'mertguvencli', 'face-swap-with-indexes')
+  const destIndex = Math.max(0, Math.min(100, Math.floor(options.destinationFaceIndex)))
+  const srcIndex = Math.max(0, Math.min(100, Math.floor(options.sourceFaceIndex ?? 0)))
+  const prediction = await createPrediction(
+    options.apiToken,
+    versionId,
+    {
+      source_face_image: options.faceImageUrl,
+      destination_image: options.targetImageUrl,
+      source_face_index: srcIndex,
+      destination_face_index: destIndex,
+      execution_type: 'face_swap',
+    },
+    15_000,
+    { waitSec: null },
+  )
+  if (prediction.status === 'failed') {
+    throw new Error(extractReplicateError(prediction))
+  }
+  if (!prediction.id) throw new Error('replicate_missing_prediction_id')
+  if (prediction.status === 'succeeded') {
+    const doneUrl = extractImageUrl(prediction.output)
+    if (doneUrl) return { status: 'succeeded', predictionId: prediction.id, imageUrl: doneUrl }
+  }
+  return { status: 'processing', predictionId: prediction.id }
+}
+
+/**
  * 원본 이미지를 유지한 채 약하게 수정(img2img).
  * 전체 재생성(T2I)과 달리 얼굴·구도가 바뀌는 문제를 줄인다.
  */

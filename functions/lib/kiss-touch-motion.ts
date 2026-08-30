@@ -283,7 +283,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
     bits.push(
       'PANTY OFF FIRST: panties/thong/briefs must be fully removed before the fondling — bare crotch with adult pubic hair visible under the hand',
       'FORBIDDEN: hand hovering near the hip/thigh without touching genitals; hand only on outer thigh; fondling over panties; ending still wearing underwear',
-      'LAST FRAME: hand still contacting bare crotch — do not return to the source still pose',
+      'LAST FRAME FREEZE: hand STILL on bare crotch through the final frame — source photo is START ONLY, never snap back to clothed/stiff opening pose',
     )
   }
 
@@ -305,6 +305,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
       backHug
         ? `from behind: both his hands reach around her torso onto her bare breasts, ${verbPhrase} continuously — back-hug breast fondle, not a face-to-face tap`
         : `sustained breast play for most of the clip: hand stays on her bare breast, ${verbPhrase} continuously — not a one-second tap`,
+      'LAST FRAME FREEZE: hand(s) STILL on bare breast through the final frame — source photo is START ONLY, never snap back to the opening still',
     )
   }
 
@@ -319,12 +320,12 @@ export function amplifyAdultMotionForVideo(motion: string): {
     if (kissVulva) {
       bits.push(
         'mandatory mouth-to-vulva kissing for most of the clip — a consenting adult partner\'s lips and mouth make continuous oral contact with her bare vulva/genitals, not a hand touch, not a peck elsewhere',
-        'last frame still kissing the bare vulva — do not return to the source still pose',
+        'LAST FRAME FREEZE: still kissing the bare vulva — source photo is START ONLY, never snap back to the opening still',
       )
     } else if (kissBreast) {
       bits.push(
         'mandatory mouth-to-breast kissing for most of the clip — a consenting adult partner\'s lips make continuous oral contact with her bare breast/nipple, not a hand-only touch, not a peck elsewhere',
-        'last frame still kissing the bare breast/nipple — do not return to the source still pose',
+        'LAST FRAME FREEZE: still kissing the bare breast/nipple — source photo is START ONLY, never snap back to the opening still',
       )
     } else if (backHug || headTiltBack) {
       bits.push(
@@ -332,7 +333,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
         backHug
           ? 'he stays BEHIND her the whole time while kissing — FORBIDDEN face-to-face square stance'
           : 'she keeps her head tilted back during the kiss',
-        'last frame still in that kissed / head-back / behind pose — do not snap to a stiff side-by-side still',
+        'LAST FRAME FREEZE: still in that kissed / head-back / behind pose — source photo is START ONLY, never snap to a stiff side-by-side still',
       )
     } else {
       bits.push(
@@ -342,7 +343,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
           : 'slight natural teeth OK if lips part; no wide Hollywood grin',
         kissIntensity === 'peck'
           ? 'last frame may show lips just parting after the peck'
-          : 'last frame still kissing — do not return to the source still pose',
+          : 'LAST FRAME FREEZE: still kissing — source photo is START ONLY, never snap back to the opening still',
       )
     }
     if (/나체|누드|nude|naked|전라|topless/i.test(t)) {
@@ -362,7 +363,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
     const verbPhrase = detectTouchVerbPhrase(t)
     bits.push(
       `hands actively caressing the body with continuous touching — ${verbPhrase}, not a static hand pose`,
-      'END POSE: keep the intimate contact through the last frame — do not return to the source still pose',
+      'END POSE FREEZE: intimate contact held through the last frame — source photo is START ONLY, never snap back to the opening still',
     )
   }
 

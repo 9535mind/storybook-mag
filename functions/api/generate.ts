@@ -9,7 +9,7 @@ import {
 } from '../lib/content-policy'
 import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, resolveFalImageSize } from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
-import { generateReplicateImage, resolveReplicateImageSize } from '../lib/replicate-client'
+import { generateReplicateImage, resolveReplicateImageSize, startReplicateImage } from '../lib/replicate-client'
 import {
   compileResponsiveFreePrompt,
   isRealWildlifeScene,
@@ -90,6 +90,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       size?: string
       mode?: string
       precision?: boolean
+      /** true면 Replicate에 제출만 하고 predictionId 반환 — 클라이언트가 /api/generate-status 폴링 */
+      async?: boolean
     }
     try {
       body = await request.json()
@@ -193,6 +195,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
 
     const attempts: EngineAttempt[] = []
+    const wantAsync = body.async === true
 
     // wantsNudeOrUndress로 조사(을/를 등) 붙은 자연스러운 한국어까지 포함해서 판별한다 —
     // 예전엔 이 정규식이 \s*(공백만)라 "속옷을 제거해줘"처럼 흔한 말투를 놓쳐서, fal(엄격한
@@ -200,6 +203,90 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const likelyAdult =
       wantsNudeOrUndress(description) ||
       /란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit|성기|자위|섹스/i.test(description)
+
+    // 얼굴·장면 스튜디오 등: 20~45초 생성을 Pages 30초 sync로 끝내면 "서버 시간 한도"로 조기 실패.
+    // 프롬프트만 조립해 Replicate에 제출하고, 완료는 클라이언트가 폴링한다.
+    if (wantAsync) {
+      if (!env.REPLICATE_API_TOKEN?.trim()) {
+        return jsonResponse({ ok: false, error: 'replicate_token_not_configured' }, 500)
+      }
+      try {
+        const fashionSceneHeavy =
+          mode === 'fashion' &&
+          /속옷|거울|란제리|underwear|mirror|lingerie|몸매|비스듬/i.test(description)
+        const baseSteps = mode === 'free' ? (wildlifeScene ? 18 : complexScene ? 14 : 12) : fashionSceneHeavy ? 14 : 10
+        const baseCfg = mode === 'free' ? (wildlifeScene ? 7.0 : complexScene ? 5.0 : 4.0) : fashionSceneHeavy ? 4.2 : 3.2
+        const usePrecisionModel = precision
+        const modelOwner = usePrecisionModel
+          ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
+          : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based'
+        const modelName = usePrecisionModel
+          ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
+          : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning'
+        const modelVersion = usePrecisionModel ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION
+        const steps = usePrecisionModel ? 30 : baseSteps
+        const cfg = usePrecisionModel ? 7.5 : baseCfg
+        const sizeOpts = resolveReplicateImageSize(size)
+
+        const started = await startReplicateImage({
+          apiToken: env.REPLICATE_API_TOKEN,
+          modelOwner,
+          modelName,
+          modelVersion,
+          prompt,
+          negativePrompt,
+          disableSafetyChecker: true,
+          numInferenceSteps: steps,
+          guidanceScale: cfg,
+          ...sizeOpts,
+        })
+
+        if (started.status === 'succeeded' && started.imageUrl) {
+          return jsonResponse(
+            {
+              ok: true,
+              pending: false,
+              imageUrl: started.imageUrl,
+              predictionId: started.predictionId,
+              prompt,
+              mode,
+              engine: 'replicate',
+              engineLabel: 'Replicate · async',
+            },
+            200,
+          )
+        }
+
+        return jsonResponse(
+          {
+            ok: true,
+            pending: true,
+            predictionId: started.predictionId,
+            prompt,
+            mode,
+            engine: 'replicate',
+            engineLabel: usePrecisionModel
+              ? `Replicate · ${modelOwner}/${modelName} · 정밀(비동기)`
+              : 'Replicate · Juggernaut XL Lightning (비동기)',
+          },
+          200,
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error'
+        if (isProviderContentBlock(message)) {
+          return jsonResponse(
+            {
+              ok: false,
+              error: 'provider_content_blocked',
+              message:
+                '이미지 엔진이 이 장면을 안전 필터로 거절했습니다. 구도·의상·장면을 조금 바꿔 다시 시도해 주세요.',
+            },
+            422,
+          )
+        }
+        return jsonResponse({ ok: false, error: 'generation_failed', message }, 502)
+      }
+    }
 
     const tryFal = async (asPrimary: boolean) => {
       if (!env.FAL_KEY?.trim()) {
