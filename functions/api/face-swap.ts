@@ -2,7 +2,9 @@ import { requireAuth } from '../lib/auth'
 import {
   isUnchangedFaceSwapResult,
   submitFaceSwapJob,
+  submitFalKontextMultiImage,
   uploadDataUrlToFal,
+  HEAD_SWAP_KONTEXT_PROMPT,
   type FaceSwapEngine,
   type FaceSwapGender,
 } from '../lib/fal-client'
@@ -98,7 +100,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     const auth = await requireAuth(request, env)
     if (auth instanceof Response) return auth
 
-    const limited = await enforceRateLimit(env, 'face-swap', rateLimitIdentity(auth), 20, 3600)
+    const limited = await enforceRateLimit(env, 'face-swap', rateLimitIdentity(auth), 80, 3600)
     if (limited) return limited
 
     let body: {
@@ -124,21 +126,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     let face1 = typeof body.face1 === 'string' ? body.face1.trim() : ''
     let gender1Raw = body.gender1
 
-    if (!face0.startsWith('data:') && face1.startsWith('data:')) {
+    const isData = (s: string) => s.startsWith('data:')
+    const isHttpOk = (s: string) => Boolean(s) && !isData(s) && !mediaUrlError(s)
+
+    if (!isData(face0) && !isHttpOk(face0) && (isData(face1) || isHttpOk(face1))) {
       face0 = face1
       gender0Raw = gender1Raw
       face1 = ''
       gender1Raw = undefined
     }
 
-    const targetIsDataUrl = targetImage.startsWith('data:')
+    const targetIsDataUrl = isData(targetImage)
     if (!targetIsDataUrl) {
       const urlErr = mediaUrlError(targetImage)
       if (urlErr) {
         return jsonResponse({ ok: false, error: 'target_image_required' }, 400)
       }
     }
-    if (!face0.startsWith('data:')) {
+    if (!isData(face0) && !isHttpOk(face0)) {
       return jsonResponse(
         {
           ok: false,
@@ -153,7 +158,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return jsonResponse({ ok: false, error: 'gender0_required' }, 400)
     }
 
-    const hasSecondFace = face1.startsWith('data:')
+    const hasSecondFace = isData(face1) || isHttpOk(face1)
     const gender1 = hasSecondFace ? normalizeGender(gender1Raw) : null
     if (hasSecondFace && !gender1) {
       return jsonResponse({ ok: false, error: 'gender1_required' }, 400)
@@ -175,13 +180,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     let targetSide = normalizeTargetSide(body.targetSide)
     let engine = normalizeEngine(body.engine, targetSide)
-    // 클라이언트가 replicate(증명사진)를 명시하면 존중. 2장+성별만 Easel 강제.
-    if (hasSecondFace && targetSide === 'gender' && body.engine !== 'replicate') {
+    // 클라이언트가 엔진을 명시한 경우 존중 (insight = 성인 장면에서도 검열 없이 기하 교체)
+    if (body.engine === 'insight' || body.engine === 'replicate' || body.engine === 'indexed' || body.engine === 'easel' || body.engine === 'kontext') {
+      engine = body.engine
+    } else if (hasSecondFace && targetSide === 'gender') {
       engine = 'easel'
-    } else if ((targetSide === 'left' || targetSide === 'right') && body.engine !== 'replicate') {
+    } else if (targetSide === 'left' || targetSide === 'right') {
       engine = 'indexed'
-    } else if (body.engine === 'replicate') {
-      engine = 'replicate'
     }
 
     const workflowType = body.workflowType === 'user_hair' ? 'user_hair' : 'target_hair'
@@ -201,7 +206,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
       engine = 'insight'
     }
-    if ((engine === 'insight' || engine === 'easel') && !env.FAL_KEY?.trim()) {
+    if ((engine === 'insight' || engine === 'easel' || engine === 'kontext') && !env.FAL_KEY?.trim()) {
       return jsonResponse({ ok: false, error: 'fal_key_not_configured' }, 500)
     }
 
@@ -218,20 +223,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       const falKey = env.FAL_KEY
       const [targetUrl, face0Url, face1Url] = await Promise.all([
         targetIsDataUrl
-          ? uploadDataUrlToFal(falKey, targetImage, `faceswap-target-${Date.now()}.png`, {
+          ? uploadDataUrlToFal(falKey, targetImage, `faceswap-target-${Date.now()}.jpg`, {
               maxBytes: MAX_IMAGE_BYTES,
               tooLargeError: 'target_image_too_large',
             })
           : Promise.resolve(targetImage),
-        uploadDataUrlToFal(falKey, face0, `faceswap-face0-${Date.now()}.png`, {
-          maxBytes: MAX_IMAGE_BYTES,
-          tooLargeError: 'face0_image_too_large',
-        }),
-        hasSecondFace
-          ? uploadDataUrlToFal(falKey, face1, `faceswap-face1-${Date.now()}.png`, {
+        isData(face0)
+          ? uploadDataUrlToFal(falKey, face0, `faceswap-face0-${Date.now()}.jpg`, {
               maxBytes: MAX_IMAGE_BYTES,
-              tooLargeError: 'face1_image_too_large',
+              tooLargeError: 'face0_image_too_large',
             })
+          : Promise.resolve(face0),
+        hasSecondFace
+          ? isData(face1)
+            ? uploadDataUrlToFal(falKey, face1, `faceswap-face1-${Date.now()}.jpg`, {
+                maxBytes: MAX_IMAGE_BYTES,
+                tooLargeError: 'face1_image_too_large',
+              })
+            : Promise.resolve(face1)
           : Promise.resolve(undefined as string | undefined),
       ])
       targetImageUrl = targetUrl
@@ -263,6 +272,38 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           faceImageUrl: face0ImageUrl,
         })
         return await respondReplicateResult(started, targetImageUrl, 'replicate')
+      }
+
+      if (engine === 'kontext') {
+        const submitted = await submitFalKontextMultiImage({
+          falKey: env.FAL_KEY as string,
+          imageUrls: [targetImageUrl, face0ImageUrl],
+          prompt: HEAD_SWAP_KONTEXT_PROMPT,
+          guidanceScale: 5,
+        })
+        if ('imageUrl' in submitted && submitted.imageUrl) {
+          return jsonResponse(
+            {
+              ok: true,
+              pending: false,
+              imageUrl: submitted.imageUrl,
+              engine: 'kontext',
+              baseImageUrl: targetImageUrl,
+            },
+            200,
+          )
+        }
+        return jsonResponse(
+          {
+            ok: true,
+            pending: true,
+            statusUrl: submitted.statusUrl,
+            responseUrl: submitted.responseUrl,
+            engine: 'kontext',
+            baseImageUrl: targetImageUrl,
+          },
+          200,
+        )
       }
 
       const submitted = await submitFaceSwapJob({
@@ -318,7 +359,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           {
             ok: false,
             error: 'provider_content_blocked',
-            message: '이미지 엔진이 이 얼굴 교체를 안전 필터로 거절했어요. 다른 사진으로 다시 시도해 주세요.',
+            message: '이 교체 엔진이 장면을 거절했어요. 다른 엔진으로 이어갑니다.',
           },
           422,
         )

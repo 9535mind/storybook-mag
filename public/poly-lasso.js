@@ -36,6 +36,13 @@
     let hoverPointIndex = -1
     /** @type {number} */
     let hoverEdgeIndex = -1
+    /** 그리는 중 고무줄 */
+    let cursorPt = null
+    /** 누른 채 끌면 자유곡선 */
+    let freehand = false
+    let lastFreePt = null
+    /** 닫힌 선택 통째 이동 */
+    let dragPoly = null
 
     function status(msg, isError) {
       if (typeof options.onStatus === 'function') options.onStatus(msg, Boolean(isError))
@@ -79,6 +86,10 @@
       locked = false
       ignoreNextPointerDown = false
       dragVertex = null
+      dragPoly = null
+      freehand = false
+      lastFreePt = null
+      cursorPt = null
       hoverPointIndex = -1
       hoverEdgeIndex = -1
       emit()
@@ -129,7 +140,7 @@
         ignoreNextPointerDown = false
       }, 350)
       status(
-        '선택 닫힘 · 흰 점/변을 드래그해 다듬기 · 우클릭 「쓸 조각」/「버릴 조각」',
+        '선택 닫힘 · 점선을 드래그하거나 안쪽을 잡아 옮긴 뒤 「이 선택 지우기」',
         false,
       )
       emit()
@@ -160,7 +171,7 @@
     function hitTestLocked(p) {
       if (!regions.length) return null
       const pts = regions[0].points
-      const r = hitRadius()
+      const r = hitRadius() * 1.15
       let bestV = -1
       let bestVd = r
       for (let i = 0; i < pts.length; i += 1) {
@@ -172,7 +183,7 @@
       }
       if (bestV >= 0) return { kind: 'vertex', pointIndex: bestV }
 
-      const edgeHit = r * 0.85
+      const edgeHit = r * 1.05
       let bestE = -1
       let bestEd = edgeHit
       let bestQ = { x: 0, y: 0 }
@@ -181,7 +192,7 @@
         const b = pts[(i + 1) % pts.length]
         const seg = distToSegment(p, a, b)
         // 끝점 근처는 꼭짓점으로만
-        if (seg.t < 0.12 || seg.t > 0.88) continue
+        if (seg.t < 0.04 || seg.t > 0.96) continue
         if (seg.dist <= bestEd) {
           bestEd = seg.dist
           bestE = i
@@ -190,6 +201,20 @@
       }
       if (bestE >= 0) return { kind: 'edge', edgeIndex: bestE, qx: bestQ.x, qy: bestQ.y }
       return null
+    }
+
+    function pointInPoly(p, pts) {
+      if (!pts || pts.length < 3) return false
+      let inside = false
+      for (let i = 0, j = pts.length - 1; i < pts.length; j = i, i += 1) {
+        const xi = pts[i].x
+        const yi = pts[i].y
+        const xj = pts[j].x
+        const yj = pts[j].y
+        const hit = yi > p.y !== yj > p.y && p.x < ((xj - xi) * (p.y - yi)) / (yj - yi || 1e-9) + xi
+        if (hit) inside = !inside
+      }
+      return inside
     }
 
     function updateHover(p) {
@@ -228,16 +253,21 @@
           : 'rgba(56, 189, 248, 0.22)'
       if (!isDraft && points.length >= 3) ctx.fill()
 
-      // 선은 채움(자르기 경계) 안쪽에만 — 바깥 stroke가 “다른 올가미”처럼 보이던 문제 방지
       ctx.strokeStyle = isDraft ? '#facc15' : isLocked ? '#34d399' : '#38bdf8'
       ctx.lineWidth = isLocked ? 2.5 : 2
-      if (!isDraft && points.length >= 3) {
-        ctx.save()
-        ctx.clip()
+      ctx.setLineDash(isLocked ? [7, 5] : isDraft ? [5, 4] : [])
+      ctx.stroke()
+      ctx.setLineDash([])
+
+      if (isDraft && cursorPt && points.length) {
+        ctx.beginPath()
+        ctx.moveTo(points[points.length - 1].x, points[points.length - 1].y)
+        ctx.lineTo(cursorPt.x, cursorPt.y)
+        ctx.setLineDash([4, 4])
+        ctx.strokeStyle = '#fde047'
+        ctx.lineWidth = 1.5
         ctx.stroke()
-        ctx.restore()
-      } else {
-        ctx.stroke()
+        ctx.setLineDash([])
       }
 
       // 닫힌 상태: 변 중간 핸들(밀고 당기기용)
@@ -376,7 +406,6 @@
           return
         }
         if (hit?.kind === 'edge') {
-          // 변 위에 점 추가 후 그 점을 당김 → 그 부분만 밀고 당기기
           const pts = regions[0].points
           const insertAt = hit.edgeIndex + 1
           pts.splice(insertAt, 0, { x: hit.qx, y: hit.qy })
@@ -387,8 +416,16 @@
           emit()
           return
         }
+        if (pointInPoly(p, regions[0].points)) {
+          dragPoly = { lastX: p.x, lastY: p.y }
+          canvas.setPointerCapture?.(event.pointerId)
+          canvas.style.cursor = 'grabbing'
+          status('선택 전체를 옮기는 중…', false)
+          emit()
+          return
+        }
         status(
-          '흰 점(꼭짓점) 또는 노란 점(변)을 드래그해 다듬으세요. 우클릭 → 쓸/버리기.',
+          '흰 점·노란 점을 드래그하거나, 안쪽을 잡아 통째로 옮기세요. 우클릭 → 다시 그리기.',
           false,
         )
         return
@@ -399,13 +436,31 @@
         return
       }
       draft.push(p)
-      status(`점 ${draft.length}개 · 더블클릭/Enter로 닫기 → 닫은 뒤 점·변 드래그 조절`, false)
+      freehand = true
+      lastFreePt = p
+      canvas.setPointerCapture?.(event.pointerId)
+      status(`점 ${draft.length}개 · 클릭으로 이어 찍거나, 누른 채 끌면 자유롭게 그려집니다.`, false)
       emit()
     }
 
     function onPointerMove(event) {
       if (!enabled) return
       const p = pointerToCanvas(event)
+      cursorPt = p
+
+      if (dragPoly && regions[0]) {
+        event.preventDefault()
+        const dx = p.x - dragPoly.lastX
+        const dy = p.y - dragPoly.lastY
+        for (const pt of regions[0].points) {
+          pt.x += dx
+          pt.y += dy
+        }
+        dragPoly.lastX = p.x
+        dragPoly.lastY = p.y
+        emit()
+        return
+      }
 
       if (dragVertex && regions[dragVertex.regionIndex]) {
         event.preventDefault()
@@ -419,15 +474,43 @@
         return
       }
 
+      if (freehand && !locked && draft.length) {
+        event.preventDefault()
+        if (!lastFreePt || distPoint(p, lastFreePt) >= 7) {
+          draft.push(p)
+          lastFreePt = p
+          emit()
+        }
+        return
+      }
+
       if (locked) {
         updateHover(p)
         const hit = hitTestLocked(p)
-        canvas.style.cursor = hit ? 'grab' : 'crosshair'
+        const inside = regions[0] && pointInPoly(p, regions[0].points)
+        canvas.style.cursor = hit || inside ? 'grab' : 'crosshair'
         emit()
+        return
       }
+
+      if (draft.length) emit()
     }
 
     function onPointerUp(event) {
+      freehand = false
+      lastFreePt = null
+      if (dragPoly) {
+        dragPoly = null
+        canvas.style.cursor = locked ? 'crosshair' : ''
+        try {
+          canvas.releasePointerCapture?.(event.pointerId)
+        } catch {
+          /* ignore */
+        }
+        status('위치 반영됨 · 점·변을 더 다듬거나 「이 선택 지우기」', false)
+        emit()
+        return
+      }
       if (!dragVertex) return
       dragVertex = null
       canvas.style.cursor = locked ? 'crosshair' : ''
@@ -437,7 +520,7 @@
         /* ignore */
       }
       status(
-        '조절 반영됨 · 더 다듬거나 우클릭 「쓸 조각」/「버릴 조각」',
+        '조절 반영됨 · 안쪽을 잡아 통째로 옮기거나, 「이 선택 지우기」',
         false,
       )
       emit()
@@ -541,6 +624,8 @@
         hideMenu()
         // 좌표는 유지 — 끄면서 clearAll 하면 우클릭 직후 자르기 점이 사라질 수 있음
         dragVertex = null
+        dragPoly = null
+        freehand = false
         hoverPointIndex = -1
         hoverEdgeIndex = -1
         canvas.style.cursor = ''

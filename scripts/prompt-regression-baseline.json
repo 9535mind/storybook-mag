@@ -22,22 +22,39 @@
     "matchedSignals": []
   },
   "evaluateTaleScenePolicy/child-ok": {
+    "allowed": false,
+    "blockedReason": "blocked-minor-reference",
+    "matchedSignals": [
+      "minor-reference"
+    ]
+  },
+  "evaluateTaleScenePolicy/adult-blocked": {
     "allowed": true,
     "blockedReason": null,
     "matchedSignals": []
   },
-  "evaluateTaleScenePolicy/adult-blocked": {
-    "allowed": false,
-    "blockedReason": "blocked-adult-content",
-    "matchedSignals": [
-      "adult-content"
-    ]
-  },
   "polishKoreanPromptText/typo-fix": "가슴을 만져본다 하고 있다",
   "polishKoreanPromptText/empty": "",
   "wantsNudeOrUndress/basic": true,
+  "wantsUnderwearLook/lace-bra": true,
+  "wantsUnderwearLook/slip-no-bra-is-false": false,
+  "wantsDeskUncensoredStill/slip-true": true,
+  "wantsDeskUncensoredStill/jeans-false": false,
+  "wantsDeskUncensoredStill/nude-true": true,
+  "wantsSlipOrSilkLook/slip-true": true,
   "wantsNudeOrUndress/striped-false-positive-guard": false,
   "wantsUndressAction/basic": true,
+  "wantsOtbeotgim/canonical": true,
+  "wantsOtbeotgim/겹벗김": true,
+  "wantsOtbeotgim/한겹씩-제거": true,
+  "wantsOtbeotgim/옷을-하나씩-벗기": true,
+  "wantsOtbeotgim/peel-one-layer": true,
+  "wantsUndressAction/한겹씩-제거": true,
+  "polishKoreanPromptText/옷벗김-synonyms": {
+    "layer": "옷벗김 가슴을 주무른다",
+    "oneByOne": "옷벗김 한 뒤 선다",
+    "peel": "옷벗김 then knead"
+  },
   "wantsDressAction/basic": true,
   "wantsFullNude/body-project": true,
   "isBodyProjectRequest/phrase": true,
@@ -96,6 +113,19 @@
     "hash": "fbc37198b2f7ab77"
   },
   "buildAdultPubicHairLock/shaved": "pubic area smooth/shaved ONLY because the user explicitly requested shaving/waxing",
+  "buildWanPubicLine/default-visible-curls": {
+    "curls": true,
+    "noHairless": true,
+    "notShavedDefault": true
+  },
+  "buildStillWomanNudeNoPantyLock/pubic": {
+    "__type": "long-string",
+    "length": 1339,
+    "words": 239,
+    "hash": "9434d1f5d478b9d4"
+  },
+  "buildStillWomanNudeNoPantyLock/clothed": "",
+  "buildStillNudeAdultPubicLine/default": "MANDATORY adult curly pubic hair visible on the BARE mons (곱슬 음모, visible coils). ZERO panties/thong/bikini covering the crotch — fabric there is a FAILED substitute for pubic hair. FORBIDDEN hairless/smooth blank crotch that can be mistaken for a child. Adult woman 18+ only.",
   "buildRealisticPubicHairRefinePrompt/default": {
     "__type": "long-string",
     "length": 1575,
@@ -113,15 +143,15 @@
   "buildBustHeightPreferenceLine/auto": "",
   "buildClothingSilhouetteBodyLock/no-override": {
     "__type": "long-string",
-    "length": 1743,
-    "words": 300,
-    "hash": "ffc7736eb957ef7d"
+    "length": 1826,
+    "words": 317,
+    "hash": "e0c9baea10e806ad"
   },
   "buildClothingSilhouetteBodyLock/low-override": {
     "__type": "long-string",
-    "length": 1350,
-    "words": 229,
-    "hash": "af96f2157a2fdf86"
+    "length": 1433,
+    "words": 246,
+    "hash": "bf7d62f3d96db6e9"
   },
   "normalizeBodyLandmarks/full": {
     "moundL": {
@@ -179,35 +209,61 @@
     20
   ],
   "amplifyAdultMotionForVideo/kiss-breast-touch-lips": {
-    "addon": "sustained breast play for most of the clip: hand stays on her bare breast, squeezing and stroking continuously continuously — not a one-second tap. mandatory deep mouth-to-mouth kissing for most of the clip — lips locked together, heads leaning in, continuous kiss (not a quick peck, not faces apart). slight natural teeth OK if lips part; no wide Hollywood grin. last frame still kissing — do not return to the source still pose. kissing while fully nude, bare breasts visible",
+    "addon": "FIRST remove ALL her clothes including pants/jeans/belt/panties — FULL NUDE not topless-only. THEN intimate action on bare skin — FORBIDDEN leaving trousers or a belt on. FIRST remove ALL clothing from her — top AND pants/jeans/belt/panties → FULL NUDE (not topless-only). FORBIDDEN touching over a shirt; FORBIDDEN trousers or belt still on. sustained breast play for most of the clip: hand stays on her bare breast, squeezing and stroking continuously continuously — not a one-second tap. LAST FRAME FREEZE: hand(s) STILL on bare breast through the final frame — source photo is START ONLY, never snap back to the opening still. DEEP KISS (딥키스): mouths locked, lips sucking hard, tongues visibly intertwining / french kiss — continuous, not a peck. slight natural teeth OK if lips part; no wide Hollywood grin. LAST FRAME FREEZE: still kissing — source photo is START ONLY, never snap back to the opening still",
     "wantsPartner": true,
-    "wantsPoseChange": true
+    "wantsPoseChange": true,
+    "wantsMaleGenitalHand": false,
+    "wantsBackHug": false
   },
   "amplifyAdultMotionForVideo/kiss-vulva": {
-    "addon": "mandatory mouth-to-vulva kissing for most of the clip — a consenting adult partner's lips and mouth make continuous oral contact with her bare vulva/genitals, not a hand touch, not a peck elsewhere. last frame still kissing the bare vulva — do not return to the source still pose",
+    "addon": "mandatory mouth-to-vulva kissing for most of the clip — a consenting adult partner's lips and mouth make continuous oral contact with her bare vulva/genitals, not a hand touch, not a peck elsewhere. LAST FRAME FREEZE: still kissing the bare vulva — source photo is START ONLY, never snap back to the opening still",
     "wantsPartner": true,
-    "wantsPoseChange": true
+    "wantsPoseChange": true,
+    "wantsMaleGenitalHand": false,
+    "wantsBackHug": false
   },
   "amplifyAdultMotionForVideo/kiss-breast-only": {
-    "addon": "mandatory mouth-to-breast kissing for most of the clip — a consenting adult partner's lips make continuous oral contact with her bare breast/nipple, not a hand-only touch, not a peck elsewhere. last frame still kissing the bare breast/nipple — do not return to the source still pose",
+    "addon": "mandatory mouth-to-breast kissing for most of the clip — a consenting adult partner's lips make continuous oral contact with her bare breast/nipple, not a hand-only touch, not a peck elsewhere. LAST FRAME FREEZE: still kissing the bare breast/nipple — source photo is START ONLY, never snap back to the opening still",
     "wantsPartner": true,
-    "wantsPoseChange": true
+    "wantsPoseChange": true,
+    "wantsMaleGenitalHand": false,
+    "wantsBackHug": false
   },
   "amplifyAdultMotionForVideo/knead-breast": {
-    "addon": "sustained breast play for most of the clip: hand stays on her bare breast, squeezing and stroking continuously continuously — not a one-second tap",
+    "addon": "sustained breast play for most of the clip: hand stays on her bare breast, kneading and squeezing continuously — not a one-second tap. LAST FRAME FREEZE: hand(s) STILL on bare breast through the final frame — source photo is START ONLY, never snap back to the opening still",
     "wantsPartner": false,
-    "wantsPoseChange": true
+    "wantsPoseChange": true,
+    "wantsMaleGenitalHand": false,
+    "wantsBackHug": false
+  },
+  "amplifyAdultMotionForVideo/solo-self-knead-breast": {
+    "wantsPartner": false,
+    "selfTouch": true
+  },
+  "amplifyAdultMotionForVideo/split-hands-left-breast-right-vulva": {
+    "addon": "SPLIT HANDS: HIS LEFT hand stays on her bare breast; HIS RIGHT hand stays on her bare vulva/crotch. Both contacts at the same time. FORBIDDEN swapping left/right. FORBIDDEN both hands on the same place. FORBIDDEN hand on hip/thigh or sliding from navel down the leg. Crotch hand stays ON vulva, not beside it.. Bare crotch first — FORBIDDEN a new black panty/bikini. If fabric remains it is silk matching the skirt, not black. Adult pubic hair visible under the crotch hand. LAST FRAME FREEZE: left and right hands STILL on those two places — source photo is START ONLY",
+    "wantsPartner": true,
+    "wantsPoseChange": true,
+    "wantsMaleGenitalHand": false,
+    "wantsBackHug": false
   },
   "amplifyAdultMotionForVideo/undress": {
     "addon": "",
     "wantsPartner": false,
-    "wantsPoseChange": false
+    "wantsPoseChange": false,
+    "wantsMaleGenitalHand": false,
+    "wantsBackHug": false
   },
   "buildFashionMagazinePrompt/basic": {
     "__type": "long-string",
     "length": 333,
     "words": 51,
     "hash": "3456350cd65e8bed"
+  },
+  "buildFashionMagazinePrompt/underwear-silk-not-black": {
+    "silkMatch": true,
+    "noBlackPos": true,
+    "noBlackNeg": true
   },
   "buildFashionNegativePrompt/nude": {
     "__type": "long-string",
@@ -217,40 +273,200 @@
   },
   "buildFashionNegativePrompt/lingerie": {
     "__type": "long-string",
-    "length": 2160,
-    "words": 303,
-    "hash": "33c532b40c217a6b"
+    "length": 2232,
+    "words": 313,
+    "hash": "03688b7747655448"
+  },
+  "mentionsCoupleOrSecondPerson/solo-forbidden-couple-word": false,
+  "mentionsCoupleOrSecondPerson/real-couple": true,
+  "buildFashionNegativePrompt/desk-solo-slip-keeps-two-people-neg": {
+    "couple": false,
+    "hasTwoPeopleNeg": true
   },
   "buildNudeIdentityRefinePrompt/body-project": {
     "__type": "long-string",
-    "length": 2497,
-    "words": 400,
-    "hash": "cec71901980d0518"
+    "length": 2435,
+    "words": 386,
+    "hash": "b4381fd75a66f67e"
   },
   "buildNudeIdentityRefinePrompt/general-nude": {
     "__type": "long-string",
-    "length": 1103,
-    "words": 177,
-    "hash": "7887ab17f1c10f8b"
+    "length": 1173,
+    "words": 195,
+    "hash": "d1fc31884e77b8be"
   },
   "buildNudeBecomesDefinitionLock/with-landmarks-and-height": {
     "__type": "long-string",
-    "length": 3108,
-    "words": 515,
-    "hash": "211d0c4af14d11ab"
+    "length": 3046,
+    "words": 501,
+    "hash": "07e7e5d7319cb810"
   },
   "buildAnimationPrompt/body-project-shorts": {
     "__type": "long-string",
-    "length": 1899,
-    "words": 315,
-    "hash": "c1fd1205706249c8"
+    "length": 1455,
+    "words": 219,
+    "hash": "3456504f1c7af338"
   },
   "buildAnimationPrompt/kiss-breast-touch-lips": {
     "__type": "long-string",
-    "length": 1862,
-    "words": 322,
-    "hash": "3888864febcc8e54"
+    "length": 1473,
+    "words": 229,
+    "hash": "9c553769b9aa8614"
   },
   "buildAnimationPrompt/couple-clothed-date-has-face-lock": true,
-  "buildAnimationPrompt/solo-implied-partner-no-couple-face-lock": false
+  "buildAnimationPrompt/solo-implied-partner-no-couple-face-lock": false,
+  "buildAnimationPrompt/clothed-couple-has-beats": {
+    "length": 982,
+    "hasMotion": true,
+    "hasTimeBeat": true,
+    "hasCoupleLock": true,
+    "keepsClothes": true,
+    "noNudeLock": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/clothed-solo-no-couple-lock": {
+    "length": 641,
+    "hasBeat": true,
+    "coupleLock": false,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/couple-nude-kiss-keeps-man": {
+    "length": 1498,
+    "keepsMan": true,
+    "forbidsTwoWomen": true,
+    "bothNude": true,
+    "noWomanOnlyUndress": true,
+    "noSoloWomanMotion": true,
+    "noPartialClothes": true,
+    "beat2BeforeHold": true,
+    "hasCast": true,
+    "keepsSourceFaces": true,
+    "noInventedPartner": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/solo-self-breast-nude": {
+    "length": 1461,
+    "herOwnHands": true,
+    "knead": true,
+    "undressBeat": true,
+    "noPartnerCast": true,
+    "noHeartOverClothes": true,
+    "noCoupleLock": true,
+    "keepsSourceCrop": true,
+    "noForcedFeet": true,
+    "endsOnKnead": true,
+    "noPanties": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/5s-solo-undress-has-beat2-no-partner": {
+    "sameSit": true,
+    "oneLayer": true,
+    "keepSkirt": true,
+    "noFullNudeHold": true,
+    "noInvent": true,
+    "noCoupleSuffix": true,
+    "noKissPath": true,
+    "noCrotchHand": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/id-bust-5s-undress-zoom-out": {
+    "zoomOut": true,
+    "fullBody": true,
+    "noExactCrop": true,
+    "noZoomIn": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/10s-solo-undress-bra-then-bare": {
+    "braLayer": true,
+    "beat2HasTime": true,
+    "pantyOffNotSwap": true,
+    "noSheerAsNude": true,
+    "silkNotBlack": true,
+    "pubicVisible": true,
+    "holdNude": true,
+    "noInvent": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/solo-still-ignores-couple-words": {
+    "noInvent": true,
+    "noKissPath": true,
+    "soloCast": true
+  },
+  "buildAnimationPrompt/panty-melt-only-no-new-panty": {
+    "melts": true,
+    "noNewPanty": true,
+    "noInvent": true,
+    "noKissPath": true,
+    "underWanBudget": true
+  },
+  "detectKissIntensity/no-kiss-is-not-a-kiss": {
+    "denied": true,
+    "asked": true
+  },
+  "buildAnimationPrompt/옷벗김-synonyms-same-peel": {
+    "aHasPeel": true,
+    "bHasPeel": true,
+    "samePeelToken": true,
+    "noJumpAll": true,
+    "noInstantTopless": true,
+    "braShows": true,
+    "noReplacementPanty": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/옷벗김-landmark-keeps-knead": {
+    "hasAnchor": true,
+    "knead": true,
+    "pantsMustGo": true,
+    "noNewBlackPanty": true,
+    "notBecomeOnly": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/couple-undress-keeps-man": {
+    "bothStay": true,
+    "manShirtOnly": true,
+    "noPenis": true,
+    "noBothNude": true,
+    "manStays": true,
+    "noSoloEnd": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/clothed-couple-kiss-keeps-both": {
+    "bothStay": true,
+    "keepsClothes": true,
+    "noNudeLock": true,
+    "noManGone": true,
+    "hasKiss": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/옷벗김-split-hands-her-own": {
+    "herLeft": true,
+    "herRight": true,
+    "noHisHand": true,
+    "pantyFail": true,
+    "noThighSlide": true,
+    "noPartner": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/solo-self-breast-zoom-when-asked": {
+    "length": 1450,
+    "allowsZoom": true,
+    "stillKnead": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/couple-nude-breast-then-kiss-source-faces": {
+    "length": 1482,
+    "sourceManHand": true,
+    "keepsSourceFaces": true,
+    "noInventedPartner": true,
+    "noExtraPeopleLeave": true,
+    "sequentialBeats": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/fashion-prompt-must-not-invent-couple": {
+    "length": 1352,
+    "inventsPartner": false,
+    "coupleFaceLock": false,
+    "forbidsInvent": true,
+    "underWanBudget": true
+  }
 }

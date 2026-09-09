@@ -1,5 +1,9 @@
 import { requireAuth } from '../lib/auth'
-import { checkAdvancedFaceSwap, isUnchangedFaceSwapResult } from '../lib/fal-client'
+import {
+  checkAdvancedFaceSwap,
+  checkFalKontextMultiImage,
+  isUnchangedFaceSwapResult,
+} from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 import { checkReplicateImage } from '../lib/replicate-client'
 
@@ -99,7 +103,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               pending: false,
               status: 'failed',
               error: 'provider_content_blocked',
-              message: '이미지 엔진이 이 얼굴 교체를 안전 필터로 거절했어요. 다른 사진으로 다시 시도해 주세요.',
+              message: '이 교체 엔진이 장면을 거절했어요. 다른 엔진으로 이어갑니다.',
             },
             200,
           )
@@ -123,14 +127,25 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       return jsonResponse({ ok: false, error: 'status_url_required' }, 400)
     }
 
-    const result = await checkAdvancedFaceSwap({
-      falKey: env.FAL_KEY,
-      statusUrl,
-      responseUrl,
-    })
+    const result =
+      engine === 'kontext'
+        ? await checkFalKontextMultiImage({
+            falKey: env.FAL_KEY,
+            statusUrl,
+            responseUrl,
+          })
+        : await checkAdvancedFaceSwap({
+            falKey: env.FAL_KEY,
+            statusUrl,
+            responseUrl,
+          })
 
     if (result.status === 'succeeded' && result.imageUrl) {
-      if (baseImageUrl && (await isUnchangedFaceSwapResult(result.imageUrl, baseImageUrl))) {
+      if (
+        engine !== 'kontext' &&
+        baseImageUrl &&
+        (await isUnchangedFaceSwapResult(result.imageUrl, baseImageUrl))
+      ) {
         return jsonResponse(
           {
             ok: false,
@@ -150,7 +165,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           pending: false,
           status: 'succeeded',
           imageUrl: result.imageUrl,
-          falStatus: result.falStatus || 'COMPLETED',
+          falStatus: 'COMPLETED',
           engine,
           persisted: false,
         },
@@ -166,7 +181,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             ok: false,
             pending: false,
             status: 'failed',
-            falStatus: result.falStatus,
+            falStatus: undefined,
             error: 'provider_content_blocked',
             message: '이미지 엔진이 이 얼굴 교체를 안전 필터로 거절했어요. 다른 사진으로 다시 시도해 주세요.',
           },
@@ -178,7 +193,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           ok: false,
           pending: false,
           status: 'failed',
-          falStatus: result.falStatus,
+          falStatus: undefined,
           error: 'face_swap_failed',
           message,
         },
@@ -191,7 +206,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         ok: true,
         pending: true,
         status: 'processing',
-        falStatus: result.falStatus || 'WAITING',
+        // fal 실제 상태 전달 (IN_QUEUE / IN_PROGRESS). WAITING 고정이면
+        // 클라이언트가 처리 중에도 큐 정체로 오인해 조기 타임아웃한다.
+        falStatus:
+          ('falStatus' in result && typeof result.falStatus === 'string' && result.falStatus) ||
+          'IN_PROGRESS',
         engine,
       },
       200,

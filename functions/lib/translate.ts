@@ -152,6 +152,14 @@ const MOTION_TRANSLATE_SYSTEM = [
 function heuristicMotionKoToEn(text: string): string {
   let t = text
   const pairs: Array<[RegExp, string]> = [
+    // 문장 통째 치환을 먼저 — 「나체」만 fully nude로 바꾸면 「가 된 여성은 자신의…다」가
+    // 한글로 남아 hangul 비율 검사에 걸리거나, Wan이 원본 옷+가슴에 손 포즈를 복제한다.
+    [
+      /나체가\s*된\s*(?:여성|여자)은?\s*자신의\s*가슴을?\s*(?:주무른다|주물러|주무르|만진다|만져)/g,
+      'the woman becomes fully nude then kneads her own bare breasts with both hands',
+    ],
+    [/나체가\s*된|나체가\s*되어|나체가\s*된다/g, 'becomes fully nude'],
+    [/자신의\s*가슴/g, 'her own breasts'],
     [/천천히/g, 'slowly'],
     [/빠르게|빨리/g, 'quickly'],
     [/가운\s*벗|로브\s*벗|옷\s*벗|탈의|속옷\s*제거|속옷제거/g, 'removes all clothes and underwear until fully nude'],
@@ -160,11 +168,13 @@ function heuristicMotionKoToEn(text: string): string {
     [/입맞춤|입\s*(?:을\s*)?맞추/g, 'soft lip touch'],
     [/키스/g, 'passionate lip-sucking kiss'],
     [/누드|나체|전라/g, 'fully nude'],
+    [/자신의|스스로/g, 'her own'],
+    [/(?:여성|여자)은/g, 'the woman'],
     [/가슴을?\s*(만지|만져|만짐|만지고|만진다|주무르|주물러|주무른|주무름|애무)/g, 'fondles her bare breast'],
     [/보지를?\s*(만지|만져|만짐|애무)|크롯치\s*(만지|만져|만짐)?/g, 'touches her bare crotch'],
     [/(?:손|손으?로)\s*(만지|만져|만짐)/g, 'touches with hand'],
-    [/남자(?:의)?\s*(?:자지|좆|페니스|성기)|(?:자지|좆|페니스)\s*(?:을|를)?\s*(만지|만져|만짐|애무)/g, "she strokes the suited man's penis with her hand — not a penis on her body"],
-    [/여자가?\s*남자(?:의)?\s*(?:자지|좆)/g, "she touches the man's penis; she stays female"],
+    [/남자(?:의)?\s*(?:자지|좆|페니스|성기|지퍼)|(?:자지|좆|페니스|지퍼)\s*(?:을|를|에)?\s*(만지|만져|만짐|애무|넣)/g, "her hand into his pants zipper — no penis"],
+    [/여자가?\s*남자(?:의)?\s*(?:자지|좆|지퍼)/g, "her hand into his zipper; no penis"],
     [/민무늬|제모|쉐이븐|왁싱/g, 'shaved pubic area'],
     [/넓은\s*음모|사타구니\s*까지\s*음모/g, 'wider curly pubic bush'],
     [/얇은\s*음모|희미한\s*음모/g, 'thin sparse pubic hair'],

@@ -69,7 +69,7 @@ export function wantsNudeOrUndress(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
   const pattern = new RegExp(
     [
-      '누드', '나체', 'nude', 'naked', '탈의',
+      '누드', '나체', 'nude', 'naked', '탈의', '옷벗김',
       KO_UNDRESS_NOUN_VERB_PATTERN,
       // "strip(?:ping|ped)?"에 단어 경계(\b)가 없어서 "striped"(줄무늬 패턴 — 탈의와 무관한
       // 흔한 의상 묘사 단어)의 앞부분 "strip"만 부분일치로 걸려 오발동하는 사고가 실측으로
@@ -95,7 +95,24 @@ export function wantsNudeOrUndress(text: string): boolean {
 /** 속옷/란제리 ‘착용’ 요청 — 제거·누드 요청이면 false */
 export function wantsUnderwearLook(text: string): boolean {
   if (wantsNudeOrUndress(text)) return false
-  return /속옷|underwear|란제리|lingerie|팬티|panties|브라(?!운)|브래지/i.test(text || '')
+  const t = text || ''
+  // Desk 슬립 LOOK의 "브래지어 없이"가 브래지 정규식에 걸려 브라+팬티를 강제하던 오탐.
+  if (/브래지어\s*없이|노\s*브라|braless|no\s*bra/i.test(t) && !/란제리|lingerie|속옷|팬티|panties/i.test(t)) {
+    return false
+  }
+  return /속옷|underwear|란제리|lingerie|팬티|panties|브라(?!운)|브래지/i.test(t)
+}
+
+/** Desk 슬립 LOOK — 나체가 아니어도 Kontext가 란제리로 검열하는 옷 */
+export function wantsSlipOrSilkLook(text: string): boolean {
+  if (wantsNudeOrUndress(text)) return false
+  return /슬립|slip|\bsilk\b|실크|nightdress/i.test(text || '')
+}
+
+/** Desk 정지화: Kontext가 빈 장으로 막는 나체·슬립·란제리 → 성인 엔진으로 */
+export function wantsDeskUncensoredStill(text: string): boolean {
+  const t = text || ''
+  return wantsNudeOrUndress(t) || wantsSlipOrSilkLook(t) || wantsUnderwearLook(t)
 }
 
 /**
@@ -104,8 +121,39 @@ export function wantsUnderwearLook(text: string): boolean {
  * true가 되어 "옷이 벗겨지는 동작" 프롬프트가 잘못 붙는 문제가 있었다. 모션 문구에 실제
  * "벗다/제거/탈의" 같은 동작 동사가 있을 때만 true로 판단한다.
  */
+/** 속옷이 그려질 때 — Wan 검정 란제리 선행 금지. 상의·하의 색의 실크. */
+export const SILK_MATCH_LINGERIE_LINE =
+  'Bra/panty if shown: silk matching source top/skirt colors. FAILED black bra, black panty.'
+
+/** 옷벗김 — 원본 옷을 겹으로 벗김. TOP off를 앞에 두면 즉시 토플리스+검정팬티가 됨(실측) */
+export const OTBEOTGIM_WAN_LINE =
+  '옷벗김: keep source clothes first. Melt top until silk BRA matching the top color shows (NOT black). Then bra off, skirt off, panty OFF to bare. Mid panty = silk matching skirt. FAILED black bra/panty. Same bust as mound.'
+
+/** 토플리스+검정/베이지 팬티로 멈추는 실측 — 마지막 장은 다른 팬티가 아니라 맨살. */
+export const PANTY_MELT_FAIL =
+  'Panty OFF to bare. FAILED black/beige/sheer swap. Mid panty = silk matching skirt, not black.'
+
+export const OTBEOTGIM_BEAT1_LINE =
+  'KEEP source clothes. Melt top until silk bra matching the top color is on her chest. Skirt stays. FAILED black bra/panty or skip-bra topless.'
+
+/** 커플 벗기 — 남자는 상의만. 바지·자지 금지(실측: 전신 탈의하면 자지를 새로 그림). */
+export const COUPLE_MAN_SHIRT_ONLY =
+  'HE: shirt off only, pants stay. FORBIDDEN penis, his pants off, or a nude man.'
+
+export function wantsOtbeotgim(text: string): boolean {
+  return /옷벗김/.test(polishKoreanPromptText(text || ''))
+}
+
+/** 이미 토플리스인데 검정 팬티만 남은 장 — 겹벗김이 아니라 팬티만 녹임 */
+export function wantsPantyMeltOnly(text: string): boolean {
+  return /남은\s*팬티|팬티만\s*(?:벗|녹|제거)|팬티를\s*벗긴다|melt(?:s|ing)?\s+(?:the\s+)?(?:remaining\s+)?panty/i.test(
+    polishKoreanPromptText(text || ''),
+  )
+}
+
 export function wantsUndressAction(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
+  if (wantsOtbeotgim(t)) return true
   const pattern = new RegExp(
     [
       // "벗겨"(사동형: 벗겨줘/벗겨주세요/벗겨봐)는 벗다의 흔한 캐주얼 요청 표현이다.
@@ -340,6 +388,10 @@ export function ensureNudeHoldMotionPhrase(
     wantsFullNude(t) ||
     /누드|나체|nude|naked/i.test(t)
   if (!asksNude && !opts?.sourceAlreadyNude) return t
+
+  if (wantsPantyMeltOnly(t)) {
+    return `${t} Melt the remaining panty/thong now until bare skin. Same pose. ${SILK_MATCH_LINGERIE_LINE} FORBIDDEN adding clothes.`
+  }
 
   const pantyBan =
     '브라·팬티·바지·반바지·청바지·핫팬츠·레깅스·치마·치마바지·끈팬티 한 픽셀도 남기지 말 것 — 끝까지 완전 나체. 팬티 대신 뿌연 블러·안개·김·모자이크·피부색 얼룩 장애물도 금지 — 크롯치는 선명히 보이고 성인 체모(곱슬 음모)는 유지'

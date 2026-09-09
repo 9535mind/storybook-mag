@@ -354,6 +354,72 @@ export async function startReplicateImage(options: {
   return { status: 'processing', predictionId: prediction.id }
 }
 
+/** 성인 포즈 img2img 시작만. 완료는 /api/generate-status 폴링. */
+export async function startReplicateImageToImage(options: {
+  apiToken: string
+  modelOwner: string
+  modelName: string
+  modelVersion?: string
+  imageUrl: string
+  prompt: string
+  negativePrompt?: string
+  width: number
+  height: number
+  strength?: number
+  disableSafetyChecker?: boolean
+  numInferenceSteps?: number
+  guidanceScale?: number
+}): Promise<{ status: 'succeeded' | 'processing'; predictionId: string; imageUrl?: string }> {
+  if (!options.apiToken?.trim()) throw new Error('missing_replicate_token')
+  if (!options.imageUrl?.trim()) throw new Error('missing_image_url')
+
+  const versionId =
+    options.modelVersion?.trim() ||
+    (await resolveLatestVersion(options.apiToken, options.modelOwner, options.modelName))
+
+  let image = options.imageUrl
+  if (image.startsWith('data:')) {
+    const parsed = parseImageDataUrl(image)
+    image = await uploadBytesToReplicate(
+      options.apiToken,
+      parsed.bytes,
+      parsed.contentType,
+      parsed.filename,
+    )
+  }
+
+  const strength =
+    typeof options.strength === 'number' && Number.isFinite(options.strength)
+      ? Math.min(0.95, Math.max(0.35, options.strength))
+      : 0.82
+  const input: Record<string, unknown> = {
+    prompt: options.prompt,
+    negative_prompt: options.negativePrompt,
+    image,
+    strength,
+    prompt_strength: strength,
+    width: options.width,
+    height: options.height,
+    num_inference_steps: options.numInferenceSteps ?? 8,
+    guidance_scale: options.guidanceScale ?? 2.2,
+    number_of_images: 1,
+    disable_safety_checker: options.disableSafetyChecker !== false,
+  }
+
+  const prediction = await createPrediction(options.apiToken, versionId, input, 15_000, {
+    waitSec: null,
+  })
+  if (prediction.status === 'failed') {
+    throw new Error(extractReplicateError(prediction))
+  }
+  if (!prediction.id) throw new Error('replicate_missing_prediction_id')
+  if (prediction.status === 'succeeded') {
+    const doneUrl = extractImageUrl(prediction.output)
+    if (doneUrl) return { status: 'succeeded', predictionId: prediction.id, imageUrl: doneUrl }
+  }
+  return { status: 'processing', predictionId: prediction.id }
+}
+
 export async function checkReplicateImage(options: {
   apiToken: string
   predictionId: string
@@ -590,6 +656,8 @@ export function resolveWanI2vDuration(durationSec?: number): {
   // 15·18·24초는 fps 하한(5)에 걸려 81프레임으로는 목표 길이에 못 미치므로(예: 81/5=16.2초)
   // 기존 121프레임을 그대로 유지 — 동결된 길이 옵션이 짧아지는 회귀를 막는다.
   const raw = Math.round(Number(durationSec) || 15)
+  // Wan 하한은 81프레임. 41은 API가 거절한다. 5초는 81÷16fps(모델 기본).
+  if (raw <= 5) return { num_frames: 81, frames_per_second: 16, approxSec: 5 }
   if (raw <= 10) return { num_frames: 81, frames_per_second: 8, approxSec: 10 }
   if (raw <= 12) return { num_frames: 81, frames_per_second: 7, approxSec: 12 }
   if (raw <= 15) return { num_frames: 121, frames_per_second: 8, approxSec: 15 }
@@ -801,6 +869,10 @@ export async function startReplicateVideo(options: {
     })
   } catch (firstErr) {
     lastErr = firstErr instanceof Error ? firstErr : new Error('replicate_video_start_failed')
+    // 크레딧 부족 레이트리밋(burst 1)인데 바로 두 번째 prediction을 내면 한도만 더 깎인다.
+    if (/throttl|rate limit|429|less than \$5/i.test(lastErr.message)) {
+      throw lastErr
+    }
     try {
       prediction = await createPrediction(options.apiToken, versionId, minimalInput, 18_000, {
         waitSec: null,

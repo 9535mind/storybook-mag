@@ -27,7 +27,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const auth = await requireAuth(request, env)
   if (auth instanceof Response) return auth
 
-  const limited = await enforceRateLimit(env, 'remove-background', rateLimitIdentity(auth), 20, 3600)
+  const limited = await enforceRateLimit(env, 'remove-background', rateLimitIdentity(auth), 80, 3600)
   if (limited) return limited
 
   if (!env.FAL_KEY?.trim()) {

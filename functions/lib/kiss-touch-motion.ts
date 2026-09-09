@@ -17,6 +17,52 @@ import { polishKoreanPromptText } from './korean-text'
  * 들어있지 않다(주무르+ㄴ다 → 주무른다). 이 형태를 안 넣으면 "가슴을 주무른다" 같은
  * 아주 흔한 문장이 "동작 없음"으로 잘못 판정돼 모션 지시가 통째로 빠지는 사고가 난다.
  */
+export type HandZone = 'breast' | 'vulva'
+
+/**
+ * 「왼손은 가슴, 오른손은 보지」처럼 손마다 부위를 나눈 요청.
+ * 없으면 null — 예전에 가슴/보지 중 하나만 살리던 경로와 구분한다.
+ */
+export function detectSplitHandTargets(text: string): { left: HandZone; right: HandZone } | null {
+  const t = polishKoreanPromptText(text || '')
+  if (!t) return null
+  const leftBreast =
+    /왼손(?:은|을|이|로|으로)?\s*(?:가슴|젖|유방)/i.test(t) ||
+    /left\s*hand(?:\s+is)?(?:\s+on)?(?:\s+her)?\s*(?:breast|chest|nipple)/i.test(t)
+  const leftVulva =
+    /왼손(?:은|을|이|로|으로)?\s*(?:보지|음부|외음|클리|크롯치)/i.test(t) ||
+    /left\s*hand(?:\s+is)?(?:\s+on)?(?:\s+her)?\s*(?:pussy|vulva|crotch|clit)/i.test(t)
+  const rightBreast =
+    /오른손(?:은|을|이|로|으로)?\s*(?:가슴|젖|유방)/i.test(t) ||
+    /right\s*hand(?:\s+is)?(?:\s+on)?(?:\s+her)?\s*(?:breast|chest|nipple)/i.test(t)
+  const rightVulva =
+    /오른손(?:은|을|이|로|으로)?\s*(?:보지|음부|외음|클리|크롯치)/i.test(t) ||
+    /right\s*hand(?:\s+is)?(?:\s+on)?(?:\s+her)?\s*(?:pussy|vulva|crotch|clit)/i.test(t)
+  if (leftBreast && rightVulva && !leftVulva && !rightBreast) return { left: 'breast', right: 'vulva' }
+  if (leftVulva && rightBreast && !leftBreast && !rightVulva) return { left: 'vulva', right: 'breast' }
+  return null
+}
+
+function zoneEn(z: HandZone): string {
+  return z === 'breast' ? 'bare breast' : 'bare vulva/crotch'
+}
+
+export function buildSplitHandsLockLine(text: string): string {
+  const split = detectSplitHandTargets(text)
+  if (!split) return ''
+  const t = polishKoreanPromptText(text || '')
+  const solo = !/파트너|남자|남친|애인|상대|partner|man\s+hand|his\s+hand/i.test(t)
+  const who = solo ? 'HER' : 'HIS'
+  return [
+    `SPLIT HANDS: ${who} LEFT hand stays on her ${zoneEn(split.left)}; ${who} RIGHT hand stays on her ${zoneEn(split.right)}.`,
+    'Both contacts at the same time. FORBIDDEN swapping left/right. FORBIDDEN both hands on the same place.',
+    'FORBIDDEN hand on hip/thigh or sliding from navel down the leg. Crotch hand stays ON vulva, not beside it.',
+    solo ? 'No partner. Her own two hands only.' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
 export const TOUCH_ACTION_VERBS_KO =
   '만지|만져|만진|만졌|만질|만짐|만지고|만진다|만지작|쓰다듬|어루만지|어루만져|어루만진|어루만졌|스치|스쳐|' +
   '주무르|주물러|주물렀|주무른|주무름|문지르|문질러|문질렀|문지른|비비|비벼|비빈|비볐|' +
@@ -33,8 +79,18 @@ export const TOUCH_ACTION_VERBS_KO =
  */
 export type KissIntensity = 'peck' | 'kiss' | 'deep'
 
+/** 「No kiss」「키스 금지」는 키스 요청이 아님 — 금지 문구의 kiss 단어가 경로를 뒤집음(실측). */
+export function stripDeniedKissPhrases(text: string): string {
+  return String(text || '')
+    .replace(/\bno(?:t)?\s+(?:a\s+)?kiss(?:es|ing)?\b/gi, ' ')
+    .replace(/\bforbidden\s+kiss(?:es|ing)?\b/gi, ' ')
+    .replace(/키스\s*(?:금지|없이|말고|안\s*함|하지\s*마)/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
 export function detectKissIntensity(text: string): KissIntensity | null {
-  const t = polishKoreanPromptText(text || '')
+  const t = stripDeniedKissPhrases(polishKoreanPromptText(text || ''))
   if (!t) return null
   if (
     /딥\s*키스|딮\s*키스|혀\s*(?:를\s*)?(?:넣|섞|엉|맞)|french\s*kiss|tongue\s*kiss|with\s*(?:his\s*|her\s*)?tongue/i.test(
@@ -136,20 +192,35 @@ export function detectTouchVerbPhrase(t: string): string {
   return 'squeezing and stroking continuously'
 }
 
+/** 자지 만짐 대체 — 지퍼에 손. 자지를 그리면 실패(실측). */
+export const MAN_ZIPPER_HAND_LINE =
+  'Her hand slides into HIS pants zipper. Pants stay on. FORBIDDEN penis, open fly showing genitals, or a nude man.'
+
 /**
- * 여성이 남성의 성기를 손으로 만지는 요청.
- * (기존 경로는 여성 가슴/보지 애무만 있어서 "자지를 만진다"가 통째로 무시됐음)
+ * 여성이 남성 가랑이를 손으로 — 자지 대신 지퍼.
  */
 export function wantsMaleGenitalHand(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
   if (!t) return false
   return (
-    /(?:남자|남친|애인|파트너|그의?)\s*(?:의\s*)?(?:자지|좆|페니스|성기|cock|dick|penis)/i.test(t) ||
-    /(?:자지|좆|페니스)\s*(?:을|를)?\s*(?:만지|만져|만짐|만진|만졌|애무|잡|쥐|쓰다듬|문지|비비)/i.test(t) ||
-    /(?:여자가?|그녀가?)\s*.{0,12}(?:자지|좆|페니스|cock|dick|penis)/i.test(t) ||
-    /hand\s*job|stroke(?:s|ing)?\s*(?:his\s*)?(?:cock|dick|penis)|(?:her\s*)?hand\s*(?:on|around)\s*(?:his\s*)?(?:cock|dick|penis)/i.test(
+    /(?:남자|남친|애인|파트너|그의?)\s*(?:의\s*)?(?:자지|좆|페니스|성기|지퍼|cock|dick|penis|zipper|fly)/i.test(t) ||
+    /(?:자지|좆|페니스|지퍼)\s*(?:을|를|에)?\s*(?:만지|만져|만짐|만진|만졌|애무|넣|잡|쥐|쓰다듬|문지|비비)/i.test(t) ||
+    /(?:여자가?|그녀가?)\s*.{0,12}(?:자지|좆|페니스|지퍼|cock|dick|penis|zipper)/i.test(t) ||
+    /hand\s*job|stroke(?:s|ing)?\s*(?:his\s*)?(?:cock|dick|penis)|(?:her\s*)?hand\s*(?:on|around|in|into)\s*(?:his\s*)?(?:cock|dick|penis|zipper|fly)/i.test(
       t,
     )
+  )
+}
+
+/**
+ * 1인·자기 애무 — 「자신의 가슴을 주무른다」를 파트너 손으로 오인하면
+ * Wan이 원본(옷 입은 채 가슴에 손)을 그대로 복제한다(실측 15초).
+ */
+export function isSoloSelfTouch(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  if (!t) return false
+  return /자신(?:의|이|을|를)?|스스로|혼자|self[\s-]?touch|masturbat|her\s+own\s+(?:breast|chest|body)|own\s+breasts?/i.test(
+    t,
   )
 }
 
@@ -244,29 +315,58 @@ export function amplifyAdultMotionForVideo(motion: string): {
     )
   }
 
-  // 여성이 남성 성기를 손으로 — 여성 보지 애무와 분리 (「성기」단어 오인 방지)
-  // 실측: "penis/handjob"만 쓰면 Wan이 나체 여성 크롯치에 자지를 그려 넣음 → 소유주·금지를 명시.
+  // 자지 만짐 → 지퍼에 손. 자지를 그리면 여성 몸이나 바지 안에 새로 생김(실측).
   if (maleGenitalHand) {
     wantsPartner = true
     wantsPoseChange = true
-    const verbPhrase = detectTouchVerbPhrase(t)
-    bits.push(
-      `MUTUAL HAND OWNERSHIP: the WOMAN keeps female anatomy only — bare vulva/mons, NO penis on her body`,
-      `HIS penis only: the suited MAN's penis (open fly if needed). Her hand ${verbPhrase} HIS penis — not her own crotch`,
-      'FORBIDDEN: drawing a penis on the woman, futa, hermaphrodite, gender-swap, turning her crotch male',
-      'LAST FRAME: her hand still on HIS (the man in the suit) penis; her crotch stays female vulva',
-    )
+    bits.push(MAN_ZIPPER_HAND_LINE, 'She stays female. Last frame: her hand still in HIS zipper.')
   }
+
+  const splitHands = detectSplitHandTargets(t)
+  const splitLine = buildSplitHandsLockLine(t)
 
   // 보지/크롯치 애무 — 가슴 애무로 오인되면 허벅지만 스치는 실패가 남음(실측)
   // 남성 성기 만짐과 구분: 「남자의 성기/자지」는 여기로 보내지 않음
   const crotchTouch =
     !maleGenitalHand &&
+    (splitHands?.left === 'vulva' ||
+      splitHands?.right === 'vulva' ||
+      new RegExp(
+        `(?:보지|음부|클리토리스|클리|외음|사타구니|가랑이|크롯치|crotch|pussy|vulva|clit(?:oris)?|labia|mons)\\s*(?:을|를|을\\s*|를\\s*)?(?:${TOUCH_ACTION_VERBS_KO}|애무|자극)|(?:${TOUCH_ACTION_VERBS_KO}|애무)\\s*(?:는\\s*|고\\s*)?(?:보지|음부|크롯치)|fondl(?:e|es|ing)\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)|rub(?:s|bing)?\s*(?:her\\s*)?(?:crotch|pussy|vulva)|finger(?:s|ing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)|pinch(?:es|ing)?\\s*(?:her\\s*)?(?:clit|labia)|press(?:es|ing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)`,
+        'i',
+      ).test(t))
+  const breastTouch =
+    splitHands?.left === 'breast' ||
+    splitHands?.right === 'breast' ||
     new RegExp(
-      `(?:보지|음부|클리토리스|클리|외음|사타구니|가랑이|크롯치|crotch|pussy|vulva|clit(?:oris)?|labia|mons)\\s*(?:을|를|을\\s*|를\\s*)?(?:${TOUCH_ACTION_VERBS_KO}|애무|자극)|(?:${TOUCH_ACTION_VERBS_KO}|애무)\\s*(?:는\\s*|고\\s*)?(?:보지|음부|크롯치)|fondl(?:e|es|ing)\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)|rub(?:s|bing)?\s*(?:her\\s*)?(?:crotch|pussy|vulva)|finger(?:s|ing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)|pinch(?:es|ing)?\\s*(?:her\\s*)?(?:clit|labia)|press(?:es|ing)?\\s*(?:her\\s*)?(?:crotch|pussy|vulva|clit)`,
+      `(?:가슴|젖|유방|젖가슴)\\s*(?:을|를)?\\s*(?:${TOUCH_ACTION_VERBS_KO}|애무)|만지면서|만져주|만지작|주무르면서|주물러주|애무하|caress(?:es|ing)?\\s*(?:her\\s*)?(?:breast|chest)|fondl(?:e|es|ing)\\s*(?:her\\s*)?(?:breast|chest)|knead(?:s|ing)?\\s*(?:her\\s*)?(?:own\\s*)?(?:breast|chest)|hand(?:s)?\\s*(?:on|cupping)\\s*(?:her\\s*)?(?:breast|chest|boob)|pinch(?:es|ing)?\\s*(?:her\\s*)?(?:breast|nipple)|twist(?:s|ing)?\\s*(?:her\\s*)?nipple|squeez(?:e|es|ing)\\s*(?:her\\s*)?(?:breast|chest)|bit(?:e|es|ing)\\s*(?:her\\s*)?nipple`,
       'i',
     ).test(t)
-  if (crotchTouch) {
+
+  if (splitHands && splitLine) {
+    wantsPartner = /파트너|남자|남친|애인|상대|partner|man\s+hand|his\s+hand/i.test(t)
+    wantsPoseChange = true
+    if (/나체|누드|nude|naked|전라|topless/i.test(t)) {
+      bits.unshift(
+        'FIRST remove ALL clothing from her — top AND pants/jeans/belt/panties → FULL NUDE (not topless-only)',
+        'FORBIDDEN touching over a shirt; FORBIDDEN trousers or belt still on',
+      )
+    }
+    bits.push(
+      splitLine,
+      'Bare crotch first — FORBIDDEN a new black panty/bikini. If fabric remains it is silk matching the skirt, not black. Adult pubic hair visible under the crotch hand',
+      'LAST FRAME FREEZE: left and right hands STILL on those two places — source photo is START ONLY',
+    )
+  } else if (crotchTouch && breastTouch) {
+    wantsPartner = /파트너|남자|남친|애인|상대|partner|man\s+hand|his\s+hand/i.test(t)
+    wantsPoseChange = true
+    const verbPhrase = detectTouchVerbPhrase(t)
+    bits.push(
+      `TWO HANDS: one partner hand on her bare breast AND the other on her bare vulva at the same time — ${verbPhrase}.`,
+      'PANTY OFF FIRST: panties off, adult pubic hair visible under the crotch hand.',
+      'LAST FRAME FREEZE: one hand still on breast, the other still on vulva.',
+    )
+  } else if (crotchTouch) {
     wantsPoseChange = true
     const verbPhrase = detectTouchVerbPhrase(t)
     // 파트너 명시 없으면 본인 손으로 (CAST LOCK과 충돌해 손이 허벅지로 도망가는 회귀 방지)
@@ -287,26 +387,37 @@ export function amplifyAdultMotionForVideo(motion: string): {
     )
   }
 
-  // 가슴 만짐/애무 — 「만지면서」활용형·가슴+만지 조합을 명시적으로 (키스만 되고 손은 빠지는 실측)
-  // 보지 애무만 있을 때는 가슴으로 가로채지 않음. 상호 만짐(자지)과는 병행 가능.
-  const breastTouch =
-    !crotchTouch &&
-    new RegExp(
-      `(?:가슴|젖|유방|젖가슴)\\s*(?:을|를)?\\s*(?:${TOUCH_ACTION_VERBS_KO}|애무)|만지면서|만져주|만지작|주무르면서|주물러주|애무하|caress(?:es|ing)?\\s*(?:her\\s*)?(?:breast|chest)|fondl(?:e|es|ing)\\s*(?:her\\s*)?(?:breast|chest)|hand(?:s)?\\s*(?:on|cupping)\\s*(?:her\\s*)?(?:breast|chest|boob)|pinch(?:es|ing)?\\s*(?:her\\s*)?(?:breast|nipple)|twist(?:s|ing)?\\s*(?:her\\s*)?nipple|squeez(?:e|es|ing)\\s*(?:her\\s*)?(?:breast|chest)|bit(?:e|es|ing)\\s*(?:her\\s*)?nipple`,
-      'i',
-    ).test(t)
-  if (breastTouch) {
+  // 가슴 만짐 — 왼손/오른손 분할이면 위에서 이미 처리. 보지와 같이 써도 가슴을 버리지 않음.
+  if (breastTouch && !splitHands && !crotchTouch) {
     wantsPoseChange = true
-    if (/파트너|남자|남친|애인|상대|partner|man\s+hand|his\s+hand|여자(?:의)?\s*가슴|뒤에서/i.test(t)) {
+    const selfTouch = isSoloSelfTouch(t)
+    if (
+      !selfTouch &&
+      /파트너|남자|남친|애인|상대|partner|man\s+hand|his\s+hand|여자(?:의)?\s*가슴|뒤에서/i.test(t)
+    ) {
       wantsPartner = true
     }
+    if (/나체|누드|nude|naked|전라|topless/i.test(t)) {
+      bits.unshift(
+        'FIRST remove ALL clothing from her — top AND pants/jeans/belt/panties → FULL NUDE (not topless-only)',
+        'FORBIDDEN touching over a shirt; FORBIDDEN trousers or belt still on',
+      )
+    }
     const verbPhrase = detectTouchVerbPhrase(t)
-    bits.push(
-      backHug
-        ? `from behind: both his hands reach around her torso onto her bare breasts, ${verbPhrase} continuously — back-hug breast fondle, not a face-to-face tap`
-        : `sustained breast play for most of the clip: hand stays on her bare breast, ${verbPhrase} continuously — not a one-second tap`,
-      'LAST FRAME FREEZE: hand(s) STILL on bare breast through the final frame — source photo is START ONLY, never snap back to the opening still',
-    )
+    if (selfTouch) {
+      bits.push(
+        `SELF-TOUCH: BOTH her own hands ${verbPhrase} her own bare breasts — no partner`,
+        'FORBIDDEN keeping source clothes; FORBIDDEN a polite hand-on-heart over a dress',
+        'LAST FRAME FREEZE: her own hands STILL kneading her bare breasts — source photo is START ONLY',
+      )
+    } else {
+      bits.push(
+        backHug
+          ? `from behind: both his hands reach around her torso onto her bare breasts, ${verbPhrase} continuously — back-hug breast fondle, not a face-to-face tap`
+          : `sustained breast play for most of the clip: hand stays on her bare breast, ${verbPhrase} continuously — not a one-second tap`,
+        'LAST FRAME FREEZE: hand(s) STILL on bare breast through the final frame — source photo is START ONLY, never snap back to the opening still',
+      )
+    }
   }
 
   // 키스·기타 애무 (파트너 동작이 흔한 케이스)
@@ -347,7 +458,21 @@ export function amplifyAdultMotionForVideo(motion: string): {
       )
     }
     if (/나체|누드|nude|naked|전라|topless/i.test(t)) {
-      bits.push('kissing while fully nude, bare breasts visible')
+      bits.unshift(
+        'FIRST remove ALL her clothes including pants/jeans/belt/panties — FULL NUDE not topless-only',
+        'THEN intimate action on bare skin — FORBIDDEN leaving trousers or a belt on',
+      )
+    }
+    if (
+      /남자|남성|남친|\bman\b|his\s+hand/i.test(t) &&
+      /여자|여성|\bwoman\b|her\s+breast/i.test(t) &&
+      !/여여|두\s*여자|lesbian|two\s*women/i.test(t)
+    ) {
+      bits.unshift(
+        'HETERO ONLY: MAN mouth-kisses WOMAN; MAN hand on WOMAN bare breast',
+        'FORBIDDEN two women kissing each other — if a third woman is in the source, remove her from the frame',
+        'The man must be the kisser in the foreground — FORBIDDEN man idle in background while women kiss',
+      )
     }
   }
   if (

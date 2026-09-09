@@ -1,6 +1,7 @@
 /**
- * 콘텐츠 정책 판정 — 하드 차단(미성년·비동의·실존 인물)만 다룬다.
- * content-policy.ts에서 분리 — 다른 모듈에 의존하지 않는 독립 판정기.
+ * 콘텐츠 정책 판정 — 하드 차단만 다룬다.
+ * 성인 전용 사이트: 누드·에로·노골적 표현은 허용.
+ * 유일한 하드 차단: 미성년, 비동의·강간, 실존 인물 딥페이크.
  */
 
 export type ContentPolicyVerdict = {
@@ -54,6 +55,7 @@ function stripNegatedMinorPhrases(text: string): string {
     .replace(/십대\s*(?:아님|아니|금지|제외)/g, ' ')
 }
 
+/** 화보·쇼츠·얼굴장면 공통 — 성인 허용, 하드 차단만 */
 export function evaluateContentPolicy(
   promptText: string,
   _options?: { mode?: string },
@@ -78,36 +80,10 @@ export function evaluateContentPolicy(
   return { allowed: true, blockedReason: null, matchedSignals: [] }
 }
 
-const ADULT_CONTENT_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
-  {
-    label: 'adult-content',
-    pattern:
-      /누드|나체|섹스|성기|자위|전라|속옷\s*제거|란제리|nsfw|nude|naked|porn|explicit|sexual/i,
-  },
-]
-
 /**
- * 동화 삽화(캐릭터 일관성) 전용 정책 — 화보 스튜디오와 달리 "아이/어린이" 묘사는
- * 이 기능의 정상적인 사용 목적(어린이 그림책)이므로 차단하지 않는다.
- * 실존 인물·비동의 폭력·성적 콘텐츠만 차단한다.
+ * 얼굴·장면 스튜디오(/api/tale-scene) — 성인 전용 사이트이므로 성인 표현 허용.
+ * 하드 차단은 evaluateContentPolicy와 동일(미성년·비동의·실존인물).
  */
 export function evaluateTaleScenePolicy(promptText: string): ContentPolicyVerdict {
-  const text = promptText ?? ''
-
-  const realPerson = matchAny(text, REAL_PERSON_PATTERNS)
-  if (realPerson.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-real-person', matchedSignals: realPerson }
-  }
-
-  const nonConsensual = matchAny(text, NON_CONSENSUAL_PATTERNS)
-  if (nonConsensual.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-non-consensual', matchedSignals: nonConsensual }
-  }
-
-  const adult = matchAny(text, ADULT_CONTENT_PATTERNS)
-  if (adult.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-adult-content', matchedSignals: adult }
-  }
-
-  return { allowed: true, blockedReason: null, matchedSignals: [] }
+  return evaluateContentPolicy(promptText)
 }

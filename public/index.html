@@ -4,15 +4,15 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
-  <title>Storymag · 자유 일러스트</title>
-  <link rel="stylesheet" href="/style.css?v=20260830fs-swap-persist1" />
+  <title>Storymag</title>
+  <link rel="stylesheet" href="/style.css?v=20260909desk-still-show" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
     <div class="pin-gate__card auth-card">
       <p class="pin-gate__badge">STORYMAG</p>
-      <h1 class="pin-gate__title">자유 일러스트 스튜디오</h1>
-      <p class="pin-gate__desc">안정화될 때까지 개인 사용 중입니다. 관리자 계정으로만 로그인하세요.</p>
+      <h1 class="pin-gate__title">Storymag</h1>
+      <p class="pin-gate__desc">내 사람으로 사진과 영상을 만들고, 보관합니다. 18+ · 개인 스튜디오.</p>
 
       <div class="auth-tabs" hidden>
         <button id="auth-tab-login" class="auth-tab auth-tab--active" type="button">로그인</button>
@@ -104,7 +104,7 @@
             그림관찰과 표현
           </button>
           <button type="button" class="app__area-btn app__area-btn--admin" id="app-area-admin" data-app-area="admin" role="tab" aria-selected="false" hidden>
-            관리자 페이지
+            Desk
           </button>
         </div>
         <!-- 생성 모드는 이제 위 「관리자전용」 탭 이동으로 전환합니다. 라디오는 내부 상태값으로만 사용. -->
@@ -143,8 +143,130 @@
     </div>
 
     <div id="studio-area">
+    <section id="adult-desk" class="adult-desk" hidden>
+      <nav class="adult-desk__nav" role="tablist" aria-label="Desk">
+        <button type="button" class="adult-desk__nav-btn is-on" data-desk-view="make" role="tab" aria-selected="true">만들기</button>
+        <button type="button" class="adult-desk__nav-btn" data-desk-view="keep" role="tab" aria-selected="false">보관함</button>
+      </nav>
+
+      <div id="adult-desk-make" class="adult-desk__make">
+        <aside class="adult-desk__person">
+          <p class="adult-desk__kicker">WORK</p>
+          <div class="desk-work-head">
+            <input id="desk-work-title" class="desk-work-title" type="text" maxlength="40" autocomplete="off" aria-label="작품 이름" />
+            <button type="button" id="desk-work-new" class="desk-work-new">새 작품</button>
+          </div>
+          <div id="desk-work-list" class="desk-work-list"></div>
+          <p class="adult-desk__kicker">CAST</p>
+          <div class="desk-cast">
+            <button type="button" id="desk-cast-woman" class="desk-person desk-person--cast" data-cast="woman">
+              <span class="desk-cast-tag">여</span>
+              <img id="desk-cast-woman-img" alt="" hidden />
+              <span id="desk-cast-woman-empty" class="desk-person__empty">붙이거나 놓으세요</span>
+            </button>
+            <button type="button" id="desk-cast-man" class="desk-person desk-person--cast" data-cast="man">
+              <span class="desk-cast-tag">남</span>
+              <img id="desk-cast-man-img" alt="" hidden />
+              <span id="desk-cast-man-empty" class="desk-person__empty">붙이거나 놓으세요</span>
+            </button>
+          </div>
+          <input id="desk-cast-input" type="file" accept="image/*" hidden />
+          <button type="button" id="desk-scene-new" class="desk-scene-upload">새 장면</button>
+          <button type="button" id="desk-scene-upload" class="desk-scene-upload">장면 사진 올리기</button>
+          <input id="desk-scene-input" type="file" accept="image/*" hidden />
+          <button type="button" id="desk-leads-from-scene" class="desk-scene-upload">이 사진의 사람을 주연으로</button>
+          <button type="button" id="desk-cast-swap" class="desk-scene-upload">여 ↔ 남 바꾸기</button>
+          <p class="adult-desk__fine">기본: 칸에 넣은 얼굴·몸매 그대로. 새 사람을 그리지 않고 옷만 녹입니다. 증명사진이면 반신·전신을 그립니다. 두 장이면 두 사람이 함께 있는 장면. 그 장으로 움직이기. 장면만 바꾸기: 새 장면. 인물까지 비우기: 새 화보 시작. 작품 전체 삭제: 새 작품.</p>
+        </aside>
+
+        <div id="adult-desk-stage" class="adult-desk__stage"></div>
+
+        <aside class="adult-desk__rail">
+          <div class="desk-job" role="group" aria-label="작업">
+            <button type="button" class="desk-job__btn is-on" data-desk-job="still">새 사진</button>
+            <button type="button" class="desk-job__btn" data-desk-job="video">움직이기</button>
+          </div>
+
+          <div id="desk-still-packs">
+            <p class="adult-desk__kicker">LOOK</p>
+            <div id="desk-looks" class="desk-cards"></div>
+            <p class="adult-desk__kicker">PLACE</p>
+            <div id="desk-places" class="desk-cards"></div>
+            <p class="adult-desk__kicker">POSE</p>
+            <div id="desk-poses" class="desk-cards"></div>
+            <p class="adult-desk__fine">한 버튼을 누르면 한 걸음만 합니다. 1 몸 잇기 → 2 한 장면(두 장일 때) → 3 옷 → 4 장소·자세.</p>
+          </div>
+
+          <div id="desk-video-packs" hidden>
+            <p class="adult-desk__kicker">MOVE</p>
+            <div id="desk-moves" class="desk-cards"></div>
+            <p class="adult-desk__fine">한 번 누르면 한 편만 나옵니다. 끝나면 그 편 영상을 바로 봅니다. ①②는 다음 클릭 순서이고, 두 편을 한 파일로 합치지 않습니다. 키스·포옹은 남 칸 사람을 가운데에 붙인 뒤 찍습니다. 없는 남자를 만들지 않습니다.</p>
+            <label class="desk-two" for="desk-two-people">
+              <input type="checkbox" id="desk-two-people" />
+              사진에 두 사람
+            </label>
+            <p class="adult-desk__kicker">LENGTH</p>
+            <div class="desk-job" role="group" aria-label="길이">
+              <button type="button" class="desk-job__btn" data-desk-len="5">5초</button>
+              <button type="button" class="desk-job__btn" data-desk-len="10">10초</button>
+              <button type="button" class="desk-job__btn is-on" data-desk-len="15">15초</button>
+            </div>
+          </div>
+
+          <div id="desk-still-steps" class="desk-steps">
+            <button type="button" class="desk-run desk-run--step" data-desk-step="body">1 몸 잇기</button>
+            <button type="button" class="desk-run desk-run--step" data-desk-step="together">2 한 장면</button>
+            <button type="button" class="desk-run desk-run--step" data-desk-step="look">3 옷 녹이기</button>
+            <button type="button" class="desk-run desk-run--step" data-desk-step="place">4 장소·자세</button>
+          </div>
+          <button type="button" id="desk-run" class="desk-run">움직이기</button>
+          <p id="desk-status" class="form__status" hidden></p>
+          <button type="button" id="desk-advanced-toggle" class="desk-advanced">도구 더 보기</button>
+        </aside>
+      </div>
+
+      <div id="adult-desk-keep" class="adult-desk__keep" hidden></div>
+    </section>
+
+    <div id="workshop-chrome" class="workshop-chrome" hidden>
+      <p class="workshop-chrome__narration">
+        성인 화보가 진입점입니다. 쇼츠는 그 화보의 다음 컷입니다. 만든 아마추어 성인 쇼츠는 자기 작품으로 소지합니다.
+      </p>
+      <nav id="workshop-spine" class="workshop-spine" role="tablist" aria-label="화보 작업실">
+        <button type="button" class="workshop-spine__step workshop-spine__step--active" data-workshop-stage="shoot" role="tab" aria-selected="true">
+          <span class="workshop-spine__num">1</span>
+          <span class="workshop-spine__label">화보</span>
+          <span class="workshop-spine__hint">찍기</span>
+        </button>
+        <button type="button" class="workshop-spine__step" data-workshop-stage="shorts" role="tab" aria-selected="false">
+          <span class="workshop-spine__num">2</span>
+          <span class="workshop-spine__label">쇼츠</span>
+          <span class="workshop-spine__hint">다음 컷</span>
+        </button>
+        <button type="button" class="workshop-spine__step" data-workshop-stage="keep" role="tab" aria-selected="false">
+          <span class="workshop-spine__num">3</span>
+          <span class="workshop-spine__label">소지</span>
+          <span class="workshop-spine__hint">내 작품</span>
+        </button>
+      </nav>
+      <nav id="admin-subnav" class="admin-subnav" hidden role="tablist" aria-label="화보 도구">
+        <button type="button" class="admin-subnav__btn admin-subnav__btn--active" data-admin-panel="fashion" role="tab" aria-selected="true">
+          화보 찍기
+        </button>
+        <button type="button" class="admin-subnav__btn" data-admin-panel="faceswap" role="tab" aria-selected="false">
+          얼굴·장면
+        </button>
+        <button type="button" class="admin-subnav__btn" data-admin-panel="edit" role="tab" aria-selected="false">
+          다듬기
+        </button>
+      </nav>
+    </div>
+
     <section class="panel">
       <form id="generate-form" class="form">
+        <div id="workshop-fashion-lead" class="workshop-lead" hidden>
+          <p>여기서 성인 화보를 찍습니다. 완성되면 위 <strong>쇼츠</strong>에서 다음 컷을 만듭니다.</p>
+        </div>
         <div class="guide-block">
           <div class="guide-grid guide-grid--core">
             <div class="guide-field">
@@ -268,8 +390,12 @@
           <p class="description-dropzone__overlay" hidden>여기에 이미지를 놓으세요</p>
         </div>
         <input id="load-image-input" class="load-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
-        <p id="description-limit-hint" class="form__hint" hidden></p>
-        <p id="scene-preview" class="scene-preview" hidden></p>
+          <p id="description-limit-hint" class="form__hint" hidden></p>
+          <div id="description-otbeotgim" class="motion-presets__row" role="list" aria-label="옷벗김" style="margin-top: 6px"></div>
+          <p class="form__hint" style="margin-top: 6px">
+            「옷벗김」= 겉옷·상의·하의 → 브라·팬티 남김 → 속옷까지 제거 → 같은 체형 나체.
+          </p>
+          <p id="scene-preview" class="scene-preview" hidden></p>
 
         <div class="form__row">
           <div class="form__field">
@@ -304,9 +430,13 @@
     </section>
 
     <section id="result-section" class="result" hidden>
-      <h2 class="result__title">생성 결과</h2>
-      <p id="result-engine" class="result__engine" hidden></p>
-      <p id="review-badge" class="review-badge" hidden>검토 중 · 수용 없이도 이미지 수정·쇼츠 가능 · 갤러리 저장만 수용 필요</p>
+      <h2 class="result__title" id="result-title">생성 결과</h2>
+      <button type="button" id="result-engine" class="result__engine" hidden></button>
+      <div id="workshop-shorts-empty" class="workshop-empty" hidden>
+        <p>아직 화보가 없습니다. 화보를 먼저 찍어야 다음 컷을 만들 수 있습니다.</p>
+        <button type="button" id="workshop-empty-to-shoot" class="form__submit">화보 찍기</button>
+      </div>
+      <p id="review-badge" class="review-badge" hidden>검토 중 · 수용은 소지함에 넣을 때만 필요합니다. 쇼츠는 다음 컷에서 바로 할 수 있습니다.</p>
       <p id="compare-badge" class="compare-badge" hidden></p>
 
       <div class="result__stage" id="result-stage">
@@ -351,127 +481,34 @@
 
       <div id="review-panel" class="review-panel" hidden>
         <p id="review-hint" class="review-panel__hint">
-          수용하지 않아도 <strong>이미지 수정</strong>·아래 <strong>쇼츠</strong>를 바로 할 수 있어요. 갤러리에 넣을 때만 수용하세요.
+          이 장이 화보입니다. 고치려면 <strong>다듬기</strong>, 움직이려면 <strong>쇼츠</strong>, 가지려면 수용 후 <strong>소지</strong>입니다.
         </p>
 
         <div id="review-actions" class="review-panel__actions">
           <button id="compare-toggle-button" class="review-panel__secondary compare-toggle-btn" type="button" disabled>이전과 비교</button>
           <button id="compare-revert-button" class="review-panel__secondary compare-revert-btn" type="button" hidden>이 버전에서 다시 수정</button>
-          <button id="revise-toggle-button" class="review-panel__secondary" type="button">이미지 수정</button>
-          <button id="remove-bg-button" class="review-panel__secondary" type="button">배경 제거</button>
-          <button id="accept-button" class="form__submit" type="button">수용하기</button>
-        </div>
-
-        <div id="revise-panel" class="revise-panel" hidden>
-          <div class="revise-panel__modes">
-            <label class="revise-panel__mode revise-panel__mode--pin">
-              <input type="radio" name="revise-mode" value="pin" checked />
-              찍어서 붙이기 (시계·귀걸이)
-            </label>
-            <label class="revise-panel__mode">
-              <input type="radio" name="revise-mode" value="text" />
-              텍스트로 전체 수정
-            </label>
-            <label class="revise-panel__mode">
-              <input type="radio" name="revise-mode" value="region" />
-              올가미로 부분만
-            </label>
-          </div>
-          <p class="review-panel__hint">
-            시계·귀걸이는 「찍어서 붙이기」, 옷·구도는 「텍스트」, 부분만은 「올가미」.
-            체형 유지 탈의 영상은 아래 「몸매 투영 쇼츠」를 쓰세요.
-          </p>
-
-          <div id="pin-toolbar" class="pin-toolbar" hidden>
-            <p class="review-panel__hint pin-toolbar__hint">
-              소품을 고른 뒤 <strong>사진 위를 클릭</strong>하면 그 자리에 붙습니다. 휠로 크기 조절.
-            </p>
-            <div class="pin-toolbar__chips" role="group" aria-label="붙일 소품">
-              <label class="pin-chip"><input type="radio" name="pin-prop" value="watch" checked /> 시계</label>
-              <label class="pin-chip"><input type="radio" name="pin-prop" value="butterfly" /> 나비 귀걸이</label>
-              <label class="pin-chip"><input type="radio" name="pin-prop" value="hoop" /> 링 귀걸이</label>
-              <label class="pin-chip"><input type="radio" name="pin-prop" value="bracelet" /> 팔찌</label>
-            </div>
-            <p id="pin-status" class="form__hint">대기 — 붙일 위치를 클릭하세요</p>
-          </div>
-
-          <p id="region-hint" class="review-panel__hint" hidden>
-            <strong>좌클릭</strong>으로 점을 이어 찍고 · <strong>더블클릭/Enter</strong>로 닫기 ·
-            <strong>우클릭</strong> 메뉴로 취소·지우기. 예: 목걸이만 따라 찍은 뒤 「목걸이 제거」.
-          </p>
-          <p id="region-list" class="region-list" hidden></p>
-          <div id="region-toolbar" class="region-toolbar" hidden>
-            <button id="region-undo-button" class="region-toolbar__primary" type="button">
-              마지막 점/선택 취소
-            </button>
-            <button id="region-clear-button" class="review-panel__secondary region-toolbar__secondary" type="button">
-              모든 선택 지우기
-            </button>
-            <p class="review-panel__hint">닫힌 선택만 수정에 들어갑니다. 가장자리는 부드럽게 다듬어 보냅니다.</p>
-          </div>
-
-          <div id="revise-text-block" class="revise-text-block">
-          <div class="field-head">
-            <label class="form__label" for="revision-text">수정 요청</label>
-            <button type="button" class="ai-help-btn" data-ai-field="revision" data-ai-target="revision-text">
-              AI 도움 받기
-            </button>
-          </div>
-          <textarea
-            id="revision-text"
-            class="form__textarea"
-            rows="3"
-            maxlength="800"
-            placeholder="예: 옷 색 하나로 통일 / 목걸이 제거 / 나체가 되어"
-          ></textarea>
-          <p class="review-panel__hint">
-            일반 나체는 「누드」「나체가 되어」등. 체형 유지 탈의 영상은 「몸매 투영 쇼츠」.
-            <strong>진짜 두 칸</strong>만 아래 자르기.
-          </p>
-          <div class="form__field" style="margin-top: 0.5rem">
-            <span class="form__label" id="bust-height-label">가슴 높이 (나체 변환 시)</span>
-            <div
-              id="bust-height-select"
-              class="video-duration"
-              role="group"
-              aria-labelledby="bust-height-label"
-              data-bust-height="auto"
-            >
-              <button type="button" class="video-duration__btn is-active" data-bust-height="auto">자동</button>
-              <button type="button" class="video-duration__btn" data-bust-height="high">높게</button>
-              <button type="button" class="video-duration__btn" data-bust-height="mid">중간</button>
-              <button type="button" class="video-duration__btn" data-bust-height="low">낮게</button>
-            </div>
-            <p class="form__hint" style="margin-top: 6px">
-              자동 = 사진 속 팔·어깨로 AI가 추정(애매하면 살짝 낮게). 애매한 추정이 자꾸 빗나가면 높게/중간/낮게를 직접 고르세요.
-            </p>
-          </div>
-          <label class="revise-panel__two-people">
-            <input type="checkbox" id="revise-two-people" />
-            이 사진에는 두 사람이 있어요 (커플/2인) — 체크하면 두 번째 인물을 그대로 유지하도록 잠금이 자동 조정됩니다
-          </label>
-          </div>
-
-          <div class="revise-panel__footer revise-panel__footer--wrap">
-            <button id="diptych-crop-left" class="review-panel__secondary" type="button" title="완전 분리된 좌우 두 패널일 때만 — 왼쪽 패널 유지">두 패널 → 왼쪽</button>
-            <button id="diptych-crop-right" class="review-panel__secondary" type="button" title="완전 분리된 좌우 두 패널일 때만 — 오른쪽 패널 유지">두 패널 → 오른쪽</button>
-            <button id="revise-apply-button" class="form__submit animate-panel__button" type="button">수정 적용</button>
-            <button id="revise-cancel-button" class="review-panel__secondary" type="button">수정 닫기</button>
-          </div>
-          <p id="revise-status" class="form__status" hidden></p>
+          <button id="revise-toggle-button" class="review-panel__secondary" type="button">다듬기</button>
+          <button id="workshop-go-shorts" class="form__submit" type="button">이 화보로 쇼츠</button>
+          <button id="remove-bg-button" class="review-panel__secondary" type="button">배경 지우기</button>
+          <button id="accept-button" class="form__submit" type="button">소지함에 넣기</button>
         </div>
       </div>
 
       <div id="accepted-actions" class="result__actions" hidden>
         <button id="compare-toggle-button-accepted" class="review-panel__secondary compare-toggle-btn" type="button" disabled>이전과 비교</button>
         <button id="compare-revert-button-accepted" class="review-panel__secondary compare-revert-btn" type="button" hidden>이 버전에서 다시 수정</button>
-        <button id="revise-again-button" class="review-panel__secondary" type="button">이미지 수정</button>
-        <button id="remove-bg-button-accepted" class="review-panel__secondary" type="button">배경 제거</button>
+        <button id="revise-again-button" class="review-panel__secondary" type="button">다듬기</button>
+        <button id="workshop-go-shorts-accepted" class="form__submit" type="button">이 화보로 쇼츠</button>
+        <button id="remove-bg-button-accepted" class="review-panel__secondary" type="button">배경 지우기</button>
         <button id="move-gallery-button" class="review-panel__secondary" type="button" hidden></button>
         <a id="result-download" class="result__download" download="fashion-magazine.png">다운로드</a>
       </div>
 
       <div id="animate-panel" class="animate-panel" hidden>
+        <div id="workshop-shorts-head" class="workshop-shorts-head" hidden>
+          <h3 class="workshop-shorts-head__title">이 화보의 다음 컷</h3>
+          <p class="workshop-shorts-head__lead">지금 보고 있는 화보가 움직입니다. 긴 글보다 아래 칩을 고르세요.</p>
+        </div>
         <div class="field-head">
           <label class="form__label" for="motion" id="motion-label">모션 힌트 (선택)</label>
           <button type="button" class="ai-help-btn" data-ai-field="motion" data-ai-target="motion">
@@ -483,8 +520,11 @@
           class="form__select"
           type="text"
           maxlength="400"
-          placeholder="모션 힌트를 입력하세요"
+          placeholder="예: 옷벗김 후 자신의 가슴을 주무른다"
         />
+        <p class="form__hint" style="margin-top: 6px">
+          「옷벗김」= 겉옷 다음 브라·팬티는 잠깐만, 도착은 나체. 「옷벗김 후 가슴을 주무른다」는 나체까지 끝난 뒤 맨가슴입니다. 나체를 다시 적을 필요 없습니다.
+        </p>
         <div class="motion-presets" id="motion-presets" aria-label="모션 힌트 예시">
           <div class="motion-presets__row" id="motion-presets-list"></div>
           <div class="motion-presets__actions">
@@ -515,7 +555,7 @@
             <button type="button" class="video-duration__btn video-duration__btn--dual" data-duration="30" data-frame-mode="dual">30초</button>
           </div>
           <p id="video-duration-hint" class="form__hint" style="margin-top: 6px">
-            10~18초: 한 프레임. <strong>24초·30초</strong>: 두 프레임을 연속 생성해 이어 붙입니다 (속도감 유지).
+            10~18초: 한 프레임. 탈의+키스는 <strong>24초</strong>(전반 탈의 → 후반 동작)가 더 잘 됩니다.
           </p>
         </div>
         <div id="dual-frame-fields" class="form__field dual-frame-fields" style="margin-top: 0.75rem" hidden>
@@ -525,11 +565,10 @@
             class="form__select"
             type="text"
             maxlength="400"
-            placeholder="후반 예: 이미 나체인 채 키스하며 가슴을 애무한다"
+            placeholder="후반 예: 이미 나체 유지. 옷벗김은 전반에"
           />
           <p id="dual-frame-hint" class="form__hint" style="margin-top: 6px">
-            전반 → 후반을 이어 붙입니다. 줌인: 1회 후반~2회 초반 / 줌아웃 클로징: 2회 후반.
-            클로즈업으로 끝내려면 후반 모션에 「클로즈업으로 끝내」를 적으세요.
+            전반 → 후반을 이어 붙입니다. 줌인·클로즈업은 모션에 「줌인」또는 「클로즈업」을 적을 때만 켭니다.
           </p>
         </div>
         <div class="form__field" style="margin-top: 0.75rem">
@@ -582,7 +621,7 @@
         <p id="animate-status" class="form__status" hidden></p>
 
         <div id="video-result" class="video-result" hidden>
-          <video id="result-video" class="result__video" controls loop playsinline></video>
+          <video id="result-video" class="result__video" controls playsinline></video>
           <div class="video-speed-bar" aria-label="재생 속도">
             <span class="video-speed-bar__label">재생</span>
             <button type="button" class="video-duration__btn" data-speed-play="slow">느리게</button>
@@ -684,23 +723,151 @@
       <p id="gallery-empty" class="gallery__empty">아직 저장된 이미지가 없어요.</p>
     </section>
 
-    <nav id="admin-subnav" class="admin-subnav" hidden role="tablist" aria-label="관리자 메뉴">
-      <button type="button" class="admin-subnav__btn admin-subnav__btn--active" data-admin-panel="fashion" role="tab" aria-selected="true">
-        화보 만들기
-      </button>
-      <button type="button" class="admin-subnav__btn" data-admin-panel="faceswap" role="tab" aria-selected="false">
-        얼굴·장면
-      </button>
-      <button type="button" class="admin-subnav__btn" data-admin-panel="gallery" role="tab" aria-selected="false">
-        관리자 갤러리
-      </button>
-    </nav>
+    <section id="admin-edit-panel" class="admin-fuse-panel" hidden>
+      <h2 class="admin-fuse-panel__title">화보 다듬기</h2>
+      <p class="admin-fuse-panel__lead">
+        찍은 화보를 고칩니다. 다듬기가 끝나면 위 <strong>쇼츠</strong>에서 다음 컷을 만듭니다.
+      </p>
+      <div class="edit-load-row" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px">
+        <button type="button" id="edit-load-current" class="form__submit form__submit--secondary">
+          지금 생성 결과 사용
+        </button>
+        <button type="button" id="edit-upload-btn" class="review-panel__secondary">
+          사진 올리기
+        </button>
+        <input id="edit-upload-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+      </div>
+      <p id="edit-load-status" class="form__status" hidden></p>
+
+      <div id="revise-panel" class="revise-panel">
+        <p class="review-panel__hint revise-panel__where" style="margin-bottom: 10px">
+          사람·사물 지우기 · 배경 지우기 · 텍스트 수정 · 찍어서 붙이기 — 모두 이 탭에서.
+        </p>
+        <div class="revise-panel__modes">
+          <label class="revise-panel__mode revise-panel__mode--pin">
+            <input type="radio" name="revise-mode" value="pin" checked />
+            찍어서 붙이기 (시계·귀걸이)
+          </label>
+          <label class="revise-panel__mode">
+            <input type="radio" name="revise-mode" value="text" />
+            텍스트로 전체 수정
+          </label>
+          <label class="revise-panel__mode">
+            <input type="radio" name="revise-mode" value="region" />
+            올가미로 부분만
+          </label>
+          <label class="revise-panel__mode">
+            <input type="radio" name="revise-mode" value="erase" />
+            올가미로 지우기 (사람·사물)
+          </label>
+        </div>
+        <div class="revise-erase-actions" style="display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 12px">
+          <button type="button" id="revise-erase-mode-btn" class="review-panel__secondary">
+            사람·사물 지우기 (올가미)
+          </button>
+          <button type="button" id="remove-bg-button-revise" class="review-panel__secondary">
+            배경 지우기 (투명 PNG)
+          </button>
+        </div>
+        <p class="review-panel__hint">
+          「사람·사물 지우기」→ 위 사진에서 감싼 뒤 「이 선택 지우기」.
+          「배경 지우기」→ 올가미 없이 배경만 투명.
+        </p>
+
+        <div id="pin-toolbar" class="pin-toolbar" hidden>
+          <p class="review-panel__hint pin-toolbar__hint">
+            소품을 고른 뒤 <strong>사진 위를 클릭</strong>하면 그 자리에 붙습니다. 휠로 크기 조절.
+          </p>
+          <div class="pin-toolbar__chips" role="group" aria-label="붙일 소품">
+            <label class="pin-chip"><input type="radio" name="pin-prop" value="watch" checked /> 시계</label>
+            <label class="pin-chip"><input type="radio" name="pin-prop" value="butterfly" /> 나비 귀걸이</label>
+            <label class="pin-chip"><input type="radio" name="pin-prop" value="hoop" /> 링 귀걸이</label>
+            <label class="pin-chip"><input type="radio" name="pin-prop" value="bracelet" /> 팔찌</label>
+          </div>
+          <p id="pin-status" class="form__hint">대기 — 붙일 위치를 클릭하세요</p>
+        </div>
+
+        <p id="region-hint" class="review-panel__hint" hidden>
+          <strong>좌클릭</strong>으로 점을 찍거나 <strong>누른 채 끌어서</strong> 자유롭게 그리고 ·
+          <strong>더블클릭/Enter</strong>로 닫기 · 닫은 뒤 <strong>안쪽을 드래그</strong>하면 통째로 이동합니다.
+        </p>
+        <p id="region-list" class="region-list" hidden></p>
+        <div id="region-toolbar" class="region-toolbar" hidden>
+          <button id="region-apply-erase" class="form__submit" type="button">
+            이 선택 지우기
+          </button>
+          <button id="region-apply-edit" class="form__submit form__submit--secondary" type="button" hidden>
+            이 선택 수정
+          </button>
+          <button id="region-undo-button" class="review-panel__secondary" type="button">
+            마지막 점 취소
+          </button>
+          <button id="region-clear-button" class="review-panel__secondary" type="button">
+            선택 취소
+          </button>
+          <p class="review-panel__hint" style="flex-basis: 100%; margin: 4px 0 0">
+            선택이 닫힌 뒤에만 적용됩니다. 지울 사람을 넉넉히 감싸면 새 사람이 덜 끼어듭니다.
+          </p>
+        </div>
+
+        <div id="revise-text-block" class="revise-text-block">
+          <div class="field-head">
+            <label class="form__label" for="revision-text">수정 요청</label>
+            <button type="button" class="ai-help-btn" data-ai-field="revision" data-ai-target="revision-text">
+              AI 도움 받기
+            </button>
+          </div>
+          <textarea
+            id="revision-text"
+            class="form__textarea"
+            rows="3"
+            maxlength="800"
+            placeholder="예: 옷벗김 / 옷 색 하나로 통일 / 목걸이 제거"
+          ></textarea>
+          <div id="revision-otbeotgim" class="motion-presets__row" role="list" aria-label="옷벗김" style="margin: 6px 0"></div>
+          <p class="review-panel__hint">
+            「옷벗김」= 겉옷 다음 브라·팬티, 그다음 나체(같은 체형). 일반 나체는 「누드」「나체가 되어」도 됩니다. 체형 유지 탈의 영상은 「몸매 투영 쇼츠」.
+            <strong>진짜 두 칸</strong>만 아래 자르기.
+          </p>
+          <div class="form__field" style="margin-top: 0.5rem">
+            <span class="form__label" id="bust-height-label">가슴 높이 (나체 변환 시)</span>
+            <div
+              id="bust-height-select"
+              class="video-duration"
+              role="group"
+              aria-labelledby="bust-height-label"
+              data-bust-height="auto"
+            >
+              <button type="button" class="video-duration__btn is-active" data-bust-height="auto">자동</button>
+              <button type="button" class="video-duration__btn" data-bust-height="high">높게</button>
+              <button type="button" class="video-duration__btn" data-bust-height="mid">중간</button>
+              <button type="button" class="video-duration__btn" data-bust-height="low">낮게</button>
+            </div>
+            <p class="form__hint" style="margin-top: 6px">
+              자동 = 사진 속 팔·어깨로 AI가 추정(애매하면 살짝 낮게). 애매한 추정이 자꾸 빗나가면 높게/중간/낮게를 직접 고르세요.
+            </p>
+          </div>
+          <label class="revise-panel__two-people">
+            <input type="checkbox" id="revise-two-people" />
+            이 사진에는 두 사람이 있어요 (커플/2인) — 체크하면 두 번째 인물을 그대로 유지하도록 잠금이 자동 조정됩니다
+          </label>
+        </div>
+
+        <div class="revise-panel__footer revise-panel__footer--wrap">
+          <button id="diptych-crop-left" class="review-panel__secondary" type="button" title="완전 분리된 좌우 두 패널일 때만 — 왼쪽 패널 유지">두 패널 → 왼쪽</button>
+          <button id="diptych-crop-right" class="review-panel__secondary" type="button" title="완전 분리된 좌우 두 패널일 때만 — 오른쪽 패널 유지">두 패널 → 오른쪽</button>
+          <button id="revise-apply-button" class="form__submit animate-panel__button" type="button">수정 적용</button>
+          <button id="revise-cancel-button" class="review-panel__secondary" type="button">화보 찍기로</button>
+        </div>
+        <p id="revise-status" class="form__status" hidden></p>
+      </div>
+    </section>
 
     <section id="admin-faceswap-panel" class="admin-fuse-panel" hidden>
       <h2 class="admin-fuse-panel__title">얼굴·장면</h2>
       <p class="admin-fuse-panel__lead">
-        성인(18+) 전용입니다. 미성년·비동의·실존 연예인은 사용할 수 없습니다.
-        엔진은 정밀도·안정·비용을 보고 기능별로 고릅니다.
+        화보에 쓸 사람을 만듭니다. 이어그리기는 몸만 잇고, 포즈·성인은 옆 칸입니다.
+        결과가 나오면 화보로 올린 뒤 쇼츠로 갑니다.
       </p>
 
       <div class="faceswap-mode-tabs" role="tablist" aria-label="얼굴·장면 기능">
@@ -708,7 +875,10 @@
           얼굴 바꾸기
         </button>
         <button type="button" class="faceswap-mode-tabs__btn" data-fs-mode="face" role="tab" aria-selected="false">
-          얼굴로 장면
+          사진 이어그리기
+        </button>
+        <button type="button" class="faceswap-mode-tabs__btn" data-fs-mode="pose" role="tab" aria-selected="false">
+          포즈 그리기
         </button>
         <button type="button" class="faceswap-mode-tabs__btn" data-fs-mode="body" role="tab" aria-selected="false">
           전신·반신으로 장면
@@ -772,20 +942,22 @@
           <div class="admin-faceswap-options">
             <label class="form__label" for="fs-target-side">누구를 바꿀까요</label>
             <select id="fs-target-side" class="form__select">
-              <option value="all" selected>완전 교체 · 증명사진 덮어쓰기 (추천)</option>
-              <option value="left">원본 왼쪽만 완전 교체</option>
-              <option value="right">원본 오른쪽만 완전 교체</option>
-              <option value="gender">AI 합성 (Easel · 원본과 섞임)</option>
+              <option value="all" selected>안정 · InsightFace 얼굴만 (성인 OK · 추천)</option>
+              <option value="left">InsightFace · 원본 왼쪽만</option>
+              <option value="right">InsightFace · 원본 오른쪽만</option>
+              <option value="kontext">실험 · 머리 통째 Kontext (자주 검은 화면)</option>
+              <option value="gender">실험 · Easel (장애 많음)</option>
+              <option value="hard">비추천 · 지우기+붙이기</option>
             </select>
             <div id="fs-easel-options" hidden>
-              <label class="form__label" for="fs-workflow">헤어 (AI 합성일 때)</label>
+              <label class="form__label" for="fs-workflow">헤어 (Easel일 때)</label>
               <select id="fs-workflow" class="form__select">
-                <option value="target_hair" selected>원본 헤어 유지</option>
-                <option value="user_hair">증명사진 헤어로</option>
+                <option value="user_hair" selected>증명사진 헤어로</option>
+                <option value="target_hair">원본 헤어 유지</option>
               </select>
             </div>
             <label class="form__checkbox-row" for="fs-upscale" style="margin-top: 8px" hidden>
-              <input id="fs-upscale" type="checkbox" />
+              <input id="fs-upscale" type="checkbox" checked />
               <span>업스케일 (Easel 전용)</span>
             </label>
             <select id="fs-engine" class="form__select" hidden>
@@ -794,9 +966,10 @@
               <option value="insight">Insight</option>
               <option value="indexed">Indexed</option>
             </select>
-            <p class="faceswap-block__hint" style="margin-top: 8px">
-              <strong>완전 교체</strong>: 증명사진 얼굴 픽셀을 원본 얼굴 자리에 덮어씁니다 (합성 아님).
-              칸1→왼쪽, 칸2→오른쪽. 각도가 다르면 붙인 티가 날 수 있어요.
+            <p id="fs-mode-hint" class="faceswap-block__hint" style="margin-top: 8px">
+              <strong>특단:</strong> 머리·헤어까지 통째로 바꾸는 클라우드 엔진(Easel/Kontext)은
+              검은 화면·장애가 잦아 <em>기본을 얼굴만 교체(InsightFace)</em>로 고정했습니다.
+              「사진 이어그리기」는 머리를 바꾸지 않습니다. 없는 몸통만 이어 그립니다.
             </p>
           </div>
 
@@ -804,25 +977,198 @@
         </div>
       </div>
 
-      <!-- 2. 얼굴로 장면 — 다음 단계에서 구현 -->
+      <!-- 2. 사진 이어그리기 (포즈 엔진과 분리) -->
       <div id="fs-pane-face" class="faceswap-pane" data-fs-pane="face" hidden>
         <div class="faceswap-block">
-          <h3 class="faceswap-block__title">얼굴로 장면</h3>
+          <h3 class="faceswap-block__title">사진 이어그리기</h3>
           <p class="faceswap-block__hint">
-            증명사진으로 새 전신 장면을 만든 뒤 얼굴을 붙입니다. 곧 새로 연결합니다.
+            증명사진·반신의 없는 몸통만 이어 그립니다. 포즈는 만들지 않습니다.
+            두 장이면 나란히 세운 투명 PNG입니다. 포즈·성인은 옆 탭 「포즈 그리기」입니다.
           </p>
-          <p class="form__status">준비 중 — 먼저 「얼굴 바꾸기」를 사용해 주세요.</p>
+          <div class="admin-faceswap-grid admin-faceswap-grid--faces">
+            <div class="admin-faceswap-field">
+              <label class="form__label" for="fs-scene-face0-input">사진 1</label>
+              <div id="fs-scene-face0-slot" class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot" role="button" tabindex="0">
+                <span class="admin-fuse-slot__label">사진 1</span>
+                <span class="admin-fuse-slot__hint">클릭 · Ctrl+V · 드롭</span>
+              </div>
+              <input id="fs-scene-face0-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <label class="form__label" for="fs-scene-gender0">성별</label>
+              <select id="fs-scene-gender0" class="form__select">
+                <option value="female" selected>여성</option>
+                <option value="male">남성</option>
+                <option value="non-binary">논바이너리</option>
+              </select>
+              <button type="button" id="fs-scene-face0-clear" class="review-panel__secondary">비우기</button>
+            </div>
+            <div class="admin-faceswap-field">
+              <label class="form__label" for="fs-scene-face1-input">사진 2 (선택)</label>
+              <div id="fs-scene-face1-slot" class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot" role="button" tabindex="0">
+                <span class="admin-fuse-slot__label">사진 2</span>
+                <span class="admin-fuse-slot__hint">선택</span>
+              </div>
+              <input id="fs-scene-face1-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <label class="form__label" for="fs-scene-gender1">성별</label>
+              <select id="fs-scene-gender1" class="form__select">
+                <option value="none" selected>사용 안 함</option>
+                <option value="male">남성</option>
+                <option value="female">여성</option>
+                <option value="non-binary">논바이너리</option>
+              </select>
+              <button type="button" id="fs-scene-face1-clear" class="review-panel__secondary">비우기</button>
+            </div>
+          </div>
+          <label class="form__label" for="fs-scene-face-desc">메모 (한글 OK)</label>
+          <p class="faceswap-block__hint" style="margin-bottom: 6px">
+            이어그리기만 합니다. 나체·성인·팔 감기·포옹은 이 탭에서 받지 않아요. 사진 2가 있으면 성별을 고르세요.
+          </p>
+          <div id="fs-scene-face-actions" class="motion-presets__row" role="list" aria-label="행동"></div>
+          <textarea
+            id="fs-scene-face-desc"
+            class="form__textarea"
+            rows="3"
+            maxlength="800"
+            placeholder="예: 두 사람이 가까이 나란히 서 있는 전신 사진, 실사"
+          ></textarea>
+          <label class="form__label" for="fs-scene-face-ratio">비율</label>
+          <select id="fs-scene-face-ratio" class="form__select">
+            <option value="9:16" selected>세로 (쇼츠·화보)</option>
+            <option value="16:9">가로</option>
+            <option value="1:1">정사각</option>
+          </select>
+          <button type="button" id="fs-scene-face-run" class="form__submit">이어그리기</button>
         </div>
       </div>
 
-      <!-- 3. 전신·반신 — 다음 단계에서 구현 -->
+      <!-- 3. 포즈 그리기 (성인 · 얼굴 고정 없음) -->
+      <div id="fs-pane-pose" class="faceswap-pane" data-fs-pane="pose" hidden>
+        <div class="faceswap-block">
+          <h3 class="faceswap-block__title">포즈 그리기</h3>
+          <p class="faceswap-block__hint">
+            성인 엔진으로 포즈를 그린 뒤, 올린 사진 얼굴만 교체합니다.
+            기승위(시험)는 사진 1 여자 · 사진 2 <strong>누운 남자</strong>. 선 자세 두 장으로는 하지 않습니다.
+          </p>
+          <div class="admin-faceswap-grid admin-faceswap-grid--faces">
+            <div class="admin-faceswap-field">
+              <label class="form__label" for="fs-scene-pose0-input">사진 1</label>
+              <div id="fs-scene-pose0-slot" class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot" role="button" tabindex="0">
+                <span class="admin-fuse-slot__label">사진 1</span>
+                <span class="admin-fuse-slot__hint">클릭 · Ctrl+V · 드롭</span>
+              </div>
+              <input id="fs-scene-pose0-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <label class="form__label" for="fs-scene-pose-gender0">성별</label>
+              <select id="fs-scene-pose-gender0" class="form__select">
+                <option value="female" selected>여성</option>
+                <option value="male">남성</option>
+                <option value="non-binary">논바이너리</option>
+              </select>
+              <button type="button" id="fs-scene-pose0-clear" class="review-panel__secondary">비우기</button>
+            </div>
+            <div class="admin-faceswap-field">
+              <label class="form__label" for="fs-scene-pose1-input">사진 2 (선택)</label>
+              <div id="fs-scene-pose1-slot" class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot" role="button" tabindex="0">
+                <span class="admin-fuse-slot__label">사진 2</span>
+                <span class="admin-fuse-slot__hint">선택</span>
+              </div>
+              <input id="fs-scene-pose1-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <label class="form__label" for="fs-scene-pose-gender1">성별</label>
+              <select id="fs-scene-pose-gender1" class="form__select">
+                <option value="none" selected>사용 안 함</option>
+                <option value="male">남성</option>
+                <option value="female">여성</option>
+                <option value="non-binary">논바이너리</option>
+              </select>
+              <button type="button" id="fs-scene-pose1-clear" class="review-panel__secondary">비우기</button>
+            </div>
+          </div>
+          <label class="form__label" for="fs-scene-pose-desc">포즈 (한글 OK)</label>
+          <p class="faceswap-block__hint" style="margin-bottom: 6px">
+            성인 포즈만. 미성년·비동의·실존 연예인은 불가. 커플 포즈는 사진 2가 필요합니다.
+          </p>
+          <div id="fs-scene-pose-actions" class="motion-presets__row" role="list" aria-label="포즈"></div>
+          <textarea
+            id="fs-scene-pose-desc"
+            class="form__textarea"
+            rows="3"
+            maxlength="800"
+            placeholder="예: 옷벗김 / 나체로 남자가 여자 허리에 팔을 감고 서 있는 전신, 실사"
+          ></textarea>
+          <label class="form__label" for="fs-scene-pose-ratio">비율</label>
+          <select id="fs-scene-pose-ratio" class="form__select">
+            <option value="9:16" selected>세로 (쇼츠·화보)</option>
+            <option value="16:9">가로</option>
+            <option value="1:1">정사각</option>
+          </select>
+          <button type="button" id="fs-scene-pose-run" class="form__submit">성인 엔진으로 포즈 그리기</button>
+        </div>
+      </div>
+
+      <!-- 4. 전신·반신으로 장면 -->
       <div id="fs-pane-body" class="faceswap-pane" data-fs-pane="body" hidden>
         <div class="faceswap-block">
           <h3 class="faceswap-block__title">전신·반신으로 장면</h3>
           <p class="faceswap-block__hint">
-            전신·반신 참고로 체형을 유지한 장면을 만듭니다. 곧 새로 연결합니다.
+            전신·반신 사진을 넣고 장면을 <strong>한글로</strong> 적으면, 얼굴·체형을 유지한 새 장면을 만듭니다.
+            1~2명. 예: 「같은 사람, 저녁 바닷가에서 원피스 입고 서 있기」
+            얼굴이 잘 보이게 가까이 찍힌 반신이 전신보다 안정적입니다. 3인 이상 단체 사진은 얼굴이 섞이기 쉽습니다.
           </p>
-          <p class="form__status">준비 중 — 먼저 「얼굴 바꾸기」를 사용해 주세요.</p>
+          <div class="admin-faceswap-grid admin-faceswap-grid--faces">
+            <div class="admin-faceswap-field">
+              <label class="form__label" for="fs-scene-body0-input">인물 1 (전신·반신)</label>
+              <div id="fs-scene-body0-slot" class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot" role="button" tabindex="0">
+                <span class="admin-fuse-slot__label">인물 1</span>
+                <span class="admin-fuse-slot__hint">클릭 · Ctrl+V · 드롭</span>
+              </div>
+              <input id="fs-scene-body0-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <label class="form__label" for="fs-scene-body-gender0">성별</label>
+              <select id="fs-scene-body-gender0" class="form__select">
+                <option value="female" selected>여성</option>
+                <option value="male">남성</option>
+                <option value="non-binary">논바이너리</option>
+              </select>
+              <button type="button" id="fs-scene-body0-clear" class="review-panel__secondary">비우기</button>
+            </div>
+            <div class="admin-faceswap-field">
+              <label class="form__label" for="fs-scene-body1-input">인물 2 (선택)</label>
+              <div id="fs-scene-body1-slot" class="admin-fuse-slot admin-fuse-slot--empty admin-faceswap-slot" role="button" tabindex="0">
+                <span class="admin-fuse-slot__label">인물 2</span>
+                <span class="admin-fuse-slot__hint">선택</span>
+              </div>
+              <input id="fs-scene-body1-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+              <label class="form__label" for="fs-scene-body-gender1">성별</label>
+              <select id="fs-scene-body-gender1" class="form__select">
+                <option value="none" selected>사용 안 함</option>
+                <option value="male">남성</option>
+                <option value="female">여성</option>
+                <option value="non-binary">논바이너리</option>
+              </select>
+              <button type="button" id="fs-scene-body1-clear" class="review-panel__secondary">비우기</button>
+            </div>
+          </div>
+          <label class="form__label" for="fs-scene-body-desc">원하는 장면 (한글 OK)</label>
+          <div id="fs-scene-body-actions" class="motion-presets__row" role="list" aria-label="옷벗김" style="margin-bottom: 6px"></div>
+          <textarea
+            id="fs-scene-body-desc"
+            class="form__textarea"
+            rows="3"
+            maxlength="800"
+            placeholder="예: 옷벗김, 같은 체형으로 나체 / 비 오는 밤 네온 거리"
+          ></textarea>
+          <label class="form__label" for="fs-scene-body-expression">표정</label>
+          <select id="fs-scene-body-expression" class="form__select">
+            <option value="id" selected>증명사진 그대로 (무표정·원본 유지)</option>
+            <option value="scene">장면에 맞게 표정주기 (미소·감정 허용)</option>
+          </select>
+          <p class="faceswap-block__hint" style="margin-top: 4px; margin-bottom: 10px">
+            얼굴 고정이 우선입니다. 「표정주기」도 다른 사람으로 바꾸지 않고 표정만 살짝 허용합니다.
+          </p>
+          <label class="form__label" for="fs-scene-body-ratio">비율</label>
+          <select id="fs-scene-body-ratio" class="form__select">
+            <option value="9:16" selected>세로 (쇼츠·화보)</option>
+            <option value="16:9">가로</option>
+            <option value="1:1">정사각</option>
+          </select>
+          <button type="button" id="fs-scene-body-run" class="form__submit">전신·반신으로 장면 만들기</button>
         </div>
       </div>
 
@@ -838,10 +1184,13 @@
           <div id="fs-result-actions" class="admin-faceswap-result__actions" hidden>
             <a id="fs-result-download" class="review-panel__secondary" download="face-swap.png">다운로드</a>
             <button type="button" id="fs-result-to-main" class="form__submit form__submit--secondary">
-              메인 결과로 보내기 (갤러리·쇼츠)
+              이 결과를 화보로
             </button>
             <button type="button" id="fs-result-as-target" class="review-panel__secondary">
               이 결과를 원본으로 쓰기
+            </button>
+            <button type="button" id="fs-result-to-pose" class="review-panel__secondary">
+              이 결과를 포즈 사진으로
             </button>
           </div>
         </div>
@@ -850,18 +1199,18 @@
 
     <section id="admin-gallery" class="gallery gallery--admin" hidden>
       <div class="gallery__header">
-        <h2 class="gallery__title">관리자 전용 갤러리</h2>
+        <h2 class="gallery__title">소지</h2>
         <div class="gallery__header-actions">
-          <button id="new-shoot-admin-gallery" class="gallery__new-shoot" type="button">새 장면 시작</button>
+          <button id="new-shoot-admin-gallery" class="gallery__new-shoot" type="button">새 화보 시작</button>
           <button id="gallery-export-admin" class="gallery__backup" type="button" title="내 갤러리 · 관리자 갤러리를 JSON 파일로 내보내요">내보내기</button>
           <button id="gallery-import-admin" class="gallery__backup" type="button" title="내보낸 JSON 파일을 다시 불러와요">가져오기</button>
           <button id="gallery-migrate-admin" class="gallery__backup" type="button" title="R2 기능 이전에 저장된 옛 이미지들을 지금 영구 저장소로 옮겨요">기존 이미지 영구저장</button>
           <button id="clear-admin-gallery" class="gallery__clear" type="button">전체 삭제</button>
         </div>
       </div>
-      <p class="gallery__hint">화보(관리자 전용) 모드에서 만든 이미지만 여기 따로 모여요 — 「내 갤러리」와 섞이지 않아요.</p>
+      <p class="gallery__hint">이 작업실에서 찍은 화보와 그 다음 컷을 자기 작품으로 가집니다. 일러스트 갤러리와는 섞이지 않습니다.</p>
       <div id="admin-gallery-grid" class="gallery__grid"></div>
-      <p id="admin-gallery-empty" class="gallery__empty">아직 저장된 화보 이미지가 없어요.</p>
+      <p id="admin-gallery-empty" class="gallery__empty">아직 소지한 작품이 없습니다.</p>
     </section>
     </div><!-- /#studio-area -->
 
@@ -1420,14 +1769,13 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="/youtube-shorts.js?v=20260719am"></script>
   <script src="/bgm-mixer.js?v=20260722a"></script>
-  <script src="/essay.js?v=20260720c"></script>
+  <script src="/essay.js?v=20260909ocr-lazy"></script>
   <script src="/tale.js?v=20260720e"></script>
   <script src="/tale-layout.js?v=20260720d"></script>
   <script src="/observe.js?v=20260722b"></script>
-  <script src="/poly-lasso.js?v=20260802lasso4"></script>
-  <script src="/app.js?v=20260830fs-hardreplace1"></script>
+  <script src="/poly-lasso.js?v=20260831erase2"></script>
+  <script src="/app.js?v=20260909desk-bust-zoomout"></script>
 </body>
 </html>

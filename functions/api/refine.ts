@@ -25,6 +25,8 @@ import {
   BODY_PROJECT_REVISION,
   buildNudeBecomesDefinitionLock,
   buildNudeIdentityRefinePrompt,
+  buildStillNudeAdultPubicLine,
+  buildStillNudeAdultBustLine,
   isBodyProjectRequest,
   stripDefaultContinuityEchoes,
   wantsFullNude,
@@ -32,6 +34,7 @@ import {
   wantsNecklaceRefine,
   wantsNippleAreolaRefine,
   wantsNudeOrUndress,
+  wantsObjectEraseRevision,
   wantsPubicHairOnlyRefine,
   wantsSplitCompositeFix,
   wantsWristAccessoryRefine,
@@ -600,27 +603,30 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     try {
       // 올가미+귀걸이: strength 0.85는 마스크·건물 발명을 자주 함(실측) → 전용 프롬프트·강도↓
       const regionJewelry = wantsJewelryAccessoryRefine(revision)
-      // 머리 제거·배경 메우기: 강도를 높여 흰 사각형/빈칸으로 남는 실패를 줄임
+      // 머리 제거·사람/사물 지우기: 배경만 메움 — 새 사람 발명 금지
       const regionBgFill =
-        /seamless continuation of the surrounding background|fill only the masked region|background fill|remove leftover head/i.test(
-          revision,
+        wantsObjectEraseRevision(revision) ||
+        /seamless continuation of the surrounding background|fill only the masked region|background fill|remove leftover head|OBJECT ERASE/i.test(
+          `${revision} ${prompt}`,
         )
       const regionPrompt = regionJewelry
         ? buildJewelryAccessoryRefinePrompt(revisionForPrompt || revision)
         : regionBgFill
           ? [
               'Inpaint ONLY the white-masked area.',
-              'Continue the real room background behind the person (wall, furniture, window, floor) — photoreal match to neighbors.',
-              'No blank white rectangle, no empty patch, no solid color block.',
-              'Remove any leftover head, hair, cutout fringe inside the mask.',
-              'Do not change unmasked body, clothing, or other faces.',
-              revisionForPrompt || revision,
+              'Remove the person or object completely from the mask.',
+              'Fill with EMPTY background only: continue the real wall, purple banner, floor, or room behind — match neighbor pixels.',
+        'The hole is already filled with neighbor background color — do NOT restore a person or face.',
+        'FORBIDDEN: inventing a new person, face, body, woman, man, or partial figure inside the mask.',
+              'FORBIDDEN: copying another person from the photo into the hole.',
+              'No blank white rectangle, no solid color block.',
+              'Do not change unmasked people, faces, or clothing outside the mask.',
             ].join(' ')
           : prompt
       const regionNegative = regionJewelry
         ? `${negativePrompt}, surgical mask, face mask, medical mask, KF94, N95, covering mouth, new building, extra architecture, changed background, different face, no earring, missing earring`
         : regionBgFill
-          ? `${negativePrompt}, blank white rectangle, solid white patch, empty hole, pure white fill, cutout fringe, leftover head, passport photo backdrop`
+          ? `${negativePrompt}, blank white rectangle, solid white patch, empty hole, pure white fill, cutout fringe, leftover head, passport photo backdrop, new person, extra person, another woman, another man, face in hole, body in hole, invented figure, duplicate person, third person appearing`
           : negativePrompt
       const { imageUrl: nextUrl } = await refineFalInpaint({
         falKey: env.FAL_KEY,
@@ -628,7 +634,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         maskUrl: maskDataUrl,
         prompt: regionPrompt,
         negativePrompt: regionNegative,
-        strength: regionJewelry ? 0.62 : regionBgFill ? 0.92 : undefined,
+        strength: regionJewelry ? 0.62 : regionBgFill ? 0.93 : undefined,
       })
       return jsonResponse(
         {
@@ -640,11 +646,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           engine: 'fal',
           engineLabel: regionJewelry
             ? 'fal.ai · Flux Inpaint (올가미 · 장신구만)'
-            : 'fal.ai · Flux Inpaint (영역만 수정)',
+            : regionBgFill
+              ? 'fal.ai · Flux Inpaint (선택 지우기 · 배경 메움)'
+              : 'fal.ai · Flux Inpaint (영역만 수정)',
           regionCount: body.regionCount ?? 1,
           message: regionJewelry
             ? '선택한 귓불 영역에만 장신구를 넣도록 강도를 낮춰 처리했어요. 마스크·건물이 생기면 영역을 더 작게 잡고 다시 시도해 보세요.'
-            : undefined,
+            : regionBgFill
+              ? '선택한 자리를 지우고 배경으로 메웠어요. 새 사람이 보이면 선택을 더 크게 잡아 다시 시도해 보세요.'
+              : undefined,
         },
         200,
       )
@@ -1154,12 +1164,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             buildNudeBecomesDefinitionLock('', null, bustHeight),
             'Local edit: melt clothing on the masked body to transparency — same body projection, fully nude.',
             'Bare breasts with nipples, bare crotch. Face outside mask stays exact. No smile-only result.',
+            buildStillNudeAdultBustLine(revisionForPrompt || revision),
+            buildStillNudeAdultPubicLine(revisionForPrompt || revision),
             'Keep other people in frame. Photorealistic.',
           ].join(' ')
         : [
             'Local edit: ONLY change the masked white body area.',
             'FULL NUDE: remove ALL clothes from torso AND hips — blouse, bra, robe, sweater, pants, skirt, panties, thong, briefs.',
             'Bare adult breasts with visible nipples AND bare crotch — no underwear fabric left on.',
+            buildStillNudeAdultBustLine(revisionForPrompt || revision),
+            buildStillNudeAdultPubicLine(revisionForPrompt || revision),
             'Keep the unmasked face pixels exactly. Same woman. Keep any other person outside/near the mask.',
             'Photorealistic.',
             revisionForPrompt ? `User request: ${revisionForPrompt}.` : '',

@@ -19,7 +19,9 @@ function jsonResponse(body: unknown, status: number): Response {
 }
 
 function isProviderContentBlock(message: string): boolean {
-  return /nsfw|content.?policy|flagged|safety|could not be processed/i.test(message)
+  return /nsfw|content.?policy|flagged|safety|provider_content_blocked|could not be processed/i.test(
+    message,
+  )
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -56,15 +58,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     })
 
     if (result.status === 'succeeded' && result.imageUrl) {
-      // 큰 dataUrl 인라인은 status 타임아웃 원인 — R2 공개 URL만 반환
-      const persisted = await persistRemoteImageToR2(env, result.imageUrl)
+      // has_nsfw_concepts 오탐으로 정상 사진을 버리던 사고 — 실제 검은 화면은 클라이언트가 검사
+      // R2 공개 URL은 로컬 Pages(miniflare R2)에서 production pub 베이스와 안 맞아 404가 난다.
+      // 미리보기는 항상 fal CDN URL을 쓰고, persist는 응답 밖에서 보조로만 붙인다.
+      // (응답 전에 persist하면 저장이 길 때 폴링이 146초 등에 멈춘 채 그림이 안 나옴)
+      context.waitUntil(
+        persistRemoteImageToR2(env, result.imageUrl).then(() => undefined).catch(() => undefined),
+      )
       return jsonResponse(
         {
           ok: true,
           pending: false,
           status: 'succeeded',
-          imageUrl: persisted || result.imageUrl,
-          persisted: Boolean(persisted),
+          imageUrl: result.imageUrl,
         },
         200,
       )
@@ -79,7 +85,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             pending: false,
             status: 'failed',
             error: 'provider_content_blocked',
-            message: '이미지 엔진이 이 장면을 안전 필터로 거절했어요. 장면 설명을 조금 바꿔 다시 시도해 주세요.',
+            message:
+              '이미지 엔진이 이 요청을 거절했어요. 장면 설명을 짧게 바꿔 다시 시도해 주세요.',
           },
           200,
         )

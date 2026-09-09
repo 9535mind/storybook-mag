@@ -8,14 +8,19 @@
 export type { ContentPolicyVerdict } from './content-policy-check'
 export { evaluateContentPolicy, evaluateTaleScenePolicy } from './content-policy-check'
 import { polishKoreanPromptText } from './korean-text'
-export { polishKoreanPromptText } from './korean-text'
+export { polishKoreanPromptText, normalizeOtbeotgimTerms } from './korean-text'
 import {
   type BodyLandmarks,
   normalizeBodyLandmarks,
   buildBodyLandmarkCoordsLock,
+  buildBodyLandmarkCoordsLockShort,
 } from './body-landmarks-lock'
 export type { BodyLandmarks } from './body-landmarks-lock'
-export { normalizeBodyLandmarks, buildBodyLandmarkCoordsLock } from './body-landmarks-lock'
+export {
+  normalizeBodyLandmarks,
+  buildBodyLandmarkCoordsLock,
+  buildBodyLandmarkCoordsLockShort,
+} from './body-landmarks-lock'
 import {
   wantsJewelryAccessoryRefine,
   buildJewelryAccessoryRefinePrompt,
@@ -42,8 +47,8 @@ export {
   mentionsHumanSubject,
   defaultEthnicitySentence,
 } from './ethnicity-defaults'
-import { buildSoftMouthFaceLock, buildFaceFrozenLock, buildCoupleFaceLock } from './face-locks'
-export { buildSoftMouthFaceLock, buildFaceFrozenLock, buildCoupleFaceLock } from './face-locks'
+import { buildSoftMouthFaceLock, buildFaceFrozenLock, buildCoupleFaceLock, buildHeteroManWomanCastLock, buildSourcePairCastLock, wantsHeteroManWomanCast, isExplicitTwoWomenCast } from './face-locks'
+export { buildSoftMouthFaceLock, buildFaceFrozenLock, buildCoupleFaceLock, buildHeteroManWomanCastLock, buildSourcePairCastLock, wantsHeteroManWomanCast, isExplicitTwoWomenCast } from './face-locks'
 import { DYNAMIC_ACTION_PATTERN, resolveDanceTag, isDanceRevision } from './dance-scene-tags'
 export { resolveDanceTag, isDanceRevision } from './dance-scene-tags'
 import { describesAnimalSubject } from './animal-scene-detect'
@@ -52,6 +57,10 @@ import {
   wantsExplicitPubicShave,
   buildFemaleAdultAnatomyLock,
   buildAdultPubicHairLock,
+  buildWanPubicLine,
+  buildStillNudeAdultPubicLine,
+  buildStillNudeAdultBustLine,
+  buildWanFemaleSexLock,
   buildNudeAnatomyVisibilityLock,
   buildNudeBodyShapeContinuityLock,
   buildNudeCensorFogBanLock,
@@ -77,7 +86,16 @@ export {
 import {
   wantsNudeOrUndress,
   wantsUnderwearLook,
+  wantsSlipOrSilkLook,
+  wantsDeskUncensoredStill,
   wantsUndressAction,
+  wantsOtbeotgim,
+  wantsPantyMeltOnly,
+  OTBEOTGIM_WAN_LINE,
+  OTBEOTGIM_BEAT1_LINE,
+  PANTY_MELT_FAIL,
+  SILK_MATCH_LINGERIE_LINE,
+  COUPLE_MAN_SHIRT_ONLY,
   wantsDressAction,
   NUDE_STATE_WORD_PATTERN,
   stripNudeBecomesPhrase,
@@ -96,7 +114,15 @@ import {
 export {
   wantsNudeOrUndress,
   wantsUnderwearLook,
+  wantsSlipOrSilkLook,
+  wantsDeskUncensoredStill,
   wantsUndressAction,
+  wantsOtbeotgim,
+  OTBEOTGIM_WAN_LINE,
+  OTBEOTGIM_BEAT1_LINE,
+  SILK_MATCH_LINGERIE_LINE,
+  COUPLE_MAN_SHIRT_ONLY,
+  wantsPantyMeltOnly,
   wantsDressAction,
   NUDE_STATE_WORD_PATTERN,
   stripNudeBecomesPhrase,
@@ -115,19 +141,39 @@ export {
 import {
   TOUCH_ACTION_VERBS_KO,
   detectKissBodyTarget,
+  detectKissIntensity,
+  kissIntensityActionLine,
   detectTouchVerbPhrase,
+  detectSplitHandTargets,
   amplifyAdultMotionForVideo,
+  wantsMaleGenitalHand,
+  MAN_ZIPPER_HAND_LINE,
+  wantsBackHug,
+  isSoloSelfTouch,
 } from './kiss-touch-motion'
 export {
   detectKissBodyTarget,
+  detectKissIntensity,
+  kissIntensityActionLine,
   detectTouchVerbPhrase,
+  detectSplitHandTargets,
   amplifyAdultMotionForVideo,
+  wantsMaleGenitalHand,
+  MAN_ZIPPER_HAND_LINE,
+  wantsBackHug,
+  isSoloSelfTouch,
 } from './kiss-touch-motion'
 export {
   wantsPubicHairOnlyRefine,
   wantsExplicitPubicShave,
   buildFemaleAdultAnatomyLock,
   buildAdultPubicHairLock,
+  buildWanPubicLine,
+  buildStillNudeAdultPubicLine,
+  buildStillNudeAdultBustLine,
+  wantsStillWomanNudeOrPubic,
+  buildStillWomanNudeNoPantyLock,
+  buildWanFemaleSexLock,
   buildRealisticPubicHairRefinePrompt,
   wantsNippleAreolaRefine,
   buildNippleAreolaRefinePrompt,
@@ -261,6 +307,7 @@ export function buildFashionNegativePrompt(descriptionOrBase: string, revision?:
     extras.push(
       'bathrobe, bath robe, kimono robe, wrap robe, dressing gown, overcoat, trench coat',
       'white dress shirt, collared blouse, button-up shirt, sweater, cardigan, grey robe',
+      'black bra, black panties, black lingerie, black underwear, black thong',
     )
   }
   // 이 조건은 반드시 "거울을 요청하지 않았을 때"만 걸려야 한다. amplifyClothingAndScene은
@@ -500,7 +547,9 @@ function amplifyClothingAndScene(descriptionOrBase: string, revision?: string): 
     // 프롬프트 쪽 예산이 다중 키워드 상황에서 특히 귀해서, 중복되는 부정 문구를 걷어내고
     // 옷 종류/재질만 짧게 못박는다.
     if (wantsSilkOrSlip) {
-      extras.push('wearing a glossy silk slip dress')
+      extras.push(
+        'wearing a one-piece glossy silk slip nightdress, spaghetti straps, no bra, no separate panties showing as a two-piece lingerie set',
+      )
     } else if (wantsDressGarment) {
       extras.push('wearing a dress')
     }
@@ -509,12 +558,16 @@ function amplifyClothingAndScene(descriptionOrBase: string, revision?: string): 
   if (isLaceLingerie) {
     // 거울/야경/흰배경 같은 다른 "장면 정의" 태그와 한 문장에 자주 겹쳐서 amplify 예산을
     // 같이 나눠 써야 하는 경우가 많다 — 의미 손실 없이 3단어를 줄인 짧은 버전을 쓴다.
-    extras.push('wearing lace lingerie (bra, panties), sheer lace fabric')
+    extras.push(
+      `wearing lace silk lingerie (bra, panties) matching the outfit colors, not black. ${SILK_MATCH_LINGERIE_LINE}`,
+    )
   } else if (wantsUnderwearLook(description)) {
     // wantsUnderwearLook은 "란제리/lingerie"도 함께 매칭하는 더 넓은 판정이라, 위 레이스
     // 태그와 동시에 걸리면 같은 내용을 두 번 말하며 예산을 낭비했다 — 더 구체적인 레이스
     // 태그가 이미 걸렸으면 이 일반형 속옷 태그는 건너뛴다(제거·누드 요청 제외는 함수 내부에서 처리됨).
-    extras.push('wearing only underwear (bra and panties), skin and undergarments visible, NOT a bathrobe')
+    extras.push(
+      `wearing only silk underwear (bra and panties) matching the outfit colors, skin visible, NOT a bathrobe, NOT black lingerie. ${SILK_MATCH_LINGERIE_LINE}`,
+    )
   }
   // 아래부터는 "장면을 정의하는" 구조적 요소(거울/배경/도시/야경)를 먼저 배치한다 —
   // capWordsSimple이 예산 초과 시 뒤쪽부터 자르므로, 상대적으로 덜 치명적인 자세/표정
@@ -777,14 +830,14 @@ export function buildNudeBecomesDefinitionLock(
     step1,
     'Remove ALL clothing completely and keep it off: top/bra, pants/jeans/skirt/shorts, belt/waistband, AND panties/thong/briefs — every layer leaves the body, none stay on. FAILED: topless but still in pants, belt/waistband remnant under the breasts, or any panty layer left on.',
     bustHeight && bustHeight !== 'auto'
-      ? 'BUST: soft full volume at the nipple anchors — read from how the clothes fit (full-C to D when the chest projects); when unsure, prefer fuller over flat 빈유.'
-      : 'BUST: soft full volume at the nipple anchors — read from how the clothes fit (full-C to D when the chest projects); when unsure, prefer fuller over flat 빈유; if arm/elbow landmarks are unclear, default to a slightly LOWER natural bust placement rather than a lifted perky one.',
+      ? 'BUST: match clothed chest as baseline; if ambiguous, soft +½~1 cup only — FORBIDDEN +2–3 cups.'
+      : 'BUST: match clothed chest as baseline; if ambiguous, soft +½~1 cup only — FORBIDDEN +2–3 cups; if arm/elbow landmarks are unclear, default to a slightly LOWER natural bust placement rather than a lifted perky one.',
     buildBustHeightPreferenceLine(bustHeight),
     'Nipples/areola: plain natural skin, soft pinkish-brown — FORBIDDEN spiral, swirl, ring, target, pinwheel, tattoo, or any printed graphic pattern on the breast.',
     'Pubic hair on the mons: a compact, neatly-contained patch of dense dark curly coils — NOT wide straggly wisps spreading onto the thighs or navel, NOT a flat painted patch.',
     'Bare skin must be continuous from underbust through navel to crotch — ZERO belt/strap/buckle remnant under the breasts, ZERO brown horizontal band on the abdomen.',
     'FORBIDDEN foggy blur, mosaic, or censor smear over the crotch — sharp uncensored bare skin with natural pubic hair.',
-    'Keep the exact same breast size, waist width, and hip width the person already has — do not shrink, flatten, or generic-ify into a smaller doll-like body.',
+    'Keep waist/hip as clothed; for bust, clear silhouette = same size, ambiguous = about half to one cup fuller — never flat-under and never hugely oversized.',
   ]
     .filter(Boolean)
     .join(' ')
@@ -808,7 +861,7 @@ export function buildNudeBecomesAnimationPrompt(input: {
   const corpus = `${input.prompt || ''} ${input.motion || ''}`
   const landmarks = input.landmarks ? normalizeBodyLandmarks(input.landmarks) : null
   const coords = landmarks ? buildBodyLandmarkCoordsLock(landmarks) : ''
-  const endCloseUp = wantsEndCloseUp(input.motion || '')
+  const endCloseUp = wantsRequestedZoom(input.motion || '')
   const isDualA = input.clipRole === 'dual-a'
   // 몸매 투영은 기본적으로 "탈의(용해)" + "나체 유지" 두 동작 → 3등분 약속에 따라 반반.
   // 단, dual-a(24/30초 듀얼의 전반부)는 이 클립 하나가 오로지 탈의만 전담하고
@@ -821,40 +874,41 @@ export function buildNudeBecomesAnimationPrompt(input: {
     : buildEqualBeatSeconds(input.durationSec, 2)
   const total = bounds[bounds.length - 1]
   const dissolveDeadline = isDualA ? bounds[2] : bounds[1]
+  const holdStart = wanHoldStartSec(total)
 
-  // 실측(2026-08-26): 이 함수가 buildFaceFrozenLock·buildSingleContinuousShotLock·
-  // buildClothingSilhouetteBodyLock·buildAdultPubicHairLock·buildNudeCensorFogBanLock의
-  // 풀텍스트를 전부 이어붙여 6,000자를 넘겼다 — leanIntimate/plainNudeOnly는 이미
-  // 1,500자 안으로 압축돼 있는데 이 「몸매 투영」경로만 압축이 안 된 채 남아 있었던 것이
-  // "가슴 위치/크기 불일치"와 "후반부에 다시 옷을 입음"(HOLD 지시가 프롬프트 맨 끝
-  // 4,700자 지점이라 순응도가 이미 죽은 상태) 두 회귀의 실제 원인으로 확인됐다.
-  // → leanIntimate와 같은 스타일(짧은 BEAT + 한두 줄 잠금)로 재작성한다.
-  return [
-    'Adult photorealistic image-to-video. Same Korean woman: same face and body proportions (breast size/shape, waist, hips) as the input photo — do not slim, bulk, or resize her breasts. Same room, static camera.',
-    coords
-      ? `USER TAJEOM LOCK (highest priority): ${coords}`
-      : 'Estimate nipple and navel under clothing from the real torso — never on the face or neck.',
-    'FORBIDDEN: scene/person change, dancing, or walking away — only her clothes fade off while she stays standing in place.',
-    isDualA
-      ? `TWO-BEAT TIMELINE (this clip is 100% dedicated to undressing — do not merge or skip a beat):`
-      : `TWO-BEAT TIMELINE ("3등분 약속" — 2 actions = half each):`,
-    `BEAT 1 (0–${dissolveDeadline}s): starts clothed, then progressively dissolve top + bra + trousers + belt together — bare breasts/nipples at the locked coords, bare vulva at the crotch. Fully nude (ZERO belt, ZERO panties) by the ${dissolveDeadline}s mark.`,
-    isDualA
-      ? `BEAT 2 (${dissolveDeadline}–${total}s): stay fully nude, standing in the same spot, through the very last frame — this last frame becomes the source photo for the next clip. FORBIDDEN putting clothing back on.`
-      : `BEAT 2 (${dissolveDeadline}–${total}s, all the way to the very last frame): fully nude — bare breasts at the locked points, bare vulva visible. FORBIDDEN putting any clothing back on or reverting to the clothed opening pose.`,
-    'Read breast/waist/hip size from how the clothes fit the source — keep that same volume when nude, do NOT shrink to a generic/Barbie body.',
-    buildBustHeightPreferenceLine(input.bustHeight),
-    'Pubic hair on the mons: a compact, neatly-contained patch of dense dark curly coils — NOT wide straggly wisps spreading onto the thighs, NOT a flat painted patch.',
-    'No fog/blur/mosaic or sheer-lace-outline over the crotch — sharp bare skin, ZERO panties, ZERO belt remnant.',
-    buildShortsCameraLock({
-      clipRole: input.clipRole,
-      undressOrNude: true,
-      endCloseUp,
-    }),
-    'LAST FRAME: still fully nude, same face and body proportions as source — bare breasts and bare vulva visible, clothing must NOT have reappeared.',
-  ]
-    .filter(Boolean)
-    .join(' ')
+  // → 구역형(MOTION/TIME/BODY/CAM/END) + 1500자 예산
+  return assembleWanSections([
+    wanSection(
+      'MOTION',
+      'Same Korean woman as source — clothes dissolve off while she stays standing; no new person, no dance/walk-away.',
+    ),
+    wanSection(
+      'TIME',
+      isDualA
+        ? `BEAT1 0–${dissolveDeadline}s: dissolve top+bra+trousers+belt → full nude (ZERO belt/panties). BEAT2 ${dissolveDeadline}–${holdStart}s: stay nude. HOLD ${holdStart}–${total}s: FREEZE still nude. ${WAN_END_NO_SNAPBACK}`
+        : `BEAT1 0–${dissolveDeadline}s: dissolve top+bra+trousers+belt → full nude. BEAT2 ${dissolveDeadline}–${holdStart}s: stay nude. HOLD ${holdStart}–${total}s: FREEZE still nude. ${WAN_END_NO_SNAPBACK}`,
+    ),
+    wanSection(
+      'BODY',
+      [
+        coords ? `TAJEOM: ${coords}` : 'Estimate nipple/navel under clothing from real torso — never on face/neck.',
+        'Bust: match clothed width; if hard to read, soft +½~1 cup only — FORBIDDEN +2–3 cups or flat under-size.',
+        buildBustHeightPreferenceLine(input.bustHeight),
+        buildWanPubicLine(`${input.prompt || ''} ${input.motion || ''}`),
+      ]
+        .filter(Boolean)
+        .join(' '),
+    ),
+    wanSection(
+      'CAM',
+      buildShortsCameraLock({
+        clipRole: input.clipRole,
+        undressOrNude: true,
+        endCloseUp,
+      }),
+    ),
+    wanSection('END', buildWanEndHold({ durationSec: total, mode: 'nude' })),
+  ])
 }
 
 // 무드 셀렉터: 필름·사진 질감(조명/컬러그레이딩) 축으로 재설계 — "패션 사진" 형용사만
@@ -1121,6 +1175,23 @@ export function buildFreeNegativePrompt(description: string): string {
  * 전신 나체 텍스트 수정 전용 — CLIP ~77토큰 안에 탈의 지시가 앞에 오도록 짧게.
  * 몸매 투영이면 공식 정의(얼굴·체형 고정 + 옷 페이드 용해)를 최우선.
  */
+/** 올가미로 사람·사물 지우고 배경 메우기 (탈의·장신구 제거와 구분) */
+export function wantsObjectEraseRevision(revision: string): boolean {
+  const t = polishKoreanPromptText(revision || '')
+  if (!t) return false
+  if (wantsFullNude(t) || wantsNudeOrUndress(t)) return false
+  if (wantsJewelryAccessoryRefine(t) && /목걸이|귀걸이|시계|팔찌|necklace|earring|watch|bracelet/i.test(t)) {
+    return false
+  }
+  return (
+    /Erase the masked subject|content-aware\s*fill|object\s*erase/i.test(t) ||
+    /선택(?:한)?\s*(?:사람|사물|인물|영역).{0,12}(?:지우|제거|없애)/i.test(t) ||
+    /(?:사람|인물|사물).{0,8}(?:을|를)?\s*(?:완전히\s*)?(?:지우|제거|없애)/i.test(t) ||
+    /배경(?:으로|에)?\s*메워|자연스럽게\s*메워/i.test(t) ||
+    /지워\s*줘|지우기|remove\s*(?:the\s*)?(?:masked|selected)\s*(?:person|people|object)/i.test(t)
+  )
+}
+
 export function buildNudeIdentityRefinePrompt(
   revision: string,
   baseDescription = '',
@@ -1143,11 +1214,16 @@ export function buildNudeIdentityRefinePrompt(
   // 지시만 남기고, 구체적인 장식 명사는 아래 negative prompt 쪽에서 금지어로만 쓴다.
   return [
     'FULL NUDE: same face and same body as source; remove all clothes — bare breasts and bare crotch, ZERO panties, ZERO fabric or decoration of any kind covering the crotch or chest.',
+    wantsOtbeotgim(rev)
+      ? '옷벗김: dissolve the blouse on the source bust pixels. Nude bust stays at that height. FORBIDDEN a new higher sports-bra.'
+      : '',
     'This applies no matter how the original outfit looked — plain, formal, costume, fantasy, or illustrated/fairy-tale style — none of it is a fixed part of the body, all of it comes off completely, leaving plain bare skin (no replacement garment, no decorative covering).',
     'Nipples/areola: plain natural skin, soft pinkish-brown — FORBIDDEN spiral, swirl, ring, target, pinwheel, tattoo, or any printed graphic pattern on the breast.',
     buildBustHeightPreferenceLine(bustHeight),
     buildNudeBodyShapeContinuityLock(`${baseDescription || ''} ${rev}`),
-    'Keep any other person in the source — only undress the woman.',
+    wantsHeteroManWomanCast(rev)
+      ? buildHeteroManWomanCastLock()
+      : 'Keep any other person in the source — only undress the woman; do not turn a man into a woman.',
     'Same background and framing. Photorealistic adult photo.',
     rev ? `User: ${rev}.` : '',
   ]
@@ -1178,6 +1254,13 @@ export function buildRefinePrompt(input: {
   if (!free && input.mode === 'text' && wantsFullNude(revision, base)) {
     return buildNudeIdentityRefinePrompt(revision, base)
   }
+
+  // 전신 나체 전용 락은 위에서 이미 return. 여기 일반 수정에 FULL NUDE 캐스트를 넣으면
+  // 옷 입은 키스/커플 수정도 나체로 바뀐다.
+  const heteroCast =
+    !free && wantsHeteroManWomanCast(`${revision} ${base}`)
+      ? 'CAST: keep the source man as a man and the source woman as a woman. FORBIDDEN gender-swap or two women replacing the couple.'
+      : ''
 
   if (free) {
     if (input.mode === 'region') {
@@ -1213,14 +1296,22 @@ export function buildRefinePrompt(input: {
     if (wantsJewelryAccessoryRefine(revision)) {
       return buildJewelryAccessoryRefinePrompt(revision)
     }
+    // 올가미 지우기 — 사람/사물 삭제 후 배경 메움 (탈의·누드와 구분)
+    if (wantsObjectEraseRevision(revision)) {
+      return [
+        'OBJECT ERASE / empty background fill: ONLY the masked WHITE area.',
+        'Delete the person or object under the mask completely.',
+        'Fill with EMPTY wall/banner/floor matching neighbors — no humans in the hole.',
+        'FORBIDDEN: inventing any new person, face, body, woman, or man inside the mask.',
+        'FORBIDDEN: moving another person from the photo into the erased area.',
+        'Preserve ALL unmasked pixels exactly.',
+        'Photorealistic seamless inpaint.',
+      ].join(' ')
+    }
     return [
       'Local edit of an existing photo. ONLY change the masked white areas.',
       `Local change: ${revision}.${revisionAmplify}`,
       'Follow the revision exactly, including adult / nude / erotic changes when requested.',
-      // 영역 지정(인페인트) 수정에도 텍스트 수정과 동일하게 "속옷 재등장 금지"를 명시한다 —
-      // 예전엔 이 분기엔 없어서, 마스크한 부분에서 옷/속옷을 지워달라고 해도 모델이 학습
-      // 편향으로 브라·팬티를 다시 그려 넣는 사고가 텍스트 수정 경로보다도 더 흔했다
-      // (마스크 영역이 좁아 모델이 "뭔가로는 채워야 한다"고 판단하기 쉬움).
       wantsFullNude(revision, base)
         ? `Adult full nude inside the mask: remove garment AND panties/thong — bare breasts and bare crotch, no underwear redrawn. ${buildNudeAnatomyVisibilityLock(`${base} ${revision}`)}`
         : '',
@@ -1284,7 +1375,13 @@ export function buildRefinePrompt(input: {
   const bgAndPoseNote = 'Keep background and pose unchanged unless the change requires it.'
   const bathrobeNote = 'Do not add a bathrobe, kimono, or coat unless requested.'
   const nudeOrLingerieNote = wantsFullNude(revision, base)
-    ? `CRITICAL FULL NUDE: remove ALL garments — robe, gown, sweater, bra, pants, skirt, AND panties/thong/briefs/underwear. Bare breasts with visible nipples AND bare crotch (no fabric on hips/mons). End state: fully nude adult woman, zero underwear remnant.${refineCoupleRequested ? ' If a second person (e.g. a man) is in the source, he stays fully clothed and unchanged — only the woman becomes nude.' : ''} ${buildNudeAnatomyVisibilityLock(`${base} ${revision}`)}`
+    ? `CRITICAL FULL NUDE: remove ALL garments — robe, gown, sweater, bra, pants, skirt, AND panties/thong/briefs/underwear. Bare breasts with visible nipples AND bare crotch (no fabric on hips/mons). End state: fully nude adult woman, zero underwear remnant.${
+        wantsHeteroManWomanCast(`${revision} ${base}`)
+          ? ` ${buildHeteroManWomanCastLock()}`
+          : refineCoupleRequested
+            ? ' If a second person (e.g. a man) is in the source, he stays fully clothed and unchanged — only the woman becomes nude.'
+            : ''
+      } ${buildNudeAnatomyVisibilityLock(`${base} ${revision}`)}`
     : 'If lingerie/underwear is requested, show it, never a robe.'
   const contextPrefix = 'Context (must still hold):'
   const photoNote = refineCoupleRequested
@@ -1301,6 +1398,7 @@ export function buildRefinePrompt(input: {
     countWords(bgAndPoseNote) +
     countWords(bathrobeNote) +
     countWords(nudeOrLingerieNote) +
+    countWords(heteroCast) +
     countWords(contextPrefix) +
     countWords(photoNote)
   const remainingForAmplifyAndBase = Math.max(0, SDXL_WORKING_BUDGET_WORDS - fixedWords - countWords(revision))
@@ -1313,6 +1411,7 @@ export function buildRefinePrompt(input: {
     `${imgEditPrefix} ${identityLockSentence}`,
     `${applyPrefix} ${revision}.${cappedAmplify ? ` ${cappedAmplify}.` : ''}`,
     framingCastNote,
+    heteroCast,
     bgAndPoseNote,
     bathrobeNote,
     nudeOrLingerieNote,
@@ -1329,7 +1428,107 @@ export function buildRefinePrompt(input: {
 // 동작 문구) 실제로 요청한 모션 힌트와 은근히 경쟁하며 순응도를 떨어뜨리는 사고가 실측으로
 // 확인됐다("2차/3차 수정 이후 만든 쇼츠일수록 모션이 잘 안 먹힌다"). 참고문은 짧게 잘라서
 // 정체성·의상·배경 같은 핵심만 남기고, 뒤에 누적된 최근 수정 문구의 비중을 줄인다.
-const ANIMATION_CONTINUITY_MAX_CHARS = 260
+const ANIMATION_CONTINUITY_MAX_CHARS = 180
+/** Wan 2.2 I2V fast 실측: ~1500자 넘으면 순응도 급락 → 하드 상한 */
+const WAN_I2V_PROMPT_MAX_CHARS = 1500
+
+/**
+ * 쇼츠 프롬프트 구역 — 나열이 아니라 역할이 있는 칸.
+ * priority 낮을수록 보존 우선(예산 초과 시 큰 숫자부터 삭제).
+ * 1 MOTION  2 TIME  3 END(종결·원본 복귀 금지)  4 CAST  5 BODY  6 CAM  7 ID
+ * 실측: 15초 클립 후반에 원본 복장/포즈로 되돌아감 → END를 TIME 바로 다음으로 보존하고
+ * HOLD 구간을 더 길게(마지막 3~4초) 잡는다.
+ */
+type WanSectionKey = 'MOTION' | 'TIME' | 'CAST' | 'BODY' | 'CAM' | 'END' | 'ID'
+type WanSection = { key: WanSectionKey; text: string; priority: number }
+
+const WAN_SECTION_PRIORITY: Record<WanSectionKey, number> = {
+  MOTION: 1,
+  TIME: 2,
+  END: 3,
+  CAST: 4,
+  BODY: 5,
+  CAM: 6,
+  ID: 7,
+}
+
+function resolveClipTotalSec(durationSec?: number): number {
+  return Math.max(2, Math.round(Number(durationSec) || 15))
+}
+
+/**
+ * HOLD 시작 시각 — 원본 스냅백이 보통 끝 1~2초에 생기므로
+ * 그보다 앞부터 종결 상태를 고정한다 (15초 → 11–15초).
+ */
+function wanHoldStartSec(totalSec: number): number {
+  if (totalSec >= 12) return totalSec - 4
+  if (totalSec >= 8) return totalSec - 3
+  return Math.max(0, totalSec - 2)
+}
+
+const WAN_END_NO_SNAPBACK =
+  'CRITICAL END LOCK: the source photo is START FRAME ONLY. FORBIDDEN in the final seconds: morphing/fading/resetting back to the opening still — no original clothes returning, no stiff side-by-side smile, no undoing the hug/kiss/fondle/nude. FREEZE the climax end-state through the LAST FRAME.'
+
+/**
+ * 종결 고정 — 요청한 상태(나체·포옹·가슴 애무 등)로 끝까지 유지, 원본 스냅백 금지.
+ * mode: nude | action | motion | dress
+ */
+function buildWanEndHold(opts: {
+  durationSec?: number
+  mode: 'nude' | 'action' | 'motion' | 'dress' | 'clothed'
+  actionHint?: string
+  holdStartSec?: number
+}): string {
+  const total = resolveClipTotalSec(opts.durationSec)
+  const hold =
+    typeof opts.holdStartSec === 'number' && Number.isFinite(opts.holdStartSec)
+      ? Math.max(0, Math.min(total, Math.round(opts.holdStartSec)))
+      : wanHoldStartSec(total)
+  const window = `HOLD ${hold}–${total}s (last ${total - hold}s) AND the very last frame`
+  if (opts.mode === 'nude') {
+    return `${window}: stay fully nude — bare breasts, bare crotch with a dark curly pubic triangle, ZERO panties/clothes. FAILED hairless crotch. ${WAN_END_NO_SNAPBACK}`
+  }
+  if (opts.mode === 'dress') {
+    return `${window}: keep the requested garment on — do not undress again. FORBIDDEN snapback to nude or the opening still.`
+  }
+  if (opts.mode === 'clothed') {
+    return `${window}: freeze MOTION end-state, clothes stay on. FORBIDDEN snapback to the opening still.`
+  }
+  if (opts.mode === 'action') {
+    const hint = opts.actionHint
+      ? ` Keep exactly: ${opts.actionHint}.`
+      : ' Keep hug / kiss / breast-touch / nude climax as requested.'
+    return `${window}: keep the action end-state frozen.${hint} ${WAN_END_NO_SNAPBACK}`
+  }
+  return `${window}: keep the MOTION end-state frozen (embrace stays embrace, fondle stays fondle, nude stays nude). ${WAN_END_NO_SNAPBACK}`
+}
+
+/**
+ * 옷 입은 일반 쇼츠 TIME — 나체 경로와 같은 BEAT 칸.
+ * 장문 END LOCK을 TIME에 또 붙이면 MOTION이 묻혀 Wan이 미소 클로즈업으로 도망간다(실측).
+ */
+function buildClothedWanTime(opts: {
+  motion: string
+  durationSec?: number
+  dressAction?: boolean
+}): string {
+  const total = resolveClipTotalSec(opts.durationSec)
+  const hold = wanHoldStartSec(total)
+  if (opts.dressAction) {
+    return `BEAT1 0–${hold}s: put on the requested garment. HOLD ${hold}–${total}s: keep it on, freeze. FORBIDDEN undressing again.`
+  }
+  const mid = Math.max(1, Math.round(hold / 2))
+  const act = truncateContinuityText(
+    (opts.motion || 'natural soft movement, same pose family as the source').trim(),
+    220,
+  )
+  return [
+    'TWO beats then freeze — do not merge:',
+    `BEAT1 0–${mid}s: begin — ${act}. Keep source clothes.`,
+    `BEAT2 ${mid}–${hold}s: continue the same action; it must stay visible.`,
+    `HOLD ${hold}–${total}s: FREEZE that clothed end-state.`,
+  ].join(' ')
+}
 
 function truncateContinuityText(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text
@@ -1337,6 +1536,46 @@ function truncateContinuityText(text: string, maxLen: number): string {
   const lastBreak = Math.max(slice.lastIndexOf('. '), slice.lastIndexOf(', '), slice.lastIndexOf(' '))
   const cut = lastBreak > maxLen * 0.5 ? lastBreak : maxLen
   return slice.slice(0, cut).trim()
+}
+
+function wanSection(key: WanSectionKey, text: string | false | null | undefined): WanSection | null {
+  const t = typeof text === 'string' ? text.replace(/\s{2,}/g, ' ').trim() : ''
+  if (!t) return null
+  return { key, text: t, priority: WAN_SECTION_PRIORITY[key] }
+}
+
+/** 구역 조립 후 1500자 초과면 ID→CAM→BODY→CAST 순으로 버린다(MOTION·TIME·END 보존). */
+function assembleWanSections(sections: Array<WanSection | null | undefined>): string {
+  let kept = sections.filter((s): s is WanSection => Boolean(s && s.text))
+  const render = (list: WanSection[]) =>
+    list
+      .slice()
+      .sort((a, b) => a.priority - b.priority)
+      .map((s) => `[${s.key}] ${s.text}`)
+      .join('\n')
+
+  let out = render(kept)
+  if (out.length <= WAN_I2V_PROMPT_MAX_CHARS) return out
+
+  while (kept.length > 1 && out.length > WAN_I2V_PROMPT_MAX_CHARS) {
+    const maxPri = Math.max(...kept.map((s) => s.priority))
+    // END(3)까지는 유지 — 후반 원본 복귀 방지에 필수
+    if (maxPri <= WAN_SECTION_PRIORITY.END) break
+    const dropAt = kept.findIndex((s) => s.priority === maxPri)
+    if (dropAt < 0) break
+    kept = kept.filter((_, i) => i !== dropAt)
+    out = render(kept)
+  }
+  if (out.length <= WAN_I2V_PROMPT_MAX_CHARS) return out
+  return truncateContinuityText(out, WAN_I2V_PROMPT_MAX_CHARS)
+}
+
+/** @deprecated 구역 조립 전용 — assembleWanSections 사용. 단순 배열용 폴백. */
+function finalizeWanI2vPrompt(parts: string[]): string {
+  const motionish = parts.filter(Boolean)
+  if (!motionish.length) return ''
+  // 레거시 호출: 전체를 MOTION 한 칸으로 넣고 예산만 적용
+  return assembleWanSections([wanSection('MOTION', motionish.join(' '))])
 }
 
 /**
@@ -1417,27 +1656,45 @@ export function buildAdultStructureLock(
 }
 
 /**
- * 쇼츠 카메라 잠금 — 줌/클로즈업 기능 전면 제거(2026-08-28, 사용자 명시 요청).
- * 예전엔 single만 줌 전면 금지였고 dual-a(후반 줌인 브릿지)·dual-b(후반 줌아웃 또는
- * 클로즈업 종결)에는 줌 연출이 남아 있었다 — 이제 clipRole·undressOrNude·endCloseUp과
- * 무관하게 모든 클립이 처음부터 끝까지 소스 프레이밍을 그대로 유지한다(줌 완전 삭제).
+ * 쇼츠 카메라 — 기본은 원본 구도 고정. 줌/클로즈업은 모션에 사용자가 적을 때만.
+ * 「head AND feet」를 무조건 쓰면, 허벅지까지인 원본(실측)을 전신으로 재프레이밍하다가
+ * 가슴 동작에서 상체 줌인으로 도망간다.
  */
 export function buildShortsCameraLock(input: {
   clipRole?: 'single' | 'dual-a' | 'dual-b'
   undressOrNude?: boolean
   endCloseUp?: boolean
+  sourceBust?: boolean
 }): string {
+  if (input.sourceBust === true && input.undressOrNude === true && input.clipRole !== 'dual-b') {
+    return 'CAMERA: slow ZOOM OUT / pull-back from this ID/bust crop to standing FULL BODY, head-to-shoes. Face stays visible the whole time. Body scale matches this face. Clothes come off DURING the pull-back. FORBIDDEN zoom-in, tilt-down, chest-only crop, cutting the head off. End wide: full body in frame.'
+  }
+  if (input.endCloseUp === true) {
+    return input.undressOrNude === true
+      ? 'CAMERA: keep source crop while clothes come off. After she is nude, slowly push in toward the requested action (user asked for zoom). Face may grow only then.'
+      : 'CAMERA: may slowly push in because the user asked for zoom/close-up. Do not zoom unless that was asked.'
+  }
   const base =
-    'CAMERA: NO zoom-in, NO zoom-out, NO push-in, NO close-up crop for the whole clip — keep the EXACT source framing (same scale/crop) from the first frame to the last, even during undress/nude action.'
+    'CAMERA: NO zoom, NO tilt-down, NO push-in. Keep EXACT source crop. Same head size, same amount of body visible as the source. FORBIDDEN chest close-up, neck-down crop, cutting the head off.'
   return input.undressOrNude === true
-    ? `${base} Hips/legs/crotch stay in frame so clothing can come fully off within this same wide shot.`
+    ? `${base} Nude only what that crop already shows. FORBIDDEN covering breasts with both hands.`
     : base
 }
 
-/** 모션에 「클로즈업으로 끝내」「줌인 유지」 등 — 2프레임 후반 줌아웃 대신 클로즈 종결 */
+/** 모션에 「클로즈업으로 끝내」「줌인 유지」 등 — 종결만 클로즈 */
 export function wantsEndCloseUp(motion: string): boolean {
   const t = polishKoreanPromptText(motion || '')
   return /클로즈\s*업\s*(으로\s*)?(끝|종|마무리)|줌\s*인\s*(으로\s*)?(끝|유지|종)|줌인\s*상태|클로즈업\s*상태|가까이\s*(에서\s*)?(끝|마무리)|close[\s-]?up\s*(end|ending|finish|hold)|end\s*(on\s*)?(a\s*)?close[\s-]?up|stay\s*zoomed|keep\s*zoomed|no\s*zoom[\s-]?out/i.test(
+    t,
+  )
+}
+
+/** 사용자가 줌/클로즈업을 요청했는지 — 안 적으면 줌 금지 */
+export function wantsRequestedZoom(motion: string): boolean {
+  const t = polishKoreanPromptText(motion || '')
+  if (!t) return false
+  if (wantsEndCloseUp(t)) return true
+  return /줌\s*인|줌인|클로즈\s*업|클로즈업|가까이\s*(다가|찍|보여)|zoom[\s-]?in|close[\s-]?up|push[\s-]?in/i.test(
     t,
   )
 }
@@ -1462,11 +1719,14 @@ export function buildAnimationPrompt(input: {
   durationSec?: number
   /** 사용자가 UI에서 직접 고른 가슴 높이(high/mid/low) — 없으면(auto) 기존 추정 로직 사용 */
   bustHeight?: string
+  /** 지금장 얼굴 수. 있으면 모션 문구보다 우선 — 1이면 상대를 만들지 않음 */
+  sourcePeople?: 1 | 2
+  /** 증명/상반신 소스 — 벗기는 줌인이 아니라 줌아웃으로 전신을 연다 */
+  sourceBust?: boolean
 }): string {
   const fullOriginal = polishKoreanPromptText(input.prompt ?? '')
   const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
   const landmarks = input.landmarks ? normalizeBodyLandmarks(input.landmarks) : null
-  const endCloseUp = wantsEndCloseUp(input.motion ?? '')
   // 참고문은 짧게 줄여서 모션 힌트와의 경쟁을 줄이지만, 누드/탈의 판별(sourceIsNude)은
   // 원문 전체로 해야 한다 — 여러 번 수정을 거치며 누적된 텍스트는 "누드로 바꿔줘" 같은
   // 문구가 뒤쪽(잘려 나가는 부분)에 있을 수 있어서, 잘린 텍스트만 보면 이미 누드인 원본을
@@ -1497,27 +1757,35 @@ export function buildAnimationPrompt(input: {
   const undressAction =
     forceBecomeNude ||
     wantsUndressAction(motion) ||
+    wantsOtbeotgim(detectionMotion) ||
     (wantsNudeOrUndress(motion) && !sourceIsNude)
+  const clothesPeel = wantsOtbeotgim(`${detectionMotion} ${motion}`)
+  const bustAnchor = landmarks ? buildBodyLandmarkCoordsLockShort(landmarks) : ''
   const dressAction = !undressAction && wantsDressAction(motion)
   const staysNude = sourceIsNude && !undressAction && !dressAction
-  const structureCorpus = `${fullOriginal}\n${motion}`
+  const forcedPeople = input.sourcePeople === 1 || input.sourcePeople === 2 ? input.sourcePeople : null
   const coupleRequested =
-    intimate.wantsPartner ||
-    /남녀|남여|둘\s*다|남자와|여성과|커플|서로|partner|couple|both\s*adults|man\s+and\s+woman/i.test(
-      `${motion} ${fullOriginal}`,
-    )
-  // coupleRequested는 intimate.wantsPartner(단독 사진 + "파트너가 만진다"류 암시 동작)도
-  // 포함해서, 그 경우엔 사진에 실제로 두 번째 사람이 없을 수 있다 — buildCoupleFaceLock은
-  // "사진에 이미 두 사람이 있다"는 텍스트 신호가 명시적으로 있을 때만 넣는다(암시된 파트너
-  // 만으로 넣으면 무관한 문구가 이미 짧게 압축된 leanIntimate 프롬프트를 다시 늘린다).
+    forcedPeople === 1
+      ? false
+      : forcedPeople === 2
+        ? true
+        : intimate.wantsPartner ||
+          /남녀|남여|둘\s*다|남자와|여성과|커플|서로|partner|couple|both\s*adults|man\s+and\s+woman/i.test(
+            `${motion} ${detectionMotion}`,
+          )
+  // 지금장 인원(sourcePeople)이 있으면 그 값이 우선. 문구·체크박스로 없는 상대를 만들지 않음.
   const twoPeopleInSource =
-    /남녀|남여|둘\s*다|남자와|여성과|커플|서로|both\s*adults|man\s+and\s+woman|couple/i.test(
-      structureCorpus,
-    )
+    forcedPeople === 1
+      ? false
+      : forcedPeople === 2
+        ? true
+        : /남녀|남여|둘\s*다|남자와|여성과|커플|서로|both\s*adults|man\s+and\s+woman|couple|사진에는 두 사람/i.test(
+            `${detectionMotion} ${motion}`,
+          )
 
-  // 몸매 투영 전용 — 버튼(bodyProject) 또는 유효 타점이 있을 때만 become 단축.
-  // 모션 문구에 「몸매 투영」이 남아 있어도 키스/애무 leanIntimate를 가로채지 않는다.
-  if (input.bodyProject === true || landmarks) {
+  // 몸매 투영 버튼만 become 단축. 옷벗김 타점은 leanIntimate에 좌표만 붙인다 —
+  // landmarks가 있으면 주무르기 경로를 가로채던 실측을 막는다.
+  if (input.bodyProject === true) {
     return buildNudeBecomesAnimationPrompt({
       motion: motion || '몸매 투영',
       clipRole,
@@ -1528,67 +1796,337 @@ export function buildAnimationPrompt(input: {
     })
   }
 
+  // 백허그: 나체/탈의 여부와 무관하게 전용 경로 — leanIntimate 밖(기본 경로)으로
+  // 빠지면 TIME 비트가 약해지고, "exact source framing" 카메라가 옆서기 원본에 고정됨(실측).
+  const wantsBackHugPoseEarly =
+    intimate.wantsBackHug === true ||
+    wantsBackHug(detectionMotion) ||
+    wantsBackHug(motion)
+  if (wantsBackHugPoseEarly) {
+    const kissIntensityBh = detectKissIntensity(detectionMotion) || detectKissIntensity(motion) || 'kiss'
+    const wantsKissBh = detectKissIntensity(detectionMotion) != null || detectKissIntensity(motion) != null
+    const wantsBreastBh =
+      intimate.addon.includes('breast fondling') ||
+      intimate.addon.includes('breast play') ||
+      new RegExp(`(?:가슴|젖|유방)\\s*(?:을|를)?\\s*(?:${TOUCH_ACTION_VERBS_KO}|애무)|breast\\s*fondl`, 'i').test(
+        detectionMotion,
+      )
+    const touchVerbPhraseBh = detectTouchVerbPhrase(detectionMotion)
+    const threeAction = wantsKissBh && wantsBreastBh
+    // 탈의+3동작은 시간이 부족하므로: 탈의는 BEAT1에 흡수, 동작은 2~3비트
+    const nBeats = (threeAction ? 3 : 2) as 2 | 3
+    const totalBh = resolveClipTotalSec(input.durationSec)
+    // BEAT1(포즈 형성)에 시간을 더 줌 — 옆서기→뒤로 이동이 가장 어려움
+    const bhBounds =
+      nBeats === 3
+        ? [0, Math.max(3, Math.round(totalBh * 0.38)), Math.max(5, Math.round(totalBh * 0.68)), totalBh]
+        : [0, Math.max(4, Math.round(totalBh * 0.45)), totalBh]
+    const t1 = `0–${bhBounds[1]}s`
+    const t2 = `${bhBounds[1]}–${bhBounds[2]}s`
+    const t3 = nBeats >= 3 ? `${bhBounds[2]}–${bhBounds[3]}s` : ''
+    const poseLock =
+      'POSE every second: man stands DIRECTLY BEHIND her (his chest on her BACK). His head is over/behind her shoulder. BOTH arms wrap her torso from behind. FORBIDDEN: beside her, side-hug, hand-only on hip, face-to-face, passport stance.'
+    const camBh =
+      'CAMERA: keep a WIDE shot showing both full upper bodies. Bodies may RECOMPOSE inside the frame so he moves from beside her to BEHIND her — that rearrange is REQUIRED. FORBIDDEN face-only close-up; FORBIDDEN freezing the opening side-by-side stance.'
+    let beat1: string
+    let beat2: string
+    let beat3 = ''
+    if (undressAction && threeAction) {
+      beat1 = `BEAT1 (${t1}): clothes off → full nude AND he steps from beside/front to DIRECTLY BEHIND her into back-hug. ${poseLock} No kiss/breast yet.`
+      beat2 = `BEAT2 (${t2}): HOLD back-hug. She tilts head back. ${kissIntensityActionLine(kissIntensityBh, { backHug: true })} Hands not on breasts yet.`
+      beat3 = `BEAT3 (${t3}): HOLD back-hug. Both hands around onto her bare breasts, ${touchVerbPhraseBh} continuously.`
+    } else if (undressAction) {
+      beat1 = `BEAT1 (${t1}): undress to full nude while he moves BEHIND her into back-hug. ${poseLock}`
+      beat2 = wantsKissBh
+        ? `BEAT2 (${t2}): HOLD back-hug. She tilts head back. ${kissIntensityActionLine(kissIntensityBh, { backHug: true })}`
+        : wantsBreastBh
+          ? `BEAT2 (${t2}): HOLD back-hug. Hands on bare breasts from behind, ${touchVerbPhraseBh}.`
+          : `BEAT2 (${t2}): HOLD nude back-hug to the end. ${poseLock}`
+    } else if (threeAction) {
+      beat1 = `BEAT1 (${t1}): CRITICAL pose change — he MOVES BEHIND her now (leave side-by-side). Chest to her back, both arms wrap. ${poseLock} Kiss/breast NOT yet.`
+      beat2 = `BEAT2 (${t2}): KEEP behind her. She tilts head back. ${kissIntensityActionLine(kissIntensityBh, { backHug: true })} Hands not on breasts yet.`
+      beat3 = `BEAT3 (${t3}): KEEP behind her. Both hands cup bare breasts from behind, ${touchVerbPhraseBh}.`
+    } else if (wantsKissBh) {
+      beat1 = `BEAT1 (${t1}): he MOVES BEHIND her into back-hug (leave side-by-side). ${poseLock}`
+      beat2 = `BEAT2 (${t2}): KEEP behind. She tilts head back. ${kissIntensityActionLine(kissIntensityBh, { backHug: true })}`
+    } else if (wantsBreastBh) {
+      beat1 = `BEAT1 (${t1}): he MOVES BEHIND her into back-hug. ${poseLock}`
+      beat2 = `BEAT2 (${t2}): KEEP behind. Hands on bare breasts from behind, ${touchVerbPhraseBh}.`
+    } else {
+      beat1 = `BEAT1 (${t1}): he MOVES BEHIND her into back-hug (leave side-by-side). ${poseLock}`
+      beat2 = `BEAT2 (${t2}): HOLD back-hug — he never returns to her side.`
+    }
+    const holdStartBh = wanHoldStartSec(totalBh)
+    const lastBh = wantsBreastBh
+      ? 'still back-hug, hands on her breasts from behind'
+      : wantsKissBh
+        ? 'still back-hug, still kissing over her shoulder, head tilted back'
+        : 'still back-hug — man behind her'
+    const nudeHint =
+      undressAction || staysNude
+        ? 'She is / becomes fully nude.'
+        : 'Keep her outfit unless undress was requested.'
+    return assembleWanSections([
+      wanSection(
+        'MOTION',
+        [
+          'BACK-HUG ONLY: man BEHIND woman, chest-to-back, arms wrapped from behind for the WHOLE clip.',
+          nudeHint,
+          poseLock,
+        ].join(' '),
+      ),
+      wanSection(
+        'TIME',
+        [
+          nBeats >= 3 ? 'THREE beats — pose change first, then actions; never merge:' : 'TWO beats — pose change first; never merge:',
+          beat1,
+          beat2,
+          beat3,
+          `HOLD ${holdStartBh}–${totalBh}s: FREEZE ${lastBh}. ${WAN_END_NO_SNAPBACK}`,
+        ]
+          .filter(Boolean)
+          .join(' '),
+      ),
+      wanSection(
+        'CAST',
+        twoPeopleInSource || coupleRequested
+          ? `${buildCoupleFaceLock()} Same two adults; man stays behind her.`
+          : 'Two adults: man behind woman.',
+      ),
+      wanSection(
+        'BODY',
+        [
+          staysNude || undressAction ? 'Same breast size (ambiguous: +½–1 cup max).' : 'Same body proportions as source.',
+          buildBustHeightPreferenceLine(input.bustHeight),
+          staysNude || undressAction ? buildWanPubicLine(`${detectionMotion} ${fullOriginal}`) : '',
+        ]
+          .filter(Boolean)
+          .join(' '),
+      ),
+      wanSection('CAM', camBh),
+      wanSection('END', buildWanEndHold({ durationSec: totalBh, mode: 'action', actionHint: lastBh })),
+    ])
+  }
+
   // 나체+키스/만짐: 장문 잠금이 Wan에서 키스·나체를 죽이고 "툭 만짐"만 남는 실측
   // → 짧은 동작 타임라인 전용 프롬프트로 보낸다.
   // "그냥 나체가 되어 선다"처럼 동작 없는 순수 탈의 요청도 예전엔 이 짧은 경로를 안 타고
   // 아래 "기본 경로"(13,000자대 장문)로 빠졌는데, 실측 결과 그 장문 경로는 Wan이 거의
   // 통째로 무시하고 "미소 짓는 클로즈업 인물영상"을 기본값으로 뱉어버려 탈의가 0%였다.
   // → undressAction/staysNude면 동작 유무와 무관하게 전부 이 짧은 경로로 통일한다.
+  // 옷 입은 커플 키스 — leanIntimate(나체)로 보내면 1초 만에 남자 삭제+여자 나체가 됨(실측)
+  const clothedCoupleKiss =
+    twoPeopleInSource &&
+    detectKissIntensity(detectionMotion) != null &&
+    !undressAction &&
+    !staysNude &&
+    !clothesPeel &&
+    !wantsNudeOrUndress(detectionMotion)
+
+  if (clothedCoupleKiss) {
+    const total = resolveClipTotalSec(input.durationSec)
+    const hold = wanHoldStartSec(total)
+    const mid = Math.max(1, Math.round(hold / 2))
+    return assembleWanSections([
+      wanSection(
+        'MOTION',
+        'BOTH source adults stay in frame. Passionate mouth-to-mouth kiss. Keep source clothes. FORBIDDEN nude or undress. FORBIDDEN the man disappearing. FORBIDDEN a solo woman.',
+      ),
+      wanSection(
+        'TIME',
+        `BEAT1 0–${mid}s: they start kissing — both visible, clothes on. BEAT2 ${mid}–${hold}s: keep kissing, man still there. HOLD ${hold}–${total}s: FREEZE both kissing, clothes on.`,
+      ),
+      wanSection(
+        'CAST',
+        `${buildCoupleFaceLock()} BOTH stay visible every second. He stays male. FORBIDDEN deleting the man.`,
+      ),
+      wanSection('BODY', 'Same two bodies and source clothes. Do not undress.'),
+      wanSection('CAM', 'CAMERA: source crop. Both faces in frame. NO zoom.'),
+      wanSection(
+        'END',
+        `Last frames: both still kissing, clothes on, man still in frame. FORBIDDEN solo woman. FORBIDDEN nude. FORBIDDEN snapback to one person.`,
+      ),
+    ])
+  }
+
+  const pantyMeltOnly = wantsPantyMeltOnly(`${detectionMotion} ${motion}`)
+  if (pantyMeltOnly) {
+    const total = resolveClipTotalSec(input.durationSec)
+    const holdStart = wanHoldStartSec(total)
+    return assembleWanSections([
+      wanSection(
+        'MOTION',
+        `Same woman, exact source pose. Melt the remaining panty/thong until bare skin. ${SILK_MATCH_LINGERIE_LINE} FORBIDDEN adding clothes. FORBIDDEN standing up if she is sitting. Face stays in frame. No second adult.`,
+      ),
+      wanSection(
+        'TIME',
+        `BEAT1 0–${holdStart}s: panty dissolves to bare skin. HOLD ${holdStart}–${total}s: FREEZE same pose, fully nude, panty gone. ${WAN_END_NO_SNAPBACK}`,
+      ),
+      wanSection('CAST', 'Only the source woman — do not invent a partner.'),
+      wanSection('BODY', 'Same body as source. Bare skin where the panty was. ZERO new fabric.'),
+      wanSection('CAM', 'CAMERA: exact source crop. FACE in frame. FORBIDDEN zoom.'),
+      wanSection('END', buildWanEndHold({ durationSec: total, mode: 'nude' })),
+    ])
+  }
+
   const leanIntimate = undressAction || staysNude
 
   if (leanIntimate) {
-    const wantsKiss = /키스|입\s*(?:을\s*)?맞추|입맞춤|kiss/i.test(detectionMotion)
+    const wantsKiss = detectKissIntensity(detectionMotion) != null
+    const kissIntensity = detectKissIntensity(detectionMotion) || 'kiss'
+    const splitHands = detectSplitHandTargets(detectionMotion)
+    // 「Last frame bare crotch」「to BARE crotch」는 탈의 끝 상태 — 보지 애무가 아님.
+    // 그 단어만으로 wantsCrotch가 켜지면 5초 벗기가 아래 확대·손 애무로 새어 나감(실측).
+    const crotchDetect = detectionMotion
+      .replace(/last\s+frame\s+bare\s+crotch/gi, ' ')
+      .replace(/to\s+bare\s+crotch/gi, ' ')
+      .replace(/freeze\s+bare\s+crotch/gi, ' ')
+      .replace(/bare\s+crotch\s+first/gi, ' ')
+      .replace(/bare\s+breasts?(?:\s*[+,]\s*|\s+and\s+)bare\s+crotch/gi, ' ')
+      .replace(/bare\s+hips\/crotch/gi, ' ')
     const wantsCrotch =
+      Boolean(splitHands && (splitHands.left === 'vulva' || splitHands.right === 'vulva')) ||
       intimate.addon.includes('CROTCH FONDLE') ||
-      /보지|음부|성기|클리|외음|크롯치|crotch|pussy|vulva|clit/i.test(detectionMotion)
+      intimate.addon.includes('SPLIT HANDS') ||
+      intimate.addon.includes('TWO HANDS') ||
+      /보지|음부|클리|외음|크롯치|crotch|pussy|vulva|clit/i.test(crotchDetect)
+    const wantsMaleHand =
+      intimate.wantsMaleGenitalHand === true || wantsMaleGenitalHand(detectionMotion)
     const wantsBreast =
-      !wantsCrotch &&
-      (intimate.addon.includes('breast fondling') ||
-        intimate.addon.includes('breast play') ||
-        new RegExp(`(?:가슴|젖|유방)\\s*(?:을|를)?\\s*(?:${TOUCH_ACTION_VERBS_KO}|애무)|breast\\s*fondl`, 'i').test(
-          detectionMotion,
-        ))
+      Boolean(splitHands && (splitHands.left === 'breast' || splitHands.right === 'breast')) ||
+      intimate.addon.includes('breast fondling') ||
+      intimate.addon.includes('breast play') ||
+      intimate.addon.includes('SPLIT HANDS') ||
+      intimate.addon.includes('TWO HANDS') ||
+      new RegExp(
+        `(?:가슴|젖|유방)\\s*(?:을|를)?\\s*(?:${TOUCH_ACTION_VERBS_KO}|애무)|breast\\s*fondl|knead(?:s|ing)?\\s*(?:her\\s*)?(?:own\\s*)?(?:breast|chest)`,
+        'i',
+      ).test(detectionMotion)
+    const soloSplitHands =
+      Boolean(splitHands) && !intimate.wantsPartner && !twoPeopleInSource
+    const soloSelfBreast =
+      wantsBreast &&
+      !soloSplitHands &&
+      isSoloSelfTouch(detectionMotion) &&
+      !intimate.wantsPartner
+    const peelLayers = clothesPeel || (soloSelfBreast && undressAction)
+    const allowZoom = wantsRequestedZoom(detectionMotion)
     const touchVerbPhrase = detectTouchVerbPhrase(detectionMotion)
-    // 실측: 동작(키스/애무/터치)이 전혀 없는 "그냥 나체가 되어 선다" 같은 순수 탈의 요청은
-    // 아래 비트 구조를 다 채워도 프롬프트가 500자를 넘어가고, Wan 2.2 I2V fast가 그 정도
-    // 분량도 못 따라가고 원본 그대로(클로즈업+미소)를 뱉는 걸 직접 확인했다(15초 클립 기준
-    // 5,893자 프롬프트 = 탈의 0%, 동일 내용을 330자로 줄이자 탈의 100% 성공).
-    // → 동작이 전혀 없으면 극단적으로 짧은 전용 프롬프트로 별도 처리한다.
-    // 주의: detectTouchVerbPhrase()는 매칭 실패 시에도 기본값 문자열('squeezing and
-    // stroking continuously')을 반환해서 항상 truthy다 — touchVerbPhrase 자체로는
-    // "터치 동작이 있었는지" 판별할 수 없다. 실제 동작 단어 존재 여부로 직접 판별한다.
+    // 상호 만짐: 남자→여 가슴 + 여자→남 자지 (정책 금지가 아니라 예전엔 경로가 없어서 무시됨)
+    const mutualBreastHandjob = wantsBreast && wantsMaleHand
+    const twoWomenAsk = isExplicitTwoWomenCast(`${detectionMotion} ${fullOriginal}`)
+    const sourcePairIntimate =
+      twoPeopleInSource && !twoWomenAsk && (wantsKiss || wantsBreast || undressAction || staysNude)
     const plainNudeOnly =
+      !twoPeopleInSource &&
       !intimate.wantsPartner &&
       !intimate.addon &&
       !wantsKiss &&
       !wantsCrotch &&
       !wantsBreast &&
-      // TOUCH_ACTION_VERBS_KO 재사용 — 예전엔 여기에 별도 하드코딩 목록이 있어서
-      // "주무른다" 같은 르-불규칙 활용형이 위(wantsBreast)와 따로 또 빠지는 사고가 났다.
-      // 상수를 하나만 두고 재사용해야 두 판정이 항상 같이 고쳐진다.
+      !wantsMaleHand &&
       !new RegExp(`${TOUCH_ACTION_VERBS_KO}|애무`, 'i').test(detectionMotion)
     if (plainNudeOnly) {
       const bounds = undressAction ? buildEqualBeatSeconds(input.durationSec, 2) : null
       const half = bounds ? bounds[1] : 0
-      const total = bounds ? bounds[2] : Math.max(2, Math.round(Number(input.durationSec) || 15))
-      const plainParts = [
-        'Adult photorealistic video. Same Korean woman: same face AND same body proportions (breast size/shape, waist, hip width) as the input image — do not slim her down, bulk her up, or resize her breasts. Same room, static camera.',
-        clipRole === 'single'
-          ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
-          : '',
-        coupleRequested
-          ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
-          : '',
-        twoPeopleInSource ? buildCoupleFaceLock() : '',
-        undressAction
-          ? `In the first ${half}s (0–${half}s) she completely removes ALL clothes together — top, bra, AND pants/jeans/shorts/skirt/panties, not just the top. From ${half}s to ${total}s, all the way to the very last frame, she stays fully nude: bare breasts staying at the SAME height/position on her chest as before undressing (do NOT lift them higher) with small-to-medium round natural pinkish-brown nipples/areola (NOT a large dark oval blob, NOT a printed spiral/swirl/ring pattern), bare vulva with a compact patch of dense natural curly pubic hair (not wide straggly wisps, not a flat painted patch) clearly visible, ZERO panties left on at any point, ZERO fog or blur over the crotch.`
-          : 'She is already fully nude for the entire clip: bare breasts at the same height as the clothed source (not lifted higher) with small-to-medium round natural pinkish-brown nipples/areola (NOT a large dark oval blob, NOT a printed spiral/swirl/ring pattern), bare vulva with a compact patch of dense natural curly pubic hair (not wide straggly wisps, not a flat painted patch) clearly visible, ZERO panties, ZERO fog or blur over the crotch.',
-        motion ? `Motion: ${motion}.` : '',
-        'BODY LOCK: breasts a touch LARGER than the clothing implies (not smaller), same HEIGHT and waist-hip proportions as source, natural jiggle/sway with movement (not rigid) — consistent every frame.',
-        buildBustHeightPreferenceLine(input.bustHeight),
-      ].filter(Boolean)
-      return plainParts.join(' ')
+      const total = bounds ? bounds[2] : resolveClipTotalSec(input.durationSec)
+      const holdStart = wanHoldStartSec(total)
+      // 「나체」「fully nude」처럼 상태 단어만 오면 MOTION이 빈약해 Wan이 탈의를 놓침
+      // → TIME의 비트와 맞춰 MOTION을 동작 문장으로 승격한다.
+      const nudeStateOnly = /^(?:fully\s*)?(?:nude|naked)\.?$|^(?:나체|누드|전라)\.?$/i.test(
+        motion.trim(),
+      )
+      const deskShort = total <= 6
+      const nextLayerOnly = /다음\s*겹만/.test(`${detectionMotion} ${motion}`)
+      const bustPullBack = input.sourceBust === true && undressAction && clipRole !== 'dual-b'
+      const peelBeat1End = deskShort
+        ? 4
+        : total <= 10
+          ? 3
+          : Math.min(holdStart - 2, Math.max(3, Math.round(total * 0.35)))
+      const peelHoldStart = deskShort ? 4 : total <= 10 ? total - 2 : holdStart
+      const motionLine = undressAction
+        ? clothesPeel
+          ? deskShort
+            ? nextLayerOnly
+              ? bustPullBack
+                ? `${bustAnchor} NEXT LAYER only. Slow ZOOM OUT to standing full body matching this face. Melt the current remaining outer garment while pulling back. Face stays in. FORBIDDEN zoom-in or tilt-down.`
+                : `${bustAnchor} NEXT LAYER only. Melt the current remaining outer garment (skirt if skirt remains; panty only if it is the last layer). Same pose. ${SILK_MATCH_LINGERIE_LINE} FORBIDDEN standing up. Face in frame.`
+              : bustPullBack
+                ? `${bustAnchor} ONE LAYER. Slow ZOOM OUT from this bust to standing full body, same person, same body scale as the face. Melt the outer garment while the camera pulls back. KEEP source skirt/bottoms. Face stays in frame. FORBIDDEN zoom-in, tilt-down, cutting the head, a second adult.`
+                : `${bustAnchor} ONE LAYER only. Melt the current outer garment slowly. KEEP source skirt/bottoms. ${SILK_MATCH_LINGERIE_LINE} FORBIDDEN instant topless. Exact source pose. If sitting, stay sitting. Face in frame. FORBIDDEN a second adult.`
+            : bustPullBack
+              ? `${bustAnchor} ${OTBEOTGIM_WAN_LINE} Slow ZOOM OUT to standing full body matching this face. Face stays in frame. FORBIDDEN zoom-in, tilt-down, covering breasts.`
+              : `${bustAnchor} ${OTBEOTGIM_WAN_LINE} Face stays in frame. FORBIDDEN covering breasts. FORBIDDEN tilt-down.`
+          : nudeStateOnly || !motion.trim()
+            ? bustPullBack
+              ? 'Same woman. Slow ZOOM OUT to standing full body while removing clothes. Face stays in. FORBIDDEN zoom-in or tilt-down.'
+              : 'Same woman removes ALL clothes (top, bra, pants, panties) until fully nude — keep source pose, face stays in frame, no dance/walk-away. FORBIDDEN covering breasts with hands. FORBIDDEN tilting the camera down to hide her head.'
+            : `${motion} Face stays in frame at source crop. Keep source pose. FORBIDDEN covering breasts with hands. FORBIDDEN tilt-down neck-only.`
+        : nudeStateOnly || !motion.trim()
+          ? 'Stay fully nude for the whole clip — same woman as source, face in frame.'
+          : motion
+      return assembleWanSections([
+        wanSection('MOTION', motionLine),
+        wanSection(
+          'TIME',
+          undressAction
+            ? clothesPeel
+              ? deskShort
+                ? nextLayerOnly
+                  ? bustPullBack
+                    ? `BEAT1 0–4s: pull-back to full body AND melt only the next remaining layer. Head stays in. HOLD 4–${total}s: FREEZE standing full body in that new state. FORBIDDEN zoom-in.`
+                    : `BEAT1 0–4s: melt only the next remaining layer. Same pose. ${SILK_MATCH_LINGERIE_LINE} HOLD 4–${total}s: FREEZE that new state. FORBIDDEN standing up or zoom.`
+                  : bustPullBack
+                    ? `BEAT1 0–4s: camera PULLS BACK to standing full body (head to shoes) while melting the outer/top only. Skirt stays. Face stays in. HOLD 4–${total}s: FREEZE that full-body frame. FORBIDDEN zoom-in or tilt-down.`
+                    : `BEAT1 0–4s: KEEP source clothes. Melt the outer/top only, slowly. Skirt stays. If a bra shows, silk matching the top, not black. FAILED instant topless or a black panty. HOLD 4–${total}s: FREEZE sitting, top gone, source skirt still on. FORBIDDEN standing up or zoom.`
+                : bustPullBack
+                  ? `BEAT1 0–${peelBeat1End}s: pull-back to full body. ${OTBEOTGIM_BEAT1_LINE} BEAT2 ${peelBeat1End}–${peelHoldStart}s: bra off, then skirt off, then panty OFF to bare skin, still full body. ${PANTY_MELT_FAIL} HOLD ${peelHoldStart}–${total}s: FREEZE standing full body, face visible, fully nude.`
+                  : `BEAT1 0–${peelBeat1End}s: ${OTBEOTGIM_BEAT1_LINE} BEAT2 ${peelBeat1End}–${peelHoldStart}s: bra off, then skirt off, then panty OFF to bare skin. ${PANTY_MELT_FAIL} HOLD ${peelHoldStart}–${total}s: FREEZE same crop, face visible, fully nude, dark curly pubic triangle on mons, ZERO fabric.`
+              : `BEAT1 0–${half}s: remove ALL clothes → full nude. BEAT2 ${half}–${holdStart}s: stay nude (bare breasts, bare crotch, ZERO panties). HOLD ${holdStart}–${total}s: FREEZE still nude. ${WAN_END_NO_SNAPBACK}`
+            : `0–${holdStart}s: fully nude entire time. HOLD ${holdStart}–${total}s: FREEZE still nude. ${WAN_END_NO_SNAPBACK}`,
+        ),
+        wanSection(
+          'CAST',
+          twoWomenAsk
+            ? buildCoupleFaceLock()
+            : twoPeopleInSource
+              ? buildSourcePairCastLock()
+              : coupleRequested
+                ? 'If a man is in the source, keep him male; only undress who the motion names.'
+                : 'Only the source woman — do not invent a partner.',
+        ),
+        wanSection(
+          'BODY',
+          [
+            'Same breast size/height and waist-hip as source; natural jiggle only.',
+            buildBustHeightPreferenceLine(input.bustHeight),
+            buildWanPubicLine(`${detectionMotion} ${fullOriginal}`),
+          ]
+            .filter(Boolean)
+            .join(' '),
+        ),
+        wanSection(
+          'CAM',
+          bustPullBack
+            ? buildShortsCameraLock({
+                clipRole,
+                undressOrNude: true,
+                sourceBust: true,
+              })
+            : 'CAMERA: exact source crop. FACE stays in frame. FORBIDDEN zoom, tilt-down, neck-down, covering breasts with hands.',
+        ),
+        wanSection(
+          'END',
+          buildWanEndHold({
+            durationSec: total,
+            mode: 'nude',
+            holdStartSec: clothesPeel && !deskShort ? peelHoldStart : undefined,
+          }),
+        ),
+      ])
     }
+
     // 키스 "대상 부위" — 「키스」단어만 보고 무조건 입-입으로 고정하면, 「보지에 키스」/
     // 「가슴에 키스」요청이 반영 안 되고(입-입 키스로 대체) 결국 크롯치 오판과 겹쳐
     // "손으로 만지기"만 남는 실측이 있었다. 명시된 대상이 있으면 그 부위 키스로 분기한다.
@@ -1608,294 +2146,272 @@ export function buildAnimationPrompt(input: {
       )
     const sequentialBreastThenKiss =
       wantsBreast && wantsKiss && !kissTargetVulva && !kissTargetBreast && sequentialConnector
-    // "3등분 약속": undress가 필요하면 그 자체로 1개 동작 + 이어지는 행동(들) — 3개
-    // 순차 동작(탈의·가슴·키스)이면 균등 3등분, 2개 동작(탈의 + 단일 지속 행동)이면
-    // 균등 반반. 이미 나체(staysNude)면 탈의 비트가 없어 분할이 필요 없다.
-    const beatBounds = undressAction
-      ? buildEqualBeatSeconds(input.durationSec, sequentialBreastThenKiss ? 3 : 2)
-      : null
-    const beat1TimeLabel = beatBounds ? `first ${beatBounds[1]}s, 0–${beatBounds[1]}s` : 'first third'
+    // 상호: 가슴 만짐 + 자지 만짐 — 접속사 있으면 순차, 없으면 동시
+    const sequentialMutualHand =
+      mutualBreastHandjob && sequentialConnector && !sequentialBreastThenKiss
+    const simultaneousMutualHand = mutualBreastHandjob && !sequentialConnector
+    // 3등분/반반:
+    // - 탈의 + 가슴→키스 = 3비트
+    // - 이미 나체 + 가슴→키스 | 가슴→자지 = 2비트 (탈의 시간 없음)
+    // - 탈의 + 단일/동시상호 = 2비트
+    const threeWayWithUndress = undressAction && sequentialBreastThenKiss
+    const twoWayAlreadyNude =
+      !undressAction && (sequentialBreastThenKiss || sequentialMutualHand)
+    const beatBounds = threeWayWithUndress
+      ? buildEqualBeatSeconds(input.durationSec, 3)
+      : undressAction || twoWayAlreadyNude
+        ? buildEqualBeatSeconds(input.durationSec, 2)
+        : null
+    const clipTotal = resolveClipTotalSec(input.durationSec)
+    const holdStart = wanHoldStartSec(clipTotal)
+    const beat1TimeLabel = beatBounds ? `0–${beatBounds[1]}s` : 'first third'
+    // BEAT2를 클립 끝까지 쓰면 HOLD와 겹쳐 마지막에 원본 선 자세로 스냅백됨(실측 15초).
     const beat2TimeLabel = !beatBounds
-      ? 'rest of clip'
-      : sequentialBreastThenKiss
-        ? `middle beat, ${beatBounds[1]}–${beatBounds[2]}s`
-        : `${beatBounds[1]}–${beatBounds[2]}s, all the way to the very last frame`
+      ? `until ${holdStart}s`
+      : threeWayWithUndress
+        ? `${beatBounds[1]}–${beatBounds[2]}s`
+        : `${beatBounds[1]}–${holdStart}s`
     const beat3TimeLabel =
-      beatBounds && sequentialBreastThenKiss ? `final beat, ${beatBounds[2]}–${beatBounds[3]}s` : ''
+      beatBounds && threeWayWithUndress ? `${beatBounds[2]}–${holdStart}s` : ''
+    const sourceMan = sourcePairIntimate || twoPeopleInSource
+    const manHand = sourceMan ? "the source MAN's hand" : 'her own hand'
+    const manKiss = sourceMan ? 'the source MAN kisses' : 'she'
+    const maleHandBeat = (label: string) =>
+      `BEAT (${label}): ${MAN_ZIPPER_HAND_LINE}`
+    const zoneEn = (z: 'breast' | 'vulva') => (z === 'breast' ? 'bare breast' : 'bare vulva/crotch')
+    const splitHandBeat =
+      wantsBreast && wantsCrotch && !wantsKiss && !wantsMaleHand
+        ? splitHands
+          ? soloSplitHands
+            ? `BEAT 2 (${beat2TimeLabel}): ONLY if FULL NUDE. HER LEFT hand on her ${zoneEn(splitHands.left)}; HER RIGHT hand ON her ${zoneEn(splitHands.right)} — not thigh/hip. FORBIDDEN a partner.`
+            : `BEAT 2 (${beat2TimeLabel}): HIS LEFT hand on her ${zoneEn(splitHands.left)}; HIS RIGHT hand on her ${zoneEn(splitHands.right)} — both at once, ${touchVerbPhrase}. ZERO panties. FORBIDDEN swapping left/right, FORBIDDEN both hands on one area.`
+          : `BEAT 2 (${beat2TimeLabel}): one ${manHand} on her bare breast AND the other on her bare vulva at the same time — ${touchVerbPhrase}. ZERO panties.`
+        : ''
     const crotchBeat = wantsCrotch
       ? intimate.wantsPartner
-        ? `BEAT 2 (${beat2TimeLabel}): partner hand ON her bare vulva/crotch — ${touchVerbPhrase} the bare genitals with continuous skin contact. ZERO panties. FORBIDDEN hand only on thigh/hip.`
+        ? `BEAT 2 (${beat2TimeLabel}): ${manHand} ON her bare vulva/crotch — ${touchVerbPhrase} the bare genitals with continuous skin contact. ZERO panties. FORBIDDEN hand only on thigh/hip.`
         : `BEAT 2 (${beat2TimeLabel}): her own hand ON her bare vulva/crotch — ${touchVerbPhrase} the bare genitals with continuous skin contact. ZERO panties. FORBIDDEN hand hovering on thigh without touching genitals.`
       : ''
-    const beat2 = kissTargetVulva
-      ? `BEAT 2 (${beat2TimeLabel}): a consenting adult partner kisses her bare vulva directly with his mouth — lips and mouth make continuous contact with the bare genitals. This is an ORAL kiss, NOT a hand touch — FORBIDDEN substituting a hand-only fondle for the requested mouth-to-vulva kiss.`
-      : kissTargetBreast
-        ? `BEAT 2 (${beat2TimeLabel}): a consenting adult partner kisses her bare breast and nipple directly with his mouth — lips make continuous contact with the nipple. This is an ORAL kiss on the breast, NOT a hand-only touch.`
-        : sequentialBreastThenKiss
-          ? `BEAT 2 (${beat2TimeLabel}, right after undress finishes): a consenting adult partner's hand on her bare breast, ${touchVerbPhrase} continuously — clear hand-to-skin contact. Kissing has NOT started yet in this beat.`
-          : wantsCrotch
-            ? crotchBeat
-            : wantsKiss && wantsBreast
-              ? `BEAT 2 (${beat2TimeLabel}): a consenting adult partner deep-kisses her mouth while his hand continuously ${touchVerbPhrase} her bare breast. Kiss AND breast touch both stay visible — not a quick peck, not a one-tap.`
-              : wantsKiss
-                ? `BEAT 2 (${beat2TimeLabel}): a consenting adult partner deep-kisses her mouth continuously — lips locked, heads lean in, most of the clip is kissing.`
-                : wantsBreast
-                  ? `BEAT 2 (${beat2TimeLabel}): a hand continuously ${touchVerbPhrase} her bare breast — sustained contact, not a tap; the breast tissue jiggles/bounces naturally with each motion, not stiff.`
-                  : intimate.addon
-                    ? `BEAT 2 (${beat2TimeLabel}): ${intimate.addon}`
-                    : `BEAT 2 (${beat2TimeLabel}): hold the fully nude pose exactly as described in the motion below — bare breasts and bare vulva stay clearly visible, no new action invented beyond what the motion text says.`
-    // 3단계 순서 요청일 때만 채워지는 마지막 비트 — 손이 가슴에서 떠나고 입-입 키스로 전환.
-    const beat3 = sequentialBreastThenKiss
-      ? `BEAT 3 (${beat3TimeLabel}): the hand leaves her breast and the partner leans in for a deep mouth-to-mouth kiss — lips locked together, continuous kissing for the rest of the clip until the very last frame.`
+    // 이미 나체 + 순차: BEAT1=가슴, BEAT2=키스 또는 자지
+    const beat1AlreadyNudeAction = twoWayAlreadyNude
+      ? `BEAT1 (${beat1TimeLabel}): ${manHand} on her bare breast, ${touchVerbPhrase} continuously — second action has NOT started yet.`
       : ''
-    const lastFrame = sequentialBreastThenKiss
-      ? 'LAST FRAME: still fully nude, still deep-kissing her mouth (the breast fondling beat has ended, this frame shows kissing, NOT a hand on the breast). Do NOT return to the opening still pose.'
-      : kissTargetVulva
-        ? 'LAST FRAME: fully nude, ZERO panties, mouth/lips still in contact with the bare vulva. Do NOT return to the opening still pose.'
-        : kissTargetBreast
-          ? 'LAST FRAME: fully nude, ZERO panties, mouth/lips still in contact with the bare breast/nipple. Do NOT return to the opening still pose.'
-          : wantsCrotch
-            ? 'LAST FRAME: fully nude, ZERO panties, hand still on bare crotch/vulva. Do NOT return to the opening still pose.'
-            : 'LAST FRAME: still fully nude (bare breasts + sharp bare crotch, ZERO panties, ZERO fog patch), holding the pose from the motion below. Do NOT return to the opening still pose. Do NOT put clothes back on.'
-    // 실측(plainNudeOnly와 동일한 원인): 여기 아래에 있던 기존 버전은
-    // buildClothingSilhouetteBodyLock·buildNudeCensorFogBanLock·buildShortsCameraLock·
-    // buildSingleContinuousShotLock 풀텍스트를 다 합쳐 5,000~6,000자대까지 늘어났었다 —
-    // plainNudeOnly와 같은 조건(Wan 2.2 I2V fast는 대략 1,500자를 넘기면 순응도가
-    // 급격히 떨어짐)이 여기(키스/터치 동작이 있는 케이스)에도 그대로 적용된다는 걸
-    // "가슴을 만져본다" 계열 실패로 확인 — 무거운 락 문단들을 걷어내고 plainNudeOnly와
-    // 동일한 스타일의 짧은 한 줄짜리 지시로 교체한다.
-    const beats = [
-      'Adult photorealistic video. Same Korean woman: same face AND same body proportions (breast size/shape, waist, hip width) as the input image — do not slim her down, bulk her up, or resize her breasts. Same room, static camera.',
-      clipRole === 'single'
-        ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
-        : '',
-      undressAction && coupleRequested
-        ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
-        : '',
-      twoPeopleInSource ? buildCoupleFaceLock() : '',
-      sequentialBreastThenKiss
-        ? `THREE-BEAT TIMELINE ("3등분 약속" — equal thirds) — do not merge or skip a beat:`
+    const beat2 = kissTargetVulva
+      ? `BEAT 2 (${beat2TimeLabel}): ${manKiss} her bare vulva directly with his mouth — lips and mouth make continuous contact with the bare genitals. This is an ORAL kiss, NOT a hand touch — FORBIDDEN substituting a hand-only fondle for the requested mouth-to-vulva kiss.`
+      : kissTargetBreast
+        ? `BEAT 2 (${beat2TimeLabel}): ${manKiss} her bare breast and nipple directly with his mouth — lips make continuous contact with the nipple. This is an ORAL kiss on the breast, NOT a hand-only touch.`
+        : sequentialMutualHand
+          ? maleHandBeat(beat2TimeLabel)
+          : twoWayAlreadyNude && sequentialBreastThenKiss
+            ? `BEAT2 (${beat2TimeLabel}): hand leaves breast; ${kissIntensityActionLine(kissIntensity)}.`
+            : threeWayWithUndress
+              ? `BEAT 2 (${beat2TimeLabel}, right after undress finishes): ${manHand} on her bare breast, ${touchVerbPhrase} continuously — clear hand-to-skin contact. Kissing has NOT started yet in this beat.`
+              : splitHandBeat
+                ? splitHandBeat
+                : wantsCrotch
+                ? crotchBeat
+                : simultaneousMutualHand
+                  ? `BEAT (${beat2TimeLabel}): MUTUAL — HIS hand on HER bare breast; ${MAN_ZIPPER_HAND_LINE}`
+                  : wantsMaleHand && !wantsBreast
+                    ? maleHandBeat(beat2TimeLabel)
+                    : wantsKiss && wantsBreast
+                      ? `BEAT 2 (${beat2TimeLabel}): ${kissIntensityActionLine(kissIntensity)} while his hand continuously ${touchVerbPhrase} her bare breast. Kiss AND breast touch both stay visible — not a one-tap.`
+                      : wantsKiss
+                        ? sourcePairIntimate
+                          ? `BEAT 2 (${beat2TimeLabel}): ${kissIntensityActionLine(kissIntensity)} — already fully nude. FORBIDDEN kissing clothed.`
+                          : `BEAT 2 (${beat2TimeLabel}): ${kissIntensityActionLine(kissIntensity)}.`
+                        : wantsBreast
+                          ? soloSelfBreast
+                            ? allowZoom
+                              ? `BEAT 2 (${beat2TimeLabel}): ONLY if already FULLY nude (ZERO pants/belt/bra/panty). BOTH her own hands ${touchVerbPhrase} her bare breasts. Same bust size as source. FORBIDDEN a partner.`
+                              : `BEAT 2 (${beat2TimeLabel}): ONLY if already FULLY nude (ZERO pants/belt/bra/panty). BOTH her own hands ${touchVerbPhrase} her bare breasts IN the same source crop. Same bust size as source. FORBIDDEN zoom. FORBIDDEN a partner.`
+                            : `BEAT 2 (${beat2TimeLabel}): a hand continuously ${touchVerbPhrase} her bare breast — sustained contact, not a tap; the breast tissue jiggles/bounces naturally with each motion, not stiff.`
+                          : intimate.addon
+                            ? `BEAT 2 (${beat2TimeLabel}): ${intimate.addon}`
+                            : `BEAT 2 (${beat2TimeLabel}): hold the fully nude pose exactly as described in the motion below — bare breasts and bare vulva stay clearly visible, no new action invented beyond what the motion text says.`
+    const beat3 = threeWayWithUndress
+      ? `BEAT 3 (${beat3TimeLabel}): the hand leaves her breast; ${kissIntensityActionLine(kissIntensity)} for the rest of the clip until the last frame.`
+      : ''
+    const lastFrame = sequentialMutualHand || simultaneousMutualHand || wantsMaleHand
+      ? `her hand still in HIS zipper, pants on. ${MAN_ZIPPER_HAND_LINE}`
+      : sourcePairIntimate && undressAction && !wantsKiss
+        ? `she fully nude BARE crotch (FAILED black panty), he shirtless with pants on, ${COUPLE_MAN_SHIRT_ONLY} MAN still in frame — NOT a solo woman`
+      : sourcePairIntimate && wantsKiss
+        ? 'still mouth-to-mouth kiss, both FULLY nude (no shirt, no briefs), MAN still male — NOT side-by-side clothed standing'
+      : sequentialBreastThenKiss
+        ? kissIntensity === 'peck'
+          ? 'still fully nude, lips just after a soft peck'
+          : 'still fully nude, still passionately kissing her mouth (not a hand on the breast)'
+        : kissTargetVulva
+          ? 'fully nude, mouth still on bare vulva, ZERO panties'
+          : kissTargetBreast
+            ? 'fully nude, mouth still on bare breast/nipple, ZERO panties'
+            : splitHands && wantsBreast && wantsCrotch
+              ? 'fully nude, LEFT hand and RIGHT hand still on the two assigned places, ZERO panties'
+            : wantsCrotch
+              ? 'fully nude, hand still on bare crotch/vulva, ZERO panties'
+              : soloSelfBreast
+                ? allowZoom
+                  ? 'still kneading, ZERO panties'
+                  : 'still kneading, same crop, ZERO panties'
+              : 'still fully nude (bare breasts + bare crotch, ZERO panties), holding the requested action'
+    const timeBits = [
+      threeWayWithUndress
+        ? 'THREE beats (~equal thirds) — do not merge:'
+        : twoWayAlreadyNude
+          ? 'TWO beats (already nude — NO undress time) — do not merge:'
+          : simultaneousMutualHand
+            ? 'MUTUAL fondling — both hands active together:'
+            : undressAction
+              ? 'TWO beats — do not merge:'
+              : '',
+      twoWayAlreadyNude
+        ? beat1AlreadyNudeAction
         : undressAction
-          ? `TWO-BEAT TIMELINE ("3등분 약속" — 2 actions = half each) — do not merge or skip a beat:`
-          : '',
-      undressAction
-        ? `BEAT 1 (${beat1TimeLabel}): she pulls off ALL clothes together — top, bra, pants/skirt, AND panties (not just the top) — fully nude; breasts stay at the SAME height as before undressing (do NOT lift higher); bare nipples/crotch, any outfit style. ZERO panties left at any point, ZERO fog.`
-        : 'BEAT 1: she is already fully nude — bare breasts at the same height as the clothed source (not lifted higher), clear bare crotch, ZERO panties, ZERO fog.',
-      'Pubic hair on the mons: a compact, neatly-contained patch of dense dark curly coils — NOT wide straggly wisps spreading onto the thighs, NOT a flat painted patch.',
-      'Nipples/areola: small round areola, soft pinkish-brown, in proportion to the breast — NOT a large dark oval blob or bruise-like patch, NOT a printed spiral/swirl/ring.',
+          ? sourcePairIntimate
+            ? `BEAT1 (${beat1TimeLabel}): SHE peels to nude, panty OFF last. ${COUPLE_MAN_SHIRT_ONLY}`
+            : peelLayers
+              ? `BEAT1 (${beat1TimeLabel}): ${OTBEOTGIM_BEAT1_LINE}`
+              : `BEAT1 (${beat1TimeLabel}): remove ALL clothes → full nude. Bare crotch FIRST (ZERO panties) before beat 2 starts. FACE in source crop. FORBIDDEN tilt-down or hiding breasts.`
+          : wantsMaleHand || wantsBreast || wantsKiss || wantsCrotch
+            ? twoPeopleInSource
+              ? 'Start from the source couple pose — keep both adults. FORBIDDEN a third person.'
+              : 'Start from the source photo — same person only. FORBIDDEN inventing anyone.'
+            : 'Start already fully nude — bare breasts, bare crotch, ZERO panties/fog.',
       beat2,
       beat3,
-      lastFrame,
-      'BODY LOCK: same face; breasts a touch LARGER than the clothed silhouette implies, same HEIGHT and waist-hip proportions, natural jiggle/sway with movement (not rigid) — consistent every frame.',
-      buildBustHeightPreferenceLine(input.bustHeight),
-      motion ? `User motion: ${motion}` : '',
-    ].filter(Boolean)
-    return beats.join(' ')
+      soloSplitHands
+        ? `LAST ${holdStart}–${clipTotal}s: KEEP HER left/right on the two places (${lastFrame}). ZERO panties. FORBIDDEN snapback.`
+        : soloSelfBreast
+          ? `LAST ${holdStart}–${clipTotal}s: KEEP kneading to the last frame (${lastFrame}). FORBIDDEN snapback to the opening clothed still.`
+          : `HOLD ${holdStart}–${clipTotal}s: FREEZE end-state (${lastFrame}).`,
+    ]
+      .filter(Boolean)
+      .join(' ')
+
+    return assembleWanSections([
+      wanSection(
+        'MOTION',
+        soloSplitHands
+          ? undressAction
+            ? `${allowZoom ? 'SAME CROP until fully nude, then zoom as asked.' : 'SAME CROP: exact source framing, NO zoom.'} ${bustAnchor} ${OTBEOTGIM_WAN_LINE} After bare crotch: HER LEFT hand on her ${zoneEn(splitHands.left)}, HER RIGHT hand ON her ${zoneEn(splitHands.right)} — not thigh. No partner. FORBIDDEN snapback.`
+            : `${allowZoom ? 'BODY LOCK: same bust as source.' : 'SAME CROP, NO zoom.'} HER LEFT hand on her ${zoneEn(splitHands.left)}; HER RIGHT hand on her ${zoneEn(splitHands.right)}. ZERO panties. No partner.`
+          : soloSelfBreast
+          ? undressAction
+            ? allowZoom
+              ? `SAME CROP until fully nude (pants and panty OFF), then zoom as asked. ${bustAnchor} ${OTBEOTGIM_WAN_LINE} After ZERO panties, BOTH her own hands ${touchVerbPhrase} her own bare breasts through the LAST FRAME. Source clothes GONE. No partner. FORBIDDEN snapback.`
+              : `SAME CROP: exact source framing, NO zoom. ${bustAnchor} ${OTBEOTGIM_WAN_LINE} After ZERO panties, BOTH her own hands ${touchVerbPhrase} her own bare breasts. Source clothes GONE. No partner. FORBIDDEN snapback.`
+            : allowZoom
+              ? `BODY LOCK: same bust/waist/hips as source. BOTH her own hands ${touchVerbPhrase} her own bare breasts. Camera may push in as asked. No partner. ZERO panties. Last frame still kneading.`
+              : `SAME CROP: exact source framing, same head size, NO zoom. BODY LOCK: same bust/waist/hips as source. BOTH her own hands ${touchVerbPhrase} her own bare breasts in that crop through the LAST FRAME. No partner. ZERO panties. FORBIDDEN snapback to the opening still.`
+          : sourcePairIntimate && undressAction && !wantsKiss
+          ? `Keep BOTH source adults. She undresses to bare crotch. ${PANTY_MELT_FAIL} ${COUPLE_MAN_SHIRT_ONLY} Man stays visible and male. FORBIDDEN deleting the man or a solo woman.`
+          : sourcePairIntimate && wantsKiss
+          ? 'Keep BOTH source faces. Source MAN+WOMAN kiss mouth-to-mouth, both fully nude (no shirt/briefs/jeans). He stays male. Last frames stay kissing nude — FORBIDDEN snapback to clothed standing. FORBIDDEN a new person.'
+          : wantsHeteroManWomanCast(detectionMotion)
+          ? [
+              'Keep BOTH source faces. The source MAN kisses the source WOMAN; his hand on her bare breast. NOT two women kissing. NOT a new person.',
+              'Woman is FULL NUDE (no pants/belt).',
+              motion || 'Man kisses woman and fondles her breast.',
+            ].join(' ')
+          : wantsMaleHand
+            ? [motion || MAN_ZIPPER_HAND_LINE, 'She stays female. FORBIDDEN drawing a penis.'].join(' ')
+            : twoPeopleInSource
+              ? motion || 'Keep both source adults and follow the motion.'
+              : motion || 'Follow the intimate action on the same woman as the source.',
+      ),
+      wanSection('TIME', timeBits),
+      wanSection(
+        'CAST',
+        sourcePairIntimate
+          ? buildSourcePairCastLock()
+          : wantsHeteroManWomanCast(detectionMotion)
+          ? buildHeteroManWomanCastLock()
+          : wantsMaleHand
+            ? `Two adults. ${MAN_ZIPPER_HAND_LINE} She stays female. FORBIDDEN futa / penis.`
+            : undressAction && twoPeopleInSource
+              ? `${buildSourcePairCastLock()} FORBIDDEN turning him into a second woman.`
+              : twoPeopleInSource
+                ? buildCoupleFaceLock()
+                : soloSplitHands || soloSelfBreast
+                  ? 'Only the source woman — do not invent a partner. HER OWN hands only.'
+                  : 'Only the people in the source photo. FORBIDDEN inventing a partner, extra person, or new face.',
+      ),
+      wanSection(
+        'BODY',
+        sourcePairIntimate && wantsKiss
+          ? 'Same body proportions as source. Bare crotch, ZERO panties.'
+          : [
+              wantsMaleHand ? buildWanFemaleSexLock() : '',
+              peelLayers
+                ? 'Same bust volume as the clothed mound — FORBIDDEN smaller breasts. Pants and belt must be gone.'
+                : 'Same breast size/height and waist-hip as source.',
+              peelLayers ? bustAnchor : '',
+              buildBustHeightPreferenceLine(input.bustHeight),
+              buildWanPubicLine(`${detectionMotion} ${fullOriginal}`),
+            ]
+              .filter(Boolean)
+              .join(' '),
+      ),
+      wanSection(
+        'CAM',
+        soloSelfBreast
+          ? buildShortsCameraLock({
+              clipRole,
+              undressOrNude: true,
+              endCloseUp: allowZoom,
+            })
+          : 'CAMERA: source crop, FACE in frame. FORBIDDEN tilt-down, neck-only, modest both-hands covering.',
+      ),
+      wanSection(
+        'END',
+        buildWanEndHold({ durationSec: clipTotal, mode: 'action', actionHint: lastFrame }),
+      ),
+    ])
   }
 
-  // 나체 유지/탈의 시 continuity에 남은 "wearing…"·바지 서술이 옷을 다시 입힘(실측) → 제거
-  let original = truncateContinuityText(fullOriginal, ANIMATION_CONTINUITY_MAX_CHARS)
-  if (staysNude || undressAction) {
-    original = original
-      .replace(/\b(?:wearing|wears|dressed in|clothed in|in a|in an)\s+[^.,;]+/gi, 'bare skin')
-      .replace(
-        /(?:가운|로브|드레스|스웨터|니트|브라|팬티|속옷|바지|반바지|청바지|핫팬츠|팬츠|슬랙스|레깅스|치마|치마바지|스커트|bathrobe|robe|sweater|lingerie|pants|jeans|shorts|leggings|trousers|skirt)\s*(?:을|를|만)?\s*(?:입은|걸친|착용)?/gi,
-        '',
-      )
-      .replace(/\b(?:pants|jeans|trousers|panties|bra|skirt)\b/gi, '')
+  // ── 기본 경로 (옷 입은 일반 모션) — MOTION/TIME/CAST 칸 + BEAT. 나체 lock 금지.
+  const continuityBrief = truncateContinuityText(
+    fullOriginal
+      .replace(/\b(?:wearing|wears|dressed in)\s+[^.,;]+/gi, '')
       .replace(/\s{2,}/g, ' ')
-      .trim()
-    original = truncateContinuityText(original, ANIMATION_CONTINUITY_MAX_CHARS)
-  }
-
-  // 모션 지시는 맨 앞에 CRITICAL로 강조한다. 예전엔 긴 "원본 연속성" 문단(원본 이미지
-  // 프롬프트 전체) 뒤에 짧게 붙어 있어서, Wan I2V가 앞부분의 장문 설명에 가중치를 두고
-  // 사용자가 요청한 모션(예: 특정 동작·전환)을 잘 따라가지 않는 문제가 있었다.
-  const parts = ['Premium photorealistic adult short-form video.']
-  // 줌 금지는 프롬프트 맨 앞에서도 한 번 더 — 뒤쪽 buildShortsCameraLock()과 중복되지만,
-  // 긴 프롬프트에서 뒤쪽 지시가 묻혀 줌인이 새는 실측이 있어 앞뒤로 강조한다.
-  // 줌 기능 전면 삭제(2026-08-28)로 clipRole과 무관하게 항상 넣는다.
-  parts.push(
-    'CAMERA PRIORITY (read first): absolutely NO zoom-in, NO zoom-out, NO push-in, NO close-up crop for this entire clip — keep the exact source framing from the first frame to the last frame.',
+      .trim(),
+    ANIMATION_CONTINUITY_MAX_CHARS,
   )
-  if (staysNude || undressAction) {
-    parts.push(buildSingleContinuousShotLock(coupleRequested))
-  }
-  // 나체 유지는 모션보다 앞에 — Wan이 뒤쪽 누드 락을 무시하고 옷을 입히던 실측
-  const koreanLook = buildKoreanTwentiesLookLock(structureCorpus)
-  if (koreanLook) parts.push(koreanLook)
-  // 커플(2인) 소스는 나체 여부와 무관하게 얼굴 드리프트 위험 — 증명사진이 아니라 전신/반신
-  // 합성 사진(얼굴이 작게 나옴)일 때 특히 실측됨. staysNude/undressAction 분기 밖에서
-  // 한 번만 넣어 옷을 입은 커플 데이트 쇼츠에도 항상 적용되게 한다.
-  if (twoPeopleInSource) parts.push(buildCoupleFaceLock())
-  if (staysNude || undressAction) {
-    parts.push(buildFemaleAdultAnatomyLock(structureCorpus))
-  }
-  if (staysNude || undressAction) {
-    if (isBodyProjectRequest(motion)) {
-      parts.push(buildNudeBecomesDefinitionLock(`${fullOriginal} ${motion}`))
-    }
-    // 팬티 잔존·뿌연 검열이 최우선 실패 모드 — 얼굴/랜드마크보다 앞에 짧게 고정
-    parts.push(
-      'PANTY BAN: crotch and hips stay bare — ZERO panties, ZERO thong, ZERO briefs, ZERO lingerie bottoms, ZERO bikini bottoms in EVERY frame after undress begins. Pull underwear fully OFF the body (not left on, not at ankles).',
-    )
-    parts.push(buildNudeCensorFogBanLock())
-    parts.push(buildFaceFrozenLock())
-    parts.push(buildBodyLandmarkNudeRevealLock())
-  }
-  if (staysNude) {
-    parts.push(
-      'NUDE HOLD FIRST: source is already fully nude adult woman — bare female breasts with visible nipples, clear bare crotch, no clothing and no foggy censor patch in any frame.',
-      'Keep the same body landmarks (breasts, waist, navel, hips) — only motion, not a new body.',
-    )
-  } else if (undressAction) {
-    parts.push(
-      'UNDRESS = clothing removal over a remembered body: dissolve/remove fabric while FACE stays the source face untouched.',
-      'UNDRESS FIRST (while WIDE): early in the clip pull off sweater/cardigan AND whatever covers her legs (jeans/pants/shorts/leggings/skirt) AND panties/underwear completely — garments leave the body and exit the frame. This applies regardless of garment style: ordinary clothes, dress/gown, robe, cloak/cape, corset, costume, or any fantasy/decorative outfit (shell top, jeweled/veiled wrap, etc.) — treat it exactly like normal clothing and remove ALL of it, it is NOT a fixed part of her body or character design.',
-      'End state: fully nude adult woman with soft female breasts and visible nipples — ZERO bra, ZERO panties, ZERO jeans, ZERO skirt, ZERO milky fog over crotch (not at ankles, not bunched, not half-on, not blurred).',
-      'Body form memory: waist, breast size/placement, navel height match the clothed source — redraw nude skin on those anchors only.',
-      'Do NOT interpret this as “already nude with panties still on” or “nude with fog covering crotch” — panties and fog must come off.',
-    )
-    // 소스에 남성 등 두 번째 인물이 함께 있는 사진(예: 커플 사진)일 때만 이 문구를 넣는다.
-    // coupleRequested==false(솔로 사진/솔로 요청)에도 무조건 넣었더니, "두 번째 인물"·
-    // "do NOT undress him" 같은 무관한 부정 문구가 프롬프트를 오염시켜 솔로 탈의 자체가
-    // 아예 안 되는 회귀가 실측됐다 — 커플 신호가 있을 때만 넣어 모호함 해소 효과만 남긴다.
-    if (coupleRequested) {
-      parts.push(
-        'IF a second person (e.g., a man) is also visible in the source photo: he stays exactly as he is, fully clothed, unchanged — do NOT undress him. Only the adult woman becomes nude per the instructions above, unless the motion text below explicitly says otherwise. This is a single clear instruction, not a refusal — the undress MUST still happen for her.',
-      )
-    }
-  }
-  if (motion) {
-    parts.push(
-      `CRITICAL MOTION — this is the main point of the clip, follow it exactly: ${motion}.`,
-    )
-    if (intimate.addon) {
-      parts.push(`ACTION DETAIL (must be visible on screen): ${intimate.addon}.`)
-    }
-  } else {
-    parts.push('Natural movement, soft hair and fabric motion, confident pose.')
-  }
-  // "subtle camera motion"이 Wan에서 조기 줌인·클로즈업으로 해석되는 실측 → 잠금 구도일 때는 쓰지 않음
-  const lockCameraForUndress = undressAction || staysNude
-  if (clipRole === 'single' || (clipRole === 'dual-a' && undressAction)) {
-    parts.push('Cinematic lighting; LOCKED camera — subject moves, framing does not tighten.')
-  } else if (intimate.wantsPoseChange || intimate.wantsPartner) {
-    parts.push('Cinematic lighting; subjects move within a stable frame.')
-  } else {
-    parts.push('Cinematic lighting, very slight steadiness — no push-in.')
-  }
-  // 줌/클로즈업: 공통 헬퍼 — become/leanIntimate 조기 return과 동일 규칙
-  parts.push(
-    buildShortsCameraLock({
-      clipRole,
-      undressOrNude: lockCameraForUndress,
-      endCloseUp,
-    }),
-  )
-  // 키스·애무·탈의도 포즈 변경 허용 — limbs-only면 원자세로 되돌아가는 실측
-  const allowPoseChange =
-    intimate.wantsPoseChange || intimate.wantsPartner || undressAction || staysNude
-  parts.push(
-    buildAdultStructureLock(structureCorpus, {
-      forNudeHold: undressAction || staysNude,
-      allowPoseChange,
-      // koreanLook(3063)·buildFemaleAdultAnatomyLock(3066)를 이미 앞에서 넣었음 — 중복 방지
-      skipIdentityAndSexLocks: true,
-      bustHeight: input.bustHeight,
-    }),
-  )
-  if (original) {
-    if (staysNude || undressAction) {
-      parts.push(
-        `Subject continuity from source (FACE + BODY SHAPE only — IGNORE any clothing/lingerie in this text; motion requires FULL nude, no panties): ${original}`,
-      )
-    } else {
-      parts.push(
-        `Subject/appearance continuity from source image (identity/outfit reference only — the motion instruction above always takes priority): ${original}`,
-      )
-    }
-  }
-  if (undressAction) {
-    parts.push(
-      'TIMELINE (must all happen in this clip): (1) early — clothes/bra/panties come OFF to full nude; (2) mid-to-end — requested intimate action WHILE nude; (3) LAST FRAME still nude in that intimate pose.',
-      'CRITICAL: do not skip step (1). Do not fondle over panties. Bare breasts and bare crotch before/during the action.',
-      'If breast touch was requested: hand on her bare breast — visible every second of the intimate part.',
-      'If crotch/보지 touch was requested: hand ON bare vulva/crotch with continuous skin contact — FORBIDDEN hand only on thigh; FORBIDDEN panties left on.',
-      'Do NOT freeze clothed. ZERO panties/bra/jeans at the end. FORBIDDEN: snap back to the original source standing pose in the last frames.',
-    )
-  } else if (dressAction) {
-    parts.push(
-      'CRITICAL ADULT MOTION: the subject starts bare-skinned/nude and puts on or wraps herself in a garment (robe, dress, or clothing) during the clip; end state is dressed as requested.',
-      'Do NOT freeze the subject fully nude for the whole clip. Do NOT keep bare skin visible at the end if the motion asks her to get dressed.',
-      'Smooth dressing action, fabric sliding on and settling naturally onto the body.',
-      'While dressing, keep the same face and body type as the source until fabric covers them.',
-    )
-  } else if (staysNude) {
-    parts.push(
-      'CRITICAL: the subject should be fully nude / bare-skinned for the entire clip.',
-      'If the source still shows panties, thong, briefs, underwear, OR a foggy/milky blur patch over the crotch, REMOVE that cover in the first frames — then keep sharp bare crotch for the rest of the clip.',
-      'She STAYS fully nude — do NOT add, invent, fade in, or generate ANY clothing, underwear, bra, panties, lingerie, robe, dress, or censor fog.',
-      'No garments and no cloudy obstacles ever appear during the motion. Sharp bare skin remains visible in every single frame.',
-      'Keep the same breasts and hips as the source — no censor blur, no invented lingerie patch, no steam smudge.',
-      'Visible nipples; mandatory natural adult pubic hair (curly strands on mons) — uncensor, no mosaic, no frosted haze, no hairless doll crotch unless user asked to shave.',
-      'FORBIDDEN: keeping source panties on; foggy panty-shaped blur; anyone putting bra or panties on her; clothes reappearing mid-clip.',
-    )
-  }
-  // 솔로 나체: 파트너 요청이 없을 때만 2인물 금지.
-  // 빨기·올라타기·눕히기는 파트너가 필요해서 CAST LOCK이 동작을 죽이던 실측 → 그때는 허용.
-  if ((undressAction || staysNude) && !coupleRequested) {
-    parts.push(
-      'CAST LOCK: only the single person from the input photo. FORBIDDEN inventing a second person, man partner, or stranger who dresses her.',
-    )
-  } else if (intimate.wantsPartner) {
-    parts.push(
-      'CAST: a second consenting adult may appear only to perform the requested intimate action.',
-      'IDENTITY LOCK: the woman from the source photo keeps the SAME face, same haircut, same body type and proportions — do NOT morph her into a more muscular, taller, or different-looking woman.',
-      'FACE WHILE NUDE/KISS: while undressing and kissing, facial identity stays the same; only a light smile, light blushing shyness, or soft pleasure — never a distorted kissing grimace that changes who she is. Deep kiss = strong lips/mouth/cheek movement on that same face.',
-      'BODY WHILE PARTNER/KISS: her breast size and breast position on the torso stay identical to the source image — the partner must not cause a different bust size or relocated bust.',
-      buildKoreanMaleBodyHairLock(),
-      'If the partner is a man from the source: keep HIS face — Korean adult man, smooth nearly hairless chest/abdomen when shirtless/nude.',
-    )
-  }
-  if ((undressAction || staysNude) && intimate.wantsPartner) {
-    parts.push(
-      'NUDE COUPLE LOCK: while kissing or intimate, the woman stays fully nude — bare crotch, no panties/thong/underwear for a “tasteful fashion” look.',
-      'FORBIDDEN: keeping panties on during a nude kiss; sheer lingerie remnant; fashion-magazine underwear holdout.',
-      'BREAST LOCK DURING KISS: match source breast size AND placement height exactly — not bigger, not smaller, not higher, not lower than the source still.',
-      buildKoreanMaleBodyHairLock(),
-      'Any nude/shirtless man: smooth Korean male torso — FORBIDDEN dense chest hair or thick belly trail.',
-    )
-  }
-  if (/패션|매거진|magazine|editorial|haute\s*couture|하이엔드/i.test(structureCorpus) && (undressAction || staysNude)) {
-    parts.push(
-      'Even if the brief says fashion-magazine style, when nude/undress is requested the end state is FULL nude — magazine lighting/mood only, NOT lingerie left on.',
-    )
-  }
-  parts.push('Follow the source image identity, including adult content when requested — do not sanitize.')
-  // 맨 앞의 CRITICAL MOTION 하나만으로는, 그 뒤에 붙는 연속성/누드 관련 문단들이 길어질수록
-  // (특히 여러 차례 수정을 거친 이미지) 모션 순응도가 흐려지는 경우가 실측으로 확인됐다.
-  // 문장 끝에서 재강조해 최근 지시 우선(recency) 효과를 노리되, 예전처럼 motion 전체
-  // (탈의 지시 전체, 최대 1500자+)를 통째로 복붙하면 프롬프트가 15,000자대까지 부풀어
-  // 오히려 Wan I2V가 얼굴을 녹이거나 엉뚱한 그래픽을 그리는 붕괴로 이어짐(실측) — 짧은
-  // 재강조 문장만 남긴다.
-  if (motion) {
-    parts.push(
-      'REMINDER (recency — re-read the CRITICAL MOTION line above and follow it exactly): do not let the setup/lock paragraphs above override it — stay fully nude if that was requested, keep the intimate action clearly visible, and do NOT revert to the clothed opening pose.',
-    )
-    if (intimate.addon) {
-      parts.push(`ACTION REMINDER: ${intimate.addon}.`)
-    }
-  }
-  parts.push(
-    'FINAL POSE LOCK: the last frame keeps the intimate action pose (kiss lean-in, hands where requested) — FORBIDDEN resetting to the opening source still pose.',
-  )
-  if (undressAction || staysNude) {
-    parts.push(
-      'FINAL LOCK: last frame fully nude — bare breasts and uncensored bare hips/crotch with natural adult pubic hair visible, ZERO bra, ZERO panties, ZERO foggy blur over genitals. Same face identity, same breast size/placement as source silhouette.',
-      'FINAL FACE: soft natural mouth, slight teeth OK if parted.',
-      buildNudeCensorFogBanLock(),
-    )
-  }
-  return parts.join(' ')
+  const defaultTotal = resolveClipTotalSec(input.durationSec)
+  const clothedMotion = [
+    'Keep source clothes.',
+    motion || 'Natural soft movement, same pose family as the source.',
+    intimate.addon ? `Detail: ${intimate.addon}` : '',
+    'Do not undress.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return assembleWanSections([
+    wanSection('MOTION', clothedMotion),
+    wanSection(
+      'TIME',
+      buildClothedWanTime({
+        motion: motion || 'natural soft movement, same pose family as the source',
+        durationSec: input.durationSec,
+        dressAction,
+      }),
+    ),
+    wanSection(
+      'CAST',
+      twoPeopleInSource
+        ? buildCoupleFaceLock()
+        : 'Same person(s) as source — do not invent extras.',
+    ),
+    wanSection('BODY', 'Same face and body proportions as the source image. Keep the source outfit.'),
+    wanSection('CAM', 'CAMERA: static, exact source framing, NO zoom for the whole clip.'),
+    wanSection(
+      'END',
+      buildWanEndHold({
+        durationSec: defaultTotal,
+        mode: dressAction ? 'dress' : 'clothed',
+      }),
+    ),
+    wanSection('ID', continuityBrief ? `Brief identity: ${continuityBrief}` : ''),
+  ])
 }

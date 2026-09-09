@@ -1,13 +1,63 @@
+import {
+  buildStillNudeAdultPubicLine,
+  buildStillNudeAdultBustLine,
+  buildStillWomanNudeNoPantyLock,
+} from './nude-anatomy-locks'
+import { buildSplitHandsLockLine } from './kiss-touch-motion'
+
 export type FalImageSize =
   | 'square_hd'
+  | 'square'
   | 'portrait_4_3'
+  | 'portrait_16_9'
   | 'landscape_4_3'
+  | 'landscape_16_9'
   | { width: number; height: number }
 
 /** Pages Function wall-clock 전에 JSON으로 돌아오도록 보조 엔진 예산을 짧게 잡는다. */
 const FAL_TIMEOUT_MS = 22_000
 /** inpaint는 큐 대기가 길어 짧게 잡으면 이중 모델 폴백으로 서브요청만 소진됨 */
 const FAL_REFINE_TIMEOUT_MS = 28_000
+
+/**
+ * Flux 2 Pro는 safety_tolerance가 1–5만 허용(5=가장 느슨).
+ * Flux.1 Pro / Kontext는 1–6. 잘못된 '6'을 Flux 2에 보내면
+ * "Input should be '1', '2', '3', '4' or '5'" 로 거절된다.
+ */
+function falSafetyTolerance(modelId?: string): '5' | '6' {
+  const id = (modelId || '').toLowerCase()
+  // Flux.1 Kontext / flux-pro 는 1–6. 그 외(기본 Flux 2 Pro)는 1–5만.
+  if (id.includes('kontext') || (id.includes('flux-pro') && !id.includes('flux-2'))) return '6'
+  return '5'
+}
+
+/** Flux 2 Pro는 enum 크기만 받음. {width,height} 커스텀은 거절될 수 있음. */
+function flux2SafeImageSize(size: FalImageSize): FalImageSize {
+  if (typeof size === 'string') {
+    if (
+      size === 'square_hd' ||
+      size === 'square' ||
+      size === 'portrait_4_3' ||
+      size === 'portrait_16_9' ||
+      size === 'landscape_4_3' ||
+      size === 'landscape_16_9'
+    ) {
+      return size
+    }
+    return 'portrait_16_9'
+  }
+  const r = size.width / Math.max(1, size.height)
+  if (r < 0.7) return 'portrait_16_9'
+  if (r > 1.4) return 'landscape_16_9'
+  if (r > 1.05) return 'landscape_4_3'
+  if (r < 0.95) return 'portrait_4_3'
+  return 'square_hd'
+}
+
+function isFlux2Model(modelId?: string): boolean {
+  const id = (modelId || '').toLowerCase()
+  return id.includes('flux-2') || id.includes('flux/2')
+}
 
 type FalQueueSubmitResponse = {
   status_url?: string
@@ -31,6 +81,7 @@ type FalImageResultResponse = {
 
 type FalVideoResultResponse = {
   video?: { url?: string }
+  video_url?: string
   detail?: string | Array<{ msg?: string }>
   error?: string
 }
@@ -207,7 +258,7 @@ async function runFalQueueVideo(
   }
 
   const policyMsg = extractErrorMessage(resultPayload)
-  const videoUrl = resultPayload.video?.url?.trim()
+  const videoUrl = resultPayload.video?.url?.trim() || resultPayload.video_url?.trim()
   if (!videoUrl) {
     throw new Error(policyMsg !== 'fal_generation_failed' ? policyMsg : 'missing_video_url')
   }
@@ -274,14 +325,19 @@ export function bakeConstraintsForFlux(prompt: string, negativePrompt?: string):
       'Keep the same body type and proportions as the source.',
     )
   }
-  if (/nude|bare skin|nipple|pubic|uncensor|나체|유두|음모/i.test(src)) {
+  if (/nude|bare skin|nipple|pubic|uncensor|나체|유두|음모|bare crotch|fully nude/i.test(src)) {
+    const noPanty = buildStillWomanNudeNoPantyLock(src)
     extras.push(
-      'If nude: show visible nipples on bare breasts and natural pubic detail (or shaved if requested) — no mosaic, no censor blur, no blank barbie anatomy.',
+      noPanty ||
+        'If nude: visible adult nipples on bare breasts — no mosaic, no censor blur.',
+      noPanty ? '' : buildStillNudeAdultBustLine(src),
+      noPanty ? '' : buildStillNudeAdultPubicLine(src),
+      buildSplitHandsLockLine(src),
     )
   }
   if (!extras.length) return prompt
 
-  return `${prompt} CONSTRAINTS (must follow): ${extras.join(' ')}`
+  return `${prompt} CONSTRAINTS (must follow): ${extras.filter(Boolean).join(' ')}`
 }
 
 /** 야생동물·복잡 장면용 여유 타임아웃 (Pages wall-clock 안에서) */
@@ -297,16 +353,19 @@ export async function generateFalImage(options: {
   timeoutMs?: number
 }): Promise<{ imageUrl: string }> {
   const prompt = bakeConstraintsForFlux(options.prompt, options.negativePrompt)
+  const imageSize = isFlux2Model(options.falModel)
+    ? flux2SafeImageSize(options.imageSize)
+    : options.imageSize
   return runFalQueue(
     options.falKey,
     options.falModel,
     {
       prompt,
-      image_size: options.imageSize,
+      image_size: imageSize,
       num_images: 1,
       output_format: 'png',
       enable_safety_checker: false,
-      safety_tolerance: '6',
+      safety_tolerance: falSafetyTolerance(options.falModel),
     },
     options.timeoutMs ?? FAL_TIMEOUT_MS,
   )
@@ -498,6 +557,74 @@ export async function refineFalKontextEdit(options: {
   )
 }
 
+/** 증명사진→전신: 제출만 하고 폴링은 tale-scene-status. */
+export async function submitFalKontextEdit(options: {
+  falKey: string
+  imageUrl: string
+  prompt: string
+  tier?: 'pro' | 'max'
+  guidanceScale?: number
+  outputFormat?: 'png' | 'jpeg'
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  let imageUrl = options.imageUrl
+  if (imageUrl.startsWith('data:')) {
+    const ext = imageUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    imageUrl = await uploadDataUrlToFal(options.falKey, imageUrl, `kontext-src-${Date.now()}.${ext}`)
+  }
+  const model = options.tier === 'max' ? 'fal-ai/flux-pro/kontext/max' : 'fal-ai/flux-pro/kontext'
+  return submitFalQueueJob({
+    falKey: options.falKey,
+    falModel: model,
+    body: {
+      prompt: options.prompt,
+      image_url: imageUrl,
+      num_images: 1,
+      output_format: options.outputFormat || 'png',
+      safety_tolerance: '6',
+      enable_safety_checker: false,
+      guidance_scale:
+        typeof options.guidanceScale === 'number' ? options.guidanceScale : 5.5,
+    },
+  })
+}
+
+/** Flux 2 Pro outpaint: 결과 한 변이 이 값을 넘으면 거절된다. */
+export const FAL_OUTPAINT_MAX_DIM = 2560
+
+/** expand 합이 maxDim을 넘지 않게 줄인다. 아래(몸통)를 우선 남긴다. */
+export function fitOutpaintExpand(options: {
+  sourceW: number
+  sourceH: number
+  top?: number
+  bottom?: number
+  left?: number
+  right?: number
+  maxDim?: number
+}): { top: number; bottom: number; left: number; right: number } {
+  const maxDim = Math.max(64, options.maxDim || FAL_OUTPAINT_MAX_DIM)
+  const srcW = Math.max(1, Math.round(options.sourceW))
+  const srcH = Math.max(1, Math.round(options.sourceH))
+  const fitPair = (src: number, first: number, second: number, preferSecond: boolean) => {
+    let a = Math.max(0, Math.round(first))
+    let b = Math.max(0, Math.round(second))
+    const room = Math.max(0, maxDim - src)
+    if (a + b <= room) return [a, b] as const
+    if (room === 0) return [0, 0] as const
+    if (preferSecond) {
+      b = Math.min(b, room)
+      a = Math.min(a, Math.max(0, room - b))
+    } else {
+      const scale = room / (a + b)
+      a = Math.floor(a * scale)
+      b = Math.max(0, room - a)
+    }
+    return [a, b] as const
+  }
+  const [left, right] = fitPair(srcW, options.left || 0, options.right || 0, false)
+  const [top, bottom] = fitPair(srcH, options.top || 0, options.bottom || 0, true)
+  return { top, bottom, left, right }
+}
+
 /** 증명사진→허리/전신: 캔버스를 아래로 진짜 확장(얼굴 픽셀 유지). */
 export const FAL_OUTPAINT_TIMEOUT_MS = 55_000
 
@@ -555,6 +682,127 @@ export async function outpaintFalImage(options: {
       throw new Error(`outpaint_failed: ${a} / ${b}`)
     }
   }
+}
+
+async function submitFalQueueJob(options: {
+  falKey: string
+  falModel: string
+  body: Record<string, unknown>
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  const endpoint = `https://queue.fal.run/${options.falModel}`
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${options.falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(options.body),
+    },
+    20_000,
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse &
+    FalImageResultResponse
+  if (!submitResponse.ok) {
+    throw new Error(extractErrorMessage(submitPayload))
+  }
+  if (submitPayload.status_url && submitPayload.response_url) {
+    return { statusUrl: submitPayload.status_url, responseUrl: submitPayload.response_url }
+  }
+  const imageUrl = submitPayload.images?.[0]?.url?.trim()
+  if (!imageUrl) {
+    throw new Error(extractErrorMessage(submitPayload) || 'missing_image_url')
+  }
+  return { imageUrl }
+}
+
+/** 증명사진→전신: 제출만 하고 폴링은 tale-scene-status. */
+export async function submitFalOutpaint(options: {
+  falKey: string
+  imageUrl: string
+  expand_top?: number
+  expand_bottom?: number
+  expand_left?: number
+  expand_right?: number
+  sourceW?: number
+  sourceH?: number
+  mode?: 'high' | 'fast'
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  let imageUrl = options.imageUrl
+  if (imageUrl.startsWith('data:')) {
+    const ext = imageUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    imageUrl = await uploadDataUrlToFal(options.falKey, imageUrl, `outpaint-src-${Date.now()}.${ext}`)
+  }
+  const fitted =
+    options.sourceW && options.sourceH
+      ? fitOutpaintExpand({
+          sourceW: options.sourceW,
+          sourceH: options.sourceH,
+          top: options.expand_top,
+          bottom: options.expand_bottom,
+          left: options.expand_left,
+          right: options.expand_right,
+        })
+      : {
+          top: Math.max(0, Math.min(200, Math.round(options.expand_top || 0))),
+          bottom: Math.max(0, Math.min(1200, Math.round(options.expand_bottom || 0))),
+          left: Math.max(0, Math.min(200, Math.round(options.expand_left || 0))),
+          right: Math.max(0, Math.min(200, Math.round(options.expand_right || 0))),
+        }
+  return submitFalQueueJob({
+    falKey: options.falKey,
+    falModel: 'fal-ai/flux-2-pro/outpaint',
+    body: {
+      image_url: imageUrl,
+      expand_top: fitted.top,
+      expand_bottom: fitted.bottom,
+      expand_left: fitted.left,
+      expand_right: fitted.right,
+      mode: options.mode || 'fast',
+      output_format: 'png',
+      enable_safety_checker: false,
+    },
+  })
+}
+
+/** 배경만 채우기: 제출만 하고 폴링은 tale-scene-status. */
+export async function submitFalInpaint(options: {
+  falKey: string
+  imageUrl: string
+  maskUrl: string
+  prompt: string
+  negativePrompt?: string
+  strength?: number
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  let imageUrl = options.imageUrl
+  let maskUrl = options.maskUrl
+  if (imageUrl.startsWith('data:')) {
+    const ext = imageUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    imageUrl = await uploadDataUrlToFal(options.falKey, imageUrl, `inpaint-src-${Date.now()}.${ext}`)
+  }
+  if (maskUrl.startsWith('data:')) {
+    const ext = maskUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    maskUrl = await uploadDataUrlToFal(options.falKey, maskUrl, `inpaint-mask-${Date.now()}.${ext}`)
+  }
+  const prompt = bakeConstraintsForFlux(options.prompt, options.negativePrompt)
+  const strength =
+    typeof options.strength === 'number' && Number.isFinite(options.strength)
+      ? Math.min(0.95, Math.max(0.35, options.strength))
+      : 0.72
+  return submitFalQueueJob({
+    falKey: options.falKey,
+    falModel: 'fal-ai/flux-lora/inpainting',
+    body: {
+      prompt,
+      image_url: imageUrl,
+      mask_url: maskUrl,
+      strength,
+      num_images: 1,
+      output_format: 'png',
+      enable_safety_checker: false,
+    },
+  })
 }
 
 /** 영역 수정(inpaint) — mask에서 흰 영역만 수정. mask는 data URI 또는 https. */
@@ -695,6 +943,52 @@ export async function submitFalKontextMultiImage(options: {
   return { imageUrl }
 }
 
+/** 텍스트→이미지 비동기 제출 (증명사진 2인 장면 골격용). 폴링은 checkFalKontextMultiImage와 동일 스키마. */
+export async function submitFalTextToImage(options: {
+  falKey: string
+  prompt: string
+  imageSize: FalImageSize
+  falModel?: string
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  const model = (options.falModel || 'fal-ai/flux-2-pro').replace(/^https?:\/\/queue\.fal\.run\//, '')
+  const endpoint = `https://queue.fal.run/${model}`
+  // 얼굴로 장면 골격 전용. bakeConstraintsForFlux는 프롬프트에 nude가 있으면
+  // 나체 잠금을 붙여 Flux가 거절한다. 이 경로는 옷 입은 장면만.
+  const prompt = options.prompt
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${options.falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        image_size: isFlux2Model(model) ? flux2SafeImageSize(options.imageSize) : options.imageSize,
+        num_images: 1,
+        output_format: 'png',
+        enable_safety_checker: false,
+        safety_tolerance: falSafetyTolerance(model),
+      }),
+    },
+    20_000,
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse &
+    FalImageResultResponse
+  if (!submitResponse.ok) {
+    throw new Error(extractErrorMessage(submitPayload))
+  }
+  if (submitPayload.status_url && submitPayload.response_url) {
+    return { statusUrl: submitPayload.status_url, responseUrl: submitPayload.response_url }
+  }
+  const imageUrl = submitPayload.images?.[0]?.url?.trim()
+  if (!imageUrl) {
+    throw new Error(extractErrorMessage(submitPayload) || 'missing_image_url')
+  }
+  return { imageUrl }
+}
+
 export async function checkFalKontextMultiImage(options: {
   falKey: string
   statusUrl: string
@@ -704,6 +998,7 @@ export async function checkFalKontextMultiImage(options: {
   imageUrl?: string
   error?: string
   nsfwFlagged?: boolean
+  falStatus?: string
 }> {
   const statusResponse = await fetchWithTimeout(
     options.statusUrl,
@@ -712,15 +1007,24 @@ export async function checkFalKontextMultiImage(options: {
   )
   const statusPayload = (await statusResponse.json().catch(() => ({}))) as FalQueueStatusResponse
   if (!statusResponse.ok) {
-    return { status: 'failed', error: extractErrorMessage(statusPayload) }
+    return {
+      status: 'failed',
+      error: extractErrorMessage(statusPayload),
+      falStatus: statusPayload.status,
+    }
   }
 
-  const status = statusPayload.status?.toUpperCase()
+  const falStatus = String(statusPayload.status || '').trim()
+  const status = falStatus.toUpperCase()
   if (status === 'FAILED' || status === 'CANCELLED') {
-    return { status: 'failed', error: extractErrorMessage(statusPayload) || `fal_${status.toLowerCase()}` }
+    return {
+      status: 'failed',
+      error: extractErrorMessage(statusPayload) || `fal_${status.toLowerCase()}`,
+      falStatus,
+    }
   }
   if (status !== 'COMPLETED') {
-    return { status: 'pending' }
+    return { status: 'pending', falStatus: falStatus || 'IN_PROGRESS' }
   }
 
   const resultResponse = await fetchWithTimeout(
@@ -730,20 +1034,24 @@ export async function checkFalKontextMultiImage(options: {
   )
   const resultPayload = (await resultResponse.json().catch(() => ({}))) as FalImageResultResponse
   if (!resultResponse.ok) {
-    return { status: 'failed', error: extractErrorMessage(resultPayload) }
+    return { status: 'failed', error: extractErrorMessage(resultPayload), falStatus: 'COMPLETED' }
   }
   const policyMsg = extractErrorMessage(resultPayload)
-  if (/content.?policy|flagged|nsfw|safety/i.test(policyMsg)) {
-    return { status: 'failed', error: policyMsg }
-  }
   const imageUrl = resultPayload.images?.[0]?.url?.trim()
   if (!imageUrl) {
-    return { status: 'failed', error: policyMsg !== 'fal_generation_failed' ? policyMsg : 'missing_image_url' }
+    if (/content.?policy|flagged|nsfw|safety/i.test(policyMsg)) {
+      return { status: 'failed', error: policyMsg, falStatus: 'COMPLETED' }
+    }
+    return {
+      status: 'failed',
+      error: policyMsg !== 'fal_generation_failed' ? policyMsg : 'missing_image_url',
+      falStatus: 'COMPLETED',
+    }
   }
   // 성인 전용: has_nsfw_concepts만으로 실패 처리하지 않음(오탐·정상 NSFW 모두 이미지 반환)
   const nsfwFlagged =
     Array.isArray(resultPayload.has_nsfw_concepts) && resultPayload.has_nsfw_concepts.some(Boolean)
-  return { status: 'succeeded', imageUrl, nsfwFlagged }
+  return { status: 'succeeded', imageUrl, nsfwFlagged, falStatus: 'COMPLETED' }
 }
 
 // 얼굴 1장 교체는 대개 30~40초면 끝나지만, 2인 동시 교체는 60~90초 이상 걸리는 사례가
@@ -769,8 +1077,19 @@ function extractFaceSwapImageUrl(payload: FalFaceSwapResponse): string | null {
 
 export type FaceSwapGender = 'male' | 'female' | 'non-binary'
 
-/** insight | easel | replicate | indexed(좌우 인덱스) */
-export type FaceSwapEngine = 'insight' | 'easel' | 'replicate' | 'indexed'
+/** insight | easel | replicate | indexed(좌우 인덱스) | kontext(머리·헤어 통째) */
+export type FaceSwapEngine = 'insight' | 'easel' | 'replicate' | 'indexed' | 'kontext'
+
+/** Kontext Multi — 원본 머리·얼굴 제거 후 증명사진 머리·얼굴 통째 교체 */
+export const HEAD_SWAP_KONTEXT_PROMPT = [
+  'Image 1 is the base photo (body, clothes, pose, background). Image 2 is the identity HEAD reference.',
+  'CRITICAL: Completely REMOVE the entire head AND hair of the person in image 1 (face, hair, forehead, ears).',
+  'Fill the removed head/hair region with the natural background/environment from image 1 so no leftover original hair remains.',
+  'Then place the FULL head from image 2 — face AND hairstyle — onto the neck and shoulders of the person in image 1.',
+  'Keep image 1 body, clothing, hands, pose, camera angle, and scene lighting.',
+  'Match skin tone at the neck seam. Photorealistic. Adult subject (18+).',
+  'FORBIDDEN: keeping image 1 hair, blending two hairstyles, face-only swap that leaves original hair.',
+].join(' ')
 
 /**
  * InsightFace 계열 1인 얼굴 교체 — fal-ai/face-swap.

@@ -9,6 +9,7 @@ import {
   stripNudeBecomesPhrase,
   wantsNudeOrUndress,
   wantsUndressAction,
+  wantsOtbeotgim,
 } from '../lib/content-policy'
 import { mediaUrlError } from '../lib/media-url'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
@@ -97,6 +98,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     clipRole?: string
     /** 사용자가 직접 고른 가슴 높이(high/mid/low) — 없거나 'auto'면 기존 추정 로직 사용 */
     bustHeight?: string
+    /** 지금장 얼굴 수. 1이면 혼자 경로 고정 */
+    sourcePeople?: number
+    /** 증명/상반신 소스면 벗기 때 줌아웃으로 전신을 연다 */
+    sourceBust?: boolean
   }
   try {
     body = await request.json()
@@ -209,7 +214,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const clipRoleRaw = (body.clipRole ?? '').trim().toLowerCase()
   const clipRole =
     clipRoleRaw === 'dual-a' || clipRoleRaw === 'dual-b' ? clipRoleRaw : ('single' as const)
-  const landmarks = bodyProjectFlag ? normalizeBodyLandmarks(body.landmarks) : null
+  const landmarks = normalizeBodyLandmarks(body.landmarks)
+  const sourcePeople = body.sourcePeople === 1 || body.sourcePeople === 2 ? body.sourcePeople : undefined
+  const sourceBust = body.sourceBust === true
   // 몸매 투영: 긴 화보 설명이 I2V에 다시 옷을 먹이지 않도록 짧은 become + 타점만 사용.
   const landmarkMotion = landmarks
     ? [
@@ -240,6 +247,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         landmarks,
         durationSec: approxDurationSec,
         bustHeight,
+        sourcePeople,
+        sourceBust,
       })
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
@@ -273,10 +282,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // 모션·나체/탈의·몸매 투영이면 go_fast OFF — 켜면 중반에 팬티·브라·남자 발명이 잦음(실측)
       goFast: !(motion || nudeOrUndress || sourceNudeHold || bodyProjectFlag),
       // 몸매 투영: 원본 벨트/바지 픽셀에 달라붙는 회귀 → sample_shift를 올려 옷 용해 여유.
-      // 일반 모션/나체 쇼츠는 낮은 sample_shift(원본에 더 붙임)를 시도했다가 오히려
-      // 바지가 안 벗겨지는 회귀(탈의= 큰 변형인데 원본에 더 붙이니 변형이 덜 일어남)가
-      // 실측돼 되돌림 — 모델 기본값(12)에 맡긴다.
-      sampleShift: bodyProjectFlag ? 18 : undefined,
+      // 나체/탈의 쇼츠도 기본값(12)에선 하의·팬티 픽셀이 남아 전신 와이드에서
+      // 「나체+팬티」가 된다(실측: 자기 가슴 주무르기). 낮은 값으로 원본에 더 붙이면
+      // 바지가 안 벗겨지므로, 탈의·나체만 16으로 올려 옷을 녹인다. 옷 입은 일반 모션은 기본값.
+      sampleShift:
+        bodyProjectFlag || wantsOtbeotgim(rawMotion) || wantsOtbeotgim(motionForVideo)
+          ? 18
+          : nudeOrUndress || sourceNudeHold
+            ? 16
+            : undefined,
     })
 
     if (started.status === 'succeeded' && started.videoUrl) {
@@ -315,12 +329,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     )
   } catch (error) {
     const message = error instanceof Error ? error.message : 'unknown_error'
+    const throttled = /throttl|rate limit|429|less than \$5/i.test(message)
     // 앱 오류도 200 + ok:false 로 내려 본문을 클라이언트가 확실히 읽게 함
     return jsonResponse(
       {
         ok: false,
-        error: 'video_generation_failed',
-        message,
+        error: throttled ? 'rate_limited' : 'video_generation_failed',
+        message: throttled
+          ? 'Replicate 계정 크레딧이 $5 미만이라 영상 요청이 막혔어요. replicate.com 에서 크레딧을 충전하면 한도가 풀립니다. 지금은 약 10초 기다렸다가 한 번만 다시 눌러 주세요.'
+          : message,
+        retryAfterSec: throttled ? 12 : undefined,
       },
       200,
     )

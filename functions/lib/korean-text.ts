@@ -31,5 +31,55 @@ export function polishKoreanPromptText(text: string): string {
   // 실측: "가습을 만져본다"를 "가슴을 만져본다"로 못 읽어서 가슴 터치 감지가 통째로
   // 빠지고, 결국 동작 없는 폴백(그냥 나체 유지)으로 새서 요청한 동작이 사라졌었다.
   t = t.replace(/가습(?!기)/g, '가슴')
+  t = normalizeOtbeotgimTerms(t)
+  return t.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * 옷벗김 동의어 → 같은 토큰.
+ * 겉옷·상의·하의 제거(브라 유지) → 바지 제거(팬티 유지) → 브라·팬티 제거 → 나체.
+ */
+const OTBEOTGIM_SYNONYM_PATTERN = new RegExp(
+  [
+    'layer[\\s-]*by[\\s-]*layer(?:\\s+(?:undress|strip|peel))?',
+    '(?:undress|strip|peel)(?:es|ing|s)?\\s+layer[\\s-]*by[\\s-]*layer',
+    'peel(?:s|ing)?\\s+one\\s+layer(?:\\s+at\\s+a\\s+time)?',
+    'one\\s+layer\\s+at\\s+a\\s+time',
+    'peel(?:s|ing)?\\s+layers?',
+    'clothes\\s*peel',
+    '속옷\\s*경유',
+    '레이어\\s*벗김',
+    '겹벗김',
+    '층벗김',
+    '한\\s*겹\\s*한\\s*겹(?:\\s*(?:벗겨?|벗기|벗긴다|제거))?',
+    '한\\s*겹씩(?:으로)?\\s*(?:벗겨?|벗기|벗긴다|벗기고|벗김|제거|없애|지워)?',
+    '한\\s*장씩\\s*(?:벗겨?|벗기|벗긴다|제거|없애)?',
+    '옷을?\\s*하나씩\\s*(?:제거|벗기|벗겨|벗긴다|없애|지워)',
+    '옷을?\\s*한\\s*(?:겹|장)씩\\s*(?:제거|벗기|벗겨|벗긴다|없애)?',
+    '겹겹이(?:\\s*옷을?)?\\s*(?:벗기|벗겨|제거)',
+    '옷을?\\s*겹겹이',
+    '차례로\\s*(?:옷을?\\s*)?(?:벗기|벗겨|제거)',
+    '단계적으로\\s*(?:옷을?\\s*)?(?:벗기|벗겨|제거)',
+    '순서대로\\s*(?:옷을?\\s*)?(?:벗기|벗겨)',
+    '겉(?:옷)?부터\\s*(?:벗기|벗겨|제거)',
+    '겉옷을\\s*먼저(?:\\s*(?:벗기|벗겨))?',
+    '층층이\\s*(?:벗기|벗겨)',
+    '옷을?\\s*녹여(?:\\s*(?:벗기|벗겨))?',
+    '옷\\s*녹이(?:기)?',
+    '겉부터\\s*속까지',
+    '블라우스부터(?:\\s*(?:벗기|벗겨|제거))?',
+    '하나씩\\s*(?:벗기|벗겨|벗긴다)',
+    '한\\s*개씩\\s*(?:벗기|벗겨|제거)',
+    '옷\\s*벗김',
+  ].join('|'),
+  'gi',
+)
+
+export function normalizeOtbeotgimTerms(text: string): string {
+  let t = String(text || '')
+  if (!t) return ''
+  t = t.replace(OTBEOTGIM_SYNONYM_PATTERN, '옷벗김')
+  t = t.replace(/(?:옷벗김)(?:\s*옷벗김)+/g, '옷벗김')
+  t = t.replace(/옷벗김(?=[가-힣A-Za-z0-9])/g, '옷벗김 ')
   return t.replace(/\s+/g, ' ').trim()
 }

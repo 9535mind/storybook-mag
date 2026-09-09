@@ -202,8 +202,28 @@
     if (pdfChunkIndex < pdfChunks.length - 1) loadChunkIntoDraft(pdfChunkIndex + 1)
   })
 
-  function getOcrWorker() {
-    if (!window.Tesseract) return Promise.reject(new Error('tesseract_missing'))
+  function loadTesseract() {
+    if (window.Tesseract) return Promise.resolve()
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-essay-tesseract]')
+      if (existing) {
+        existing.addEventListener('load', () => resolve())
+        existing.addEventListener('error', () => reject(new Error('tesseract_missing')))
+        return
+      }
+      const script = document.createElement('script')
+      script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+      script.async = true
+      script.dataset.essayTesseract = '1'
+      script.onload = () => resolve()
+      script.onerror = () => reject(new Error('tesseract_missing'))
+      document.head.appendChild(script)
+    })
+  }
+
+  async function getOcrWorker() {
+    await loadTesseract()
+    if (!window.Tesseract) throw new Error('tesseract_missing')
     if (!ocrWorkerPromise) {
       ocrWorkerPromise = window.Tesseract.createWorker(OCR_LANGS)
     }

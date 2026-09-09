@@ -124,3 +124,16 @@ export function buildBodyLandmarkCoordsLock(landmarks: BodyLandmarks): string {
   )
   return parts.join('. ')
 }
+
+/** Wan 1500자용 — 옷벗김 가슴 자리만 짧게 */
+export function buildBodyLandmarkCoordsLockShort(landmarks: BodyLandmarks): string {
+  const L = landmarks.nippleL
+  const R = landmarks.nippleR
+  const mL = landmarks.moundL ?? L
+  const mR = landmarks.moundR ?? R
+  const bits: string[] = []
+  if (mL && L) bits.push(`L ${pct(mL.x)},${pct(mL.y)} n${pct(L.x)},${pct(L.y)}`)
+  if (mR && R) bits.push(`R ${pct(mR.x)},${pct(mR.y)} n${pct(R.x)},${pct(R.y)}`)
+  if (!bits.length) return ''
+  return `BUST ANCHOR stay: ${bits.join('; ')}. Dissolve clothes on these pixels. FORBIDDEN lifting the bust or a high sports-bra.`
+}

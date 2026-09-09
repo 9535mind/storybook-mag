@@ -77,3 +77,13 @@ alwaysApply: true
   `resolveWanI2vDuration`(`functions/lib/replicate-client.ts`).
 
 참고 배포(이 체크포인트 시점): `https://8c32daf3.storymag.pages.dev`.
+
+---
+
+## 2026-09-09 — 증명사진 벗기는 줌아웃 (사용자가 완성으로 저장)
+
+단일 클립의 **줌인·클로즈업 금지는 유지**. 예외는 이것만:
+
+- 소스가 **증명사진·상반신**(`sourceBust`)이고 동작이 **벗기**이면, 구도 고정 대신 **느린 줌아웃**으로 전신(머리~신발)을 연다. 얼굴은 잘리지 않음.
+- 전신 소스 벗기는 기존처럼 원본 구도 고정, 줌인 금지.
+- 엔진·길이·머지는 그대로. 관련: `.cursor/rules/desk-id-undress-zoomout.mdc`, 배포 `https://bcb32bd9.storymag.pages.dev`.

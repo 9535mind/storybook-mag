@@ -88,8 +88,82 @@ export function buildWanPubicLine(text = ''): string {
   if (/역삼각|삼각형\s*음모|landing\s*strip|brazilian/i.test(t)) {
     return 'Pubic: neat triangular dark curls centered on mons. ZERO panties/fog.'
   }
-  // 기본: 치골 위 콤팩트 곱슬 (장문 락의 핵심만)
-  return 'Pubic: compact dense dark curls on mons — not fog blotch, not blank doll skin. ZERO panties.'
+  return 'Pubic: dark curly triangle MUST show on mons (곱슬 가닥). FAILED hairless/smooth blank crotch. ZERO panties.'
+}
+
+/** 정지 이미지(Flux/inpaint)용 한 줄 — 민무늬 기본값이 소아로 오인되는 사고 방지. 쇼츠 Wan 경로는 쓰지 않음. */
+export function buildStillNudeAdultPubicLine(text = ''): string {
+  const t = polishKoreanPromptText(text || '')
+  if (wantsExplicitPubicShave(t)) {
+    return 'Pubic: smooth shaved ONLY because the user explicitly asked. Adult woman 18+, not a minor. ZERO panties on the shaved crotch.'
+  }
+  return 'MANDATORY adult curly pubic hair visible on the BARE mons (곱슬 음모, visible coils). ZERO panties/thong/bikini covering the crotch — fabric there is a FAILED substitute for pubic hair. FORBIDDEN hairless/smooth blank crotch that can be mistaken for a child. Adult woman 18+ only.'
+}
+
+/**
+ * 정지 장면(얼굴로 장면 / Flux text2img): 음모·나체를 요청했는데
+ * 모델이 상의만 벗기고 팬티/비키니를 남겨 음모를 가리는 회귀.
+ * 쇼츠 Wan 경로에서는 쓰지 않음.
+ */
+export function wantsStillWomanNudeOrPubic(text = ''): boolean {
+  const t = polishKoreanPromptText(text || '')
+  if (!t) return false
+  return /음모|치모|체모|나체|누드|전라|벗기|탈의|fully\s*nude|\bnude\b|\bnaked\b|bare\s*crotch|pubic|topless|팬티\s*(?:를?\s*)?(?:벗|없|제거)|속옷\s*(?:을?\s*)?(?:벗|없|제거)/i.test(
+    t,
+  )
+}
+
+export function buildStillWomanNudeNoPantyLock(text = '', lookNotes = ''): string {
+  if (!wantsStillWomanNudeOrPubic(text)) return ''
+  const t = polishKoreanPromptText(text || '')
+  const look = polishKoreanPromptText(lookNotes || '')
+  const bothNude =
+    /둘\s*다\s*(?:나체|누드)|남자도\s*(?:나체|벗|누드)|both\s*(?:people|of them|partners).{0,24}nude/i.test(
+      t,
+    )
+  const pubic = /음모|치모|체모|pubic/i.test(t)
+  const lines = [
+    'WOMAN FULL NUDE: bare breasts with visible nipples AND completely bare hips/crotch — ZERO panties, ZERO thong, ZERO briefs, ZERO bikini bottoms, ZERO any fabric on the mons.',
+    'FAILED LOOK (do not output this): topless woman still wearing black or white panties or a bikini bottom — that covers the crotch and is wrong.',
+    buildStillNudeAdultBustLine(`${t} ${look}`),
+    'BUST vs ID PHOTO: her nude breasts must look at least as full as her chest in the ID/source photo — never smaller. A-cup after undressing is a FAILED result.',
+  ]
+  if (pubic) {
+    lines.push(
+      wantsExplicitPubicShave(t)
+        ? 'Shaved bare crotch as asked — still ZERO panties; the mons must be uncovered skin.'
+        : 'Pubic hair must be drawn on the BARE mons because there is no underwear — panties are not an allowed substitute for pubic hair.',
+      buildStillNudeAdultPubicLine(t),
+      'FRAMING: include hips and crotch in the photo so the bare mons is visible — do not crop at the waist to hide it.',
+    )
+  }
+  if (!bothNude) {
+    lines.push('If a man is in the scene, he keeps his clothes unless the text says he is also nude.')
+  }
+  return lines.join(' ')
+}
+
+/** 정지 이미지 탈의 시 가슴이 A컵·빈유로 쪼그라드는 회귀 방지. 쇼츠 Wan 경로는 쓰지 않음. */
+export function buildStillNudeAdultBustLine(text = ''): string {
+  const t = polishKoreanPromptText(text || '')
+  // "FORBIDDEN A-cup" 같은 우리 잠금 문구를 작은 가슴 요청으로 오인하면 안 됨
+  const askedSmall =
+    /작은\s*가슴|빈유/i.test(t) ||
+    (/\bsmall\s+breasts?\b/i.test(t) && !/forbidden[^.!?]{0,100}small\s+breasts?/i.test(t))
+  if (askedSmall) {
+    return 'Bust: smaller/modest as the user asked — still adult female soft tissue, not a childlike chest.'
+  }
+  const idFull =
+    /full\s+adult\s+bust|generous\s+bust|bust\s+filling|filling\s+(?:the\s+)?(?:shirt|t-?shirt|tee)|C\s*-?\s*cup|D\s*-?\s*cup/i.test(
+      t,
+    )
+  if (LARGE_BUST_MENTION_PATTERN.test(t) || idFull) {
+    return 'Bust: keep the SAME full volume as the ID/source photo clothed chest (shirt filling). Nude must NOT look smaller than that photo. FORBIDDEN shrinking even half a cup, FORBIDDEN empty or teenage chest.'
+  }
+  if (/modest\s+chest|average\s+adult\s+bust/i.test(t)) {
+    return 'Bust: match the ID/source photo clothed chest (average adult, about B–C). Still adult soft tissue — FORBIDDEN shrinking smaller than the ID photo.'
+  }
+  return 'Bust: full adult C-cup soft volume as the minimum — match the ID/source photo clothed chest if it looks fuller. Nude breasts must look at least as large as the chest in the ID photo. FORBIDDEN shrinking breasts when undressing, FORBIDDEN childlike tiny breasts.'
 }
 
 /**
@@ -213,7 +287,7 @@ export function buildNudeBodyShapeContinuityLock(text = ''): string {
   const t = polishKoreanPromptText(text || '')
   const bits = [
     'BODY SHAPE CONTINUITY: keep the exact same breast size, waist width, and hip width the person already has — do not shrink, flatten, or generic-ify the figure into a smaller doll-like body',
-    'Preserve natural adult breast volume and shape at their existing size — FORBIDDEN tiny flat chest, FORBIDDEN unrealistic oversized breasts; match the existing proportions',
+    'Preserve natural adult breast volume — at least a soft B–C mound unless the user asked for a small bust; FORBIDDEN shrinking to A-cup / tiny flat chest when undressing; FORBIDDEN unrealistic oversized breasts',
   ]
   if (LARGE_BUST_MENTION_PATTERN.test(t)) {
     bits.push('text confirms large bust — preserve generous breast volume and projection')
@@ -317,7 +391,12 @@ export function stripDefaultContinuityEchoes(revision: string): string {
  * "한 명만" 계열 잠금을 커플 사진에서는 빼도록 공통 게이트를 둔다.
  */
 export function mentionsCoupleOrSecondPerson(text: string): boolean {
+  // Desk solo stills say "FORBIDDEN ... couple" — that English word used to flip
+  // this detector on, which then DROPPED the "two people" negative and invented a man.
+  const cleaned = String(text || '')
+    .replace(/FORBIDDEN\b[^.]*/gi, ' ')
+    .replace(/ONLY one woman\b[^.]*/gi, ' ')
   return /두\s*명|둘이|커플|연인|남자와|여성과|파트너|함께\s*있는|two\s*(?:people|persons|women|men)|couple|with\s*a\s*(?:man|woman|partner)/i.test(
-    text || '',
+    cleaned,
   )
 }

@@ -1,0 +1,28 @@
+---
+description: Desk 증명사진 벗기 — 줌인 금지, 줌아웃으로 전신. 2026-09-09 실측 완성.
+alwaysApply: true
+---
+
+# Desk 증명사진 벗기 줌아웃 (2026-09-09)
+
+사용자가 **완벽하다 저장하고 기억하게 하자**고 명시함.  
+배포: `https://bcb32bd9.storymag.pages.dev`
+
+## 정상
+
+- 증명사진·상반신을 여 칸에 두고 **벗기**(Desk 5초 포함) → 카메라가 **줌아웃**
+- 얼굴은 프레임에 남고, 허리·다리·신발까지 **전신 크기**에 맞춤
+- 그 사이에 옷이 녹음 (5초는 한 겹)
+- 실패: 머리 잘림, 가슴만 확대, 아래로 틸트(줌인)
+
+## 구현
+
+- 클라이언트: `deskPhotoNeedsBodyExtend`가 상반신이면 `sourceBust: true`
+- 서버: `buildAnimationPrompt({ sourceBust })` + `buildShortsCameraLock`
+- 회귀: `buildAnimationPrompt/id-bust-5s-undress-zoom-out`
+
+## 하면 안 되는 것
+
+- 상반신 벗기를 다시 `exact source crop` / 줌인으로 되돌리기
+- 전신 소스의 줌인 금지를 풀기 (전신은 구도 고정 유지)
+- 쇼츠 엔진·길이·머지를 이 이유로 바꾸기
