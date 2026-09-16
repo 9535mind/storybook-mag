@@ -5,8 +5,12 @@ import {
   polishKoreanPromptText,
   wantsOtbeotgim,
   wantsNudeOrUndress,
+  deskStillUsesAdultReplicate,
   wantsDeskUncensoredStill,
+  wantsDeskPoseChange,
+  COUPLE_MAN_SHIRT_ONLY,
 } from '../lib/content-policy'
+import { buildDeskStillPrompt, deskStillNegativePrompt } from '../lib/desk-still-prompt'
 import {
   submitFalInpaint,
   submitFalKontextEdit,
@@ -203,90 +207,6 @@ function detectSceneActionLines(descriptionKo: string): string[] {
   return lines
 }
 
-function buildDeskStillPrompt(descriptionKo: string, couple = false, step = ''): string {
-  const t = descriptionKo || ''
-  const lie = /눕|누워|lying/i.test(t)
-  const slip = /슬립|slip|실크/i.test(t)
-  const nudeLook = wantsNudeOrUndress(t)
-  const clothes = nudeLook
-    ? couple
-      ? 'MELT the woman’s garments off until she is fully nude. Keep the man’s current clothes unless the text undresses him. Same two people. ZERO mosaic, ZERO a black blank frame.'
-      : 'MELT every garment off THIS same body until fully nude. Bare breasts with nipples, bare crotch, dark curly adult pubic triangle. ZERO bra, ZERO panties, ZERO mosaic, ZERO a black blank frame.'
-    : slip
-      ? 'MELT clothes on this same body into a one-piece silk slip nightdress, thin spaghetti straps, one garment chest to thigh. FORBIDDEN a bra, a panty-only set, two-piece lingerie, bikini, or structured underwire cups. FORBIDDEN drawing a new body.'
-      : 'MELT the source clothes into the requested outfit on THIS same body. Do not redraw the person. Do not invent a new model.'
-  const sit = /앉|sit(?:ting)?/i.test(t)
-  const stand = /서서|서기|stand(?:ing)?/i.test(t)
-  const pose = lie
-    ? couple
-      ? 'POSE: both adults lie on the bed in ONE photo. FORBIDDEN standing portraits or splitting into two photos.'
-      : 'POSE: the same person lies on the bed, full body on the mattress. FORBIDDEN standing, a standing fashion portrait, or a new standing model.'
-    : couple && sit && stand
-      ? 'POSE: the woman SITS, the man STANDS beside her in the SAME photo. Both heads in frame. FORBIDDEN both standing, both sitting, or two separate pictures.'
-      : couple && sit
-        ? 'POSE: BOTH adults sit in the same photo, near each other. Both heads in frame.'
-        : couple && stand
-          ? 'POSE: BOTH adults stand in the same photo, near each other. Both heads in frame.'
-          : 'Keep this person. Change pose only as asked.'
-  const identity = couple
-    ? 'Two source adults. Keep EACH face, hair, and body. Put both in ONE photo together. Do not invent a third person or replace either face.'
-    : 'CRITICAL IDENTITY: keep THIS exact adult from the source photo — same face, same hair, same body. Clothing melt only. FORBIDDEN a new model, a stock Korean beauty portrait, or a different person.'
-  if (step === 'together') {
-    return [
-      identity,
-      'Put BOTH source adults into ONE shared photograph, same room, standing or sitting near each other.',
-      'Keep each current outfit. Do not melt clothes. Do not change identity.',
-      'Both heads in frame. Photoreal adult photo. Adult 18+.',
-    ].join(' ')
-  }
-  if (step === 'look') {
-    return [
-      identity,
-      `User clothes: ${t}`,
-      clothes,
-      'Keep the same pose and the same room. Clothes only.',
-      couple ? 'Both heads stay in frame.' : 'Only this one person. Do not draw a second adult.',
-      'Photoreal adult photo. Adult 18+.',
-    ].join(' ')
-  }
-  if (step === 'place') {
-    return [
-      identity,
-      `User place/pose: ${t}`,
-      pose,
-      'PLACE: the requested room. Keep the same clothes and the same face/body. Place and pose only.',
-      couple ? 'Both heads stay in frame.' : 'Only this one person. Do not draw a second adult.',
-      'Photoreal adult photo. Adult 18+.',
-    ].join(' ')
-  }
-  if (step === 'cut') {
-    const kiss = /키스|입맞춤|kiss/i.test(t)
-    const hug = /포옹|안는|hug/i.test(t)
-    const action = kiss
-      ? 'ACTION: this next still is a kiss — heads close, lips touching. Same clothes unless the text undresses.'
-      : hug
-        ? 'ACTION: this next still is a hug. Bodies close. Same clothes unless the text undresses.'
-        : 'ACTION: advance only this next beat. Same room.'
-    return [
-      identity,
-      `NEXT CUT still from THIS photograph. User: ${t}`,
-      nudeLook || slip ? clothes : 'Keep the current clothes unless the text undresses or changes the outfit. Do not redraw a new person.',
-      action,
-      couple ? 'Both heads stay in frame.' : 'Only this one person. Do not draw a second adult.',
-      'Photoreal adult photo. Adult 18+.',
-    ].join(' ')
-  }
-  return [
-    identity,
-    `User scene: ${t}`,
-    clothes,
-    pose,
-    'PLACE: the requested room. If a bedroom is asked, this same person is on the bed there, not a white studio floor.',
-    couple ? 'Both heads stay in frame.' : 'Only this one person. Do not draw a second adult.',
-    'Photoreal adult photo. One continuous room. Adult 18+.',
-  ].join(' ')
-}
-
 function restagePosePrompt(options: {
   poseId: string
   descriptionKo: string
@@ -309,6 +229,8 @@ function restagePosePrompt(options: {
       ? 'POSE CHANGE: they stand as one couple, hips touching. The man on the RIGHT wraps his LEFT arm around the woman\'s waist; his hand rests on her far hip. FORBIDDEN standing apart, both arms hanging at their sides, two separate cutouts.'
       : pose === 'hug-front'
         ? 'POSE: they hug, bodies close, BOTH faces turned toward the camera (not profile). Arms around each other.'
+        : pose === 'lap-sit'
+          ? 'POSE: the woman sits on the man’s lap facing the CAMERA. They do not look at each other. Both heads visible. Clothes stay on.'
         : pose === 'backhug'
           ? 'POSE: back-hug — the man stands behind the woman, arms around her waist. She faces the camera; his face visible over her shoulder.'
           : pose === 'hug-light' || pose === 'hug'
@@ -401,7 +323,7 @@ function poseDrawPrompt(options: {
                 ? 'two adults fully nude standing close, not a passport pose'
                 : options.g0 === 'man'
                   ? 'adult man fully nude standing, flat male chest, penis, NO breasts, not a woman. sharp photo, skin texture'
-                  : 'adult woman fully nude standing, breasts, realistic vulva, soft labia, adult pubic hair, not a barbie seam. sharp photo, skin texture'
+                  : 'adult woman fully nude standing, breasts, realistic vulva, soft labia, neat Korean-30s pubic curls on the mons slightly fuller than 20s, not a tall triangle, not a barbie seam. sharp photo, skin texture'
   return [
     poseLine,
     pose === 'cowgirl'
@@ -527,7 +449,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       poseId?: string
       photoCount?: number
       sourcePeople?: number
+      sourceCast?: 'ww' | 'mw'
       adultStill?: boolean
+      forceReplicate?: boolean
       expand?: {
         top?: number
         bottom?: number
@@ -644,29 +568,48 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       try {
         const gender = genderWord(body.gender0) || 'adult'
         const prompt = [
-          `Photoreal studio photograph of this same adult ${gender}.`,
-          'Fill ONLY the empty gray below with waist, legs and shoes so they stand full body.',
-          'Continue the SAME clothes already on the person. Do not change the existing face, hair, or upper garment.',
-          'One person only. Two arms and two legs. Soft daylight.',
+          `Photoreal studio photograph of the SAME adult ${gender} standing full body, head to shoes.`,
+          'The face, hair, eyes, nose, mouth, and skin must match the identity photo exactly. Do not invent a similar-looking different person.',
+          'Keep the exact same clothes from the identity photo. If she wears a blouse or shirt, keep that blouse or shirt. Do not change them into a suit, blazer, or ID uniform unless those clothes are already worn in the identity photo.',
+          'Standing upright on the studio floor. Two arms at the sides. Two legs. Shoes visible.',
+          'Not a passport photo, not a Korean ID headshot, not a waist crop.',
+          'One person only. Seamless studio. No desk, no table, no chair, no blank sign, no poster board, no extra people.',
         ].join(' ')
-        const mask = images[1]
-        const submitted = mask
-          ? await submitFalInpaint({
-              falKey: env.FAL_KEY,
-              imageUrl: images[0],
-              maskUrl: mask,
+        const identity = images[1] || images[0]
+        let submitted
+        if (images[1]) {
+          const imageUrls: string[] = []
+          for (let i = 0; i < 2; i += 1) {
+            const src = i === 0 ? images[0] : identity
+            imageUrls.push(
+              src.startsWith('data:')
+                ? await uploadDataUrlToFal(env.FAL_KEY, src, `extend-id-${Date.now()}-${i}.jpg`, {
+                    maxBytes: MAX_REFERENCE_BYTES,
+                    tooLargeError: 'reference_image_too_large',
+                  })
+                : src,
+            )
+          }
+          submitted = await submitFalKontextMultiImage({
+            falKey: env.FAL_KEY,
+            imageUrls,
+            prompt: [
+              'Image 1 is the standing studio layout. Image 2 is the exact identity photo.',
+              'Draw the person from image 2 standing full body inside image 1.',
               prompt,
-              negativePrompt: 'new face, different person, changed clothes, collage, extra limbs',
-              strength: 0.76,
-            })
-          : await submitFalKontextEdit({
-              falKey: env.FAL_KEY,
-              imageUrl: images[0],
-              prompt,
-              tier: 'pro',
-              guidanceScale: 4.2,
-              outputFormat: 'jpeg',
-            })
+            ].join(' '),
+            aspectRatio: '3:4',
+            guidanceScale: 6.5,
+          })
+        } else {
+          submitted = await submitFalKontextEdit({
+            falKey: env.FAL_KEY,
+            imageUrl: images[0],
+            prompt,
+            guidanceScale: 6.5,
+            aspectRatio: '3:4',
+          })
+        }
         if ('imageUrl' in submitted && submitted.imageUrl) {
           return jsonResponse(
             { ok: true, imageUrl: submitted.imageUrl, composeMode: 'extend-body' },
@@ -827,18 +770,30 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       try {
         const step = String(body.deskStep || '')
         const couple =
+          body.sourceCast === 'mw' ||
+          body.sourceCast === 'ww' ||
           images.length >= 2 ||
           Number(body.sourcePeople) >= 2 ||
-          /두\s*주연이 함께|두 사람이 한 장/i.test(descriptionKo)
+          /두\s*주연이 함께|두 사람이 한 장|올린 두 사람|남자는 상의만|남자 옷은 유지|같은 두 사람/i.test(
+            descriptionKo,
+          )
         const prompt = buildDeskStillPrompt(descriptionKo, couple, step)
-        const nudeStill = wantsNudeOrUndress(descriptionKo)
-        const slipStill = !nudeStill && wantsDeskUncensoredStill(descriptionKo)
-        if (nudeStill || slipStill) {
+        const poseCut =
+          step === 'cut' && /키스|입맞춤|kiss|포옹|hug|가슴|breast/i.test(descriptionKo)
+        const nudeStill = !poseCut && wantsNudeOrUndress(descriptionKo)
+        const useAdultReplicate = deskStillUsesAdultReplicate(
+          step,
+          descriptionKo,
+          Boolean(body.forceReplicate),
+        )
+        if (useAdultReplicate) {
           if (!env.REPLICATE_API_TOKEN?.trim()) {
             return jsonResponse({ ok: false, error: 'replicate_token_not_configured' }, 500)
           }
           const dims = poseDrawReplicateSize(
-            typeof body.aspectRatio === 'string' ? body.aspectRatio.trim() : '9:16',
+            typeof body.aspectRatio === 'string' && body.aspectRatio.trim()
+              ? body.aspectRatio.trim()
+              : '9:16',
           )
           const started = await startReplicateImageToImage({
             apiToken: env.REPLICATE_API_TOKEN,
@@ -847,13 +802,22 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             modelVersion: env.REPLICATE_MODEL_VERSION,
             imageUrl: images[0],
             prompt,
-            negativePrompt: nudeStill
-              ? 'clothes, dressed, bra, panties, thong, underwear, black image, blank frame, mosaic, censored, extra people, child, teen, different person, new face, stock model'
-              : 'bra, panty-only, two-piece lingerie, bikini, underwire, black image, blank frame, mosaic, censored, extra people, child, teen, different person, new face, stock model, fully naked',
+            negativePrompt: deskStillNegativePrompt({
+              couple,
+              nudeStill,
+              descriptionKo,
+            }),
             width: dims.width,
             height: dims.height,
-            // 0.78는 옷을 녹이지 않고 새 화보 모델을 그림. 옷만 바꾸려면 낮게.
-            strength: nudeStill ? 0.58 : 0.48,
+            strength: nudeStill
+              ? couple
+                ? 0.32
+                : 0.42
+              : wantsDeskPoseChange(descriptionKo)
+                ? 0.4
+                : wantsDeskUncensoredStill(descriptionKo)
+                  ? 0.38
+                  : 0.34,
             guidanceScale: 1.35,
             disableSafetyChecker: true,
           })
@@ -875,33 +839,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             200,
           )
         }
-        const submitted = couple
-          ? await submitFalKontextMultiImage({
-              falKey: env.FAL_KEY,
-              imageUrls: [
-                await uploadDataUrlToFal(env.FAL_KEY, images[0], `desk-still-0-${Date.now()}.jpg`, {
-                  maxBytes: MAX_REFERENCE_BYTES,
-                  tooLargeError: 'reference_image_too_large',
-                }),
-                await uploadDataUrlToFal(env.FAL_KEY, images[1], `desk-still-1-${Date.now()}.jpg`, {
-                  maxBytes: MAX_REFERENCE_BYTES,
-                  tooLargeError: 'reference_image_too_large',
-                }),
-              ],
-              prompt,
-              aspectRatio:
-                typeof body.aspectRatio === 'string' && body.aspectRatio.trim()
-                  ? body.aspectRatio.trim()
-                  : '16:9',
-              guidanceScale: 5.2,
-            })
-          : await submitFalKontextEdit({
-              falKey: env.FAL_KEY,
-              imageUrl: images[0],
-              prompt,
-              tier: 'pro',
-              guidanceScale: 5.2,
-            })
+        const submitted = await submitFalKontextEdit({
+          falKey: env.FAL_KEY,
+          imageUrl: images[0],
+          prompt,
+          tier: 'pro',
+          guidanceScale: step === 'look' ? 3.8 : poseCut ? 4.4 : 4.6,
+        })
         if ('imageUrl' in submitted && submitted.imageUrl) {
           return jsonResponse({ ok: true, imageUrl: submitted.imageUrl, composeMode: 'desk-still', prompt }, 200)
         }
@@ -1251,7 +1195,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     // 얼굴 경로: 예전(커밋) 강락 복구 + FACE LOCK. 전신 경로는 체형 강조 유지.
     const otbeotgimLine = wantsOtbeotgim(descriptionKo)
-      ? '옷벗김: remove top AND pants/belt/panty. RESULT is FULL NUDE, same bust volume as the clothed mound — FORBIDDEN smaller breasts. FORBIDDEN a pants-on topless still.'
+      ? /남자 옷은 유지|남자는 상의만|두 사람|Keep the man|HE keeps|Only SHE undresses/i.test(
+          descriptionKo,
+        )
+        ? `옷벗김: SHE undresses only. ${COUPLE_MAN_SHIRT_ONLY} FORBIDDEN removing his shirt or pants.`
+        : '옷벗김: remove top AND pants/belt/panty. RESULT is FULL NUDE, same bust volume as the clothed mound — FORBIDDEN smaller breasts. FORBIDDEN a pants-on topless still.'
       : ''
 
     const identityFirstLock = multiPerson

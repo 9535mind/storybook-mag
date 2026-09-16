@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag</title>
-  <link rel="stylesheet" href="/style.css?v=20260909desk-still-show" />
+  <link rel="stylesheet" href="/style.css?v=20260915concept-paste" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -162,24 +162,49 @@
             <button type="button" id="desk-cast-woman" class="desk-person desk-person--cast" data-cast="woman">
               <span class="desk-cast-tag">여</span>
               <img id="desk-cast-woman-img" alt="" hidden />
-              <span id="desk-cast-woman-empty" class="desk-person__empty">붙이거나 놓으세요</span>
+              <span id="desk-cast-woman-empty" class="desk-person__empty">파일 · 붙이기 · 놓기</span>
             </button>
             <button type="button" id="desk-cast-man" class="desk-person desk-person--cast" data-cast="man">
               <span class="desk-cast-tag">남</span>
               <img id="desk-cast-man-img" alt="" hidden />
-              <span id="desk-cast-man-empty" class="desk-person__empty">붙이거나 놓으세요</span>
+              <span id="desk-cast-man-empty" class="desk-person__empty">파일 · 붙이기 · 놓기</span>
             </button>
           </div>
           <input id="desk-cast-input" type="file" accept="image/*" hidden />
+          <div class="desk-cast-paste">
+            <button type="button" id="desk-cast-paste-w">여 붙이기</button>
+            <button type="button" id="desk-cast-paste-m">남 붙이기</button>
+            <button type="button" id="desk-scene-paste">장면 붙이기</button>
+          </div>
+          <p class="adult-desk__fine">여·남 칸에 끌어다 놓거나 Ctrl+V. 두 장을 놓으면 여·남에 각각 들어갑니다.</p>
           <button type="button" id="desk-scene-new" class="desk-scene-upload">새 장면</button>
           <button type="button" id="desk-scene-upload" class="desk-scene-upload">장면 사진 올리기</button>
           <input id="desk-scene-input" type="file" accept="image/*" hidden />
           <button type="button" id="desk-leads-from-scene" class="desk-scene-upload">이 사진의 사람을 주연으로</button>
           <button type="button" id="desk-cast-swap" class="desk-scene-upload">여 ↔ 남 바꾸기</button>
-          <p class="adult-desk__fine">기본: 칸에 넣은 얼굴·몸매 그대로. 새 사람을 그리지 않고 옷만 녹입니다. 증명사진이면 반신·전신을 그립니다. 두 장이면 두 사람이 함께 있는 장면. 그 장으로 움직이기. 장면만 바꾸기: 새 장면. 인물까지 비우기: 새 화보 시작. 작품 전체 삭제: 새 작품.</p>
+          <p class="adult-desk__fine">CAST 얼굴·몸매 유지. 새 사람 금지. 옷만 녹입니다. 증명사진은 몸 잇기.</p>
         </aside>
 
-        <div id="adult-desk-stage" class="adult-desk__stage"></div>
+        <div id="adult-desk-stage" class="adult-desk__stage">
+          <p id="adult-desk-stage-empty" class="adult-desk__stage-empty">CAST에 사람을 넣고, 새 사진을 만들거나 장면 사진을 올리세요.</p>
+          <div id="desk-assemble" class="desk-assemble" hidden>
+            <div class="desk-assemble__bar">
+              <button type="button" id="desk-assemble-size">세로</button>
+              <button type="button" id="desk-assemble-smaller">작게</button>
+              <button type="button" id="desk-assemble-bigger">크게</button>
+              <button type="button" id="desk-assemble-add">PNG 넣기</button>
+              <button type="button" id="desk-assemble-cast-w">여 넣기</button>
+              <button type="button" id="desk-assemble-cast-m">남 넣기</button>
+              <button type="button" id="desk-assemble-now">지금 장</button>
+              <button type="button" id="desk-assemble-drop">빼기</button>
+              <button type="button" id="desk-assemble-apply">이 장으로</button>
+              <button type="button" id="desk-assemble-close">닫기</button>
+            </div>
+            <p class="desk-assemble__hint">끌어다 놓거나 Ctrl+V로 넣습니다. 배경을 지우고 전신 키를 맞춥니다. 끌어 옮기고 휠로 미세 조정. 두세 장까지.</p>
+            <canvas id="desk-assemble-canvas" class="desk-assemble__canvas"></canvas>
+            <input id="desk-assemble-input" type="file" accept="image/png,image/*" multiple hidden />
+          </div>
+        </div>
 
         <aside class="adult-desk__rail">
           <div class="desk-job" role="group" aria-label="작업">
@@ -194,13 +219,15 @@
             <div id="desk-places" class="desk-cards"></div>
             <p class="adult-desk__kicker">POSE</p>
             <div id="desk-poses" class="desk-cards"></div>
-            <p class="adult-desk__fine">한 버튼을 누르면 한 걸음만 합니다. 1 몸 잇기 → 2 한 장면(두 장일 때) → 3 옷 → 4 장소·자세.</p>
+            <p id="desk-still-hint" class="adult-desk__fine">CAST → 1 몸 잇기 → 2 한 장면(오려 붙임) → 3 옷만 → 4 방만. 얼굴은 다시 그리지 않습니다.</p>
           </div>
 
           <div id="desk-video-packs" hidden>
+            <p class="adult-desk__kicker">LOOK</p>
+            <div id="desk-looks-move" class="desk-cards"></div>
             <p class="adult-desk__kicker">MOVE</p>
             <div id="desk-moves" class="desk-cards"></div>
-            <p class="adult-desk__fine">한 번 누르면 한 편만 나옵니다. 끝나면 그 편 영상을 바로 봅니다. ①②는 다음 클릭 순서이고, 두 편을 한 파일로 합치지 않습니다. 키스·포옹은 남 칸 사람을 가운데에 붙인 뒤 찍습니다. 없는 남자를 만들지 않습니다.</p>
+            <p class="adult-desk__fine">옷 녹이기 = 위에서 고른 옷으로 녹입니다. 한 번 = 한 편. 벗기·가슴·손은 같이 됩니다.</p>
             <label class="desk-two" for="desk-two-people">
               <input type="checkbox" id="desk-two-people" />
               사진에 두 사람
@@ -219,6 +246,7 @@
             <button type="button" class="desk-run desk-run--step" data-desk-step="look">3 옷 녹이기</button>
             <button type="button" class="desk-run desk-run--step" data-desk-step="place">4 장소·자세</button>
           </div>
+          <button type="button" id="desk-assemble-open" class="desk-scene-upload">PNG 조립</button>
           <button type="button" id="desk-run" class="desk-run">움직이기</button>
           <p id="desk-status" class="form__status" hidden></p>
           <button type="button" id="desk-advanced-toggle" class="desk-advanced">도구 더 보기</button>
@@ -385,11 +413,25 @@
             placeholder="예: 여우가 느티나무 아래에 서있다 — 간략한 캐릭터 정보를 적어 주세요"
           ></textarea>
           <p class="description-dropzone__hint">
-            참고 사진: <strong>파일 선택</strong> · <strong>Ctrl+V 캡처 붙여넣기</strong> · <strong>폴더에서 끌어다 놓기</strong>
+            참고 PNG 두 장까지. 두 장이면 한 장면에 비빕니다. <strong>파일 선택</strong> · <strong>Ctrl+V</strong> · <strong>끌어다 놓기</strong>
           </p>
+          <div id="concept-refs" class="concept-refs" aria-label="참고 이미지 두 장">
+            <button type="button" class="concept-ref" data-ref="0">
+              <span class="concept-ref__empty">참고 1 · Ctrl+V · 놓기</span>
+              <img class="concept-ref__img" alt="" hidden />
+              <span class="concept-ref__paste">붙이기</span>
+              <span class="concept-ref__x" hidden>×</span>
+            </button>
+            <button type="button" class="concept-ref" data-ref="1">
+              <span class="concept-ref__empty">참고 2 · Ctrl+V · 놓기</span>
+              <img class="concept-ref__img" alt="" hidden />
+              <span class="concept-ref__paste">붙이기</span>
+              <span class="concept-ref__x" hidden>×</span>
+            </button>
+          </div>
           <p class="description-dropzone__overlay" hidden>여기에 이미지를 놓으세요</p>
         </div>
-        <input id="load-image-input" class="load-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden />
+        <input id="load-image-input" class="load-image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
           <p id="description-limit-hint" class="form__hint" hidden></p>
           <div id="description-otbeotgim" class="motion-presets__row" role="list" aria-label="옷벗김" style="margin-top: 6px"></div>
           <p class="form__hint" style="margin-top: 6px">
@@ -621,7 +663,7 @@
         <p id="animate-status" class="form__status" hidden></p>
 
         <div id="video-result" class="video-result" hidden>
-          <video id="result-video" class="result__video" controls playsinline></video>
+          <video id="result-video" class="result__video" controls playsinline loop></video>
           <div class="video-speed-bar" aria-label="재생 속도">
             <span class="video-speed-bar__label">재생</span>
             <button type="button" class="video-duration__btn" data-speed-play="slow">느리게</button>
@@ -716,6 +758,7 @@
           <button id="gallery-import" class="gallery__backup" type="button" title="내보낸 JSON 파일을 다시 불러와요">가져오기</button>
           <input id="gallery-import-input" type="file" accept="application/json" hidden />
           <button id="gallery-migrate" class="gallery__backup" type="button" title="R2 기능 이전에 저장된 옛 이미지들을 지금 영구 저장소로 옮겨요">기존 이미지 영구저장</button>
+          <button id="delete-picked-gallery" class="gallery__clear" type="button" hidden>고른 것 삭제</button>
           <button id="clear-gallery" class="gallery__clear" type="button">전체 삭제</button>
         </div>
       </div>
@@ -1205,6 +1248,7 @@
           <button id="gallery-export-admin" class="gallery__backup" type="button" title="내 갤러리 · 관리자 갤러리를 JSON 파일로 내보내요">내보내기</button>
           <button id="gallery-import-admin" class="gallery__backup" type="button" title="내보낸 JSON 파일을 다시 불러와요">가져오기</button>
           <button id="gallery-migrate-admin" class="gallery__backup" type="button" title="R2 기능 이전에 저장된 옛 이미지들을 지금 영구 저장소로 옮겨요">기존 이미지 영구저장</button>
+          <button id="delete-picked-admin-gallery" class="gallery__clear" type="button" hidden>고른 것 삭제</button>
           <button id="clear-admin-gallery" class="gallery__clear" type="button">전체 삭제</button>
         </div>
       </div>
@@ -1768,14 +1812,14 @@
     </div>
   </main>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.js"></script>
   <script src="/youtube-shorts.js?v=20260719am"></script>
   <script src="/bgm-mixer.js?v=20260722a"></script>
-  <script src="/essay.js?v=20260909ocr-lazy"></script>
+  <script src="/essay.js?v=20260916pdf-lazy"></script>
   <script src="/tale.js?v=20260720e"></script>
   <script src="/tale-layout.js?v=20260720d"></script>
   <script src="/observe.js?v=20260722b"></script>
   <script src="/poly-lasso.js?v=20260831erase2"></script>
-  <script src="/app.js?v=20260909desk-bust-zoomout"></script>
+  <script src="/app.js?v=20260916verify"></script>
+  <script src="/desk-pipeline.js?v=20260914pixel-pipe2"></script>
 </body>
 </html>

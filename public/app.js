@@ -84,7 +84,8 @@ const APP_AREA_META = {
 function getAppArea() {
   const saved = localStorage.getItem(APP_AREA_KEY)
   if (saved === 'admin' && !isAdminUser()) return 'studio'
-  return APP_AREAS.includes(saved) ? saved : 'studio'
+  if (APP_AREAS.includes(saved)) return saved
+  return isAdminUser() ? 'admin' : 'studio'
 }
 
 function setAppArea(area) {
@@ -626,11 +627,32 @@ function applyVideoPlaybackRate() {
   if (!resultVideo) return
   const rate = VIDEO_PLAYBACK_RATES[getSelectedVideoSpeed()] || 1
   resultVideo.playbackRate = rate
+  resultVideo.loop = true
   try {
     resultVideo.defaultPlaybackRate = rate
   } catch {
     /* ignore */
   }
+}
+
+function playResultVideoLoop() {
+  if (!resultVideo?.src) return
+  resultVideo.loop = true
+  const start = () => {
+    const play = resultVideo.play()
+    if (play && typeof play.catch === 'function') play.catch(() => {})
+  }
+  if (resultVideo.readyState >= 2) start()
+  else resultVideo.addEventListener('canplay', start, { once: true })
+}
+
+if (resultVideo && !resultVideo.dataset.loopBound) {
+  resultVideo.dataset.loopBound = '1'
+  resultVideo.addEventListener('ended', () => {
+    if (!resultVideo.loop || !resultVideo.src) return
+    resultVideo.currentTime = 0
+    resultVideo.play().catch(() => {})
+  })
 }
 
 const ytTitleField = document.getElementById('yt-title')
@@ -644,6 +666,9 @@ const youtubeStatus = document.getElementById('youtube-status')
 const galleryGrid = document.getElementById('gallery-grid')
 const galleryEmpty = document.getElementById('gallery-empty')
 const clearGalleryButton = document.getElementById('clear-gallery')
+const deletePickedGalleryButton = document.getElementById('delete-picked-gallery')
+const deletePickedAdminGalleryButton = document.getElementById('delete-picked-admin-gallery')
+const galleryPickedIds = new Set()
 const newShootHeaderButton = document.getElementById('new-shoot-header')
 const newShootGalleryButton = document.getElementById('new-shoot-gallery')
 const freeGallerySection = document.getElementById('free-gallery')
@@ -752,8 +777,19 @@ function getSessionToken() {
   return localStorage.getItem(SESSION_STORAGE_KEY) || ''
 }
 
+function getStoredAdminPin() {
+  return sessionStorage.getItem(LEGACY_PIN_STORAGE_KEY) || ''
+}
+
+function setStoredAdminPin(pin) {
+  const value = String(pin || '').trim()
+  if (value) sessionStorage.setItem(LEGACY_PIN_STORAGE_KEY, value)
+  else sessionStorage.removeItem(LEGACY_PIN_STORAGE_KEY)
+}
+
 function setSessionToken(token, email) {
-  localStorage.setItem(SESSION_STORAGE_KEY, token)
+  if (token) localStorage.setItem(SESSION_STORAGE_KEY, token)
+  else localStorage.removeItem(SESSION_STORAGE_KEY)
   if (email) {
     localStorage.setItem(USER_STORAGE_KEY, email)
     rememberLoginId(email)
@@ -788,11 +824,13 @@ function fillRememberedLogin() {
   }
 }
 
-/** API 호출용 인증 헤더 (세션 토큰) */
+/** API 호출용 인증 헤더 (세션 토큰 또는 ADMIN_PIN) */
 function authHeaders(extra = {}) {
   const headers = { 'Content-Type': 'application/json', ...extra }
   const token = getSessionToken()
   if (token) headers['x-session-token'] = token
+  const pin = getStoredAdminPin()
+  if (pin) headers['x-admin-pin'] = pin
   return headers
 }
 
@@ -847,6 +885,10 @@ function authErrorMessage(code, data) {
     password_confirm_mismatch: '새 비밀번호 확인이 일치하지 않아요.',
     user_not_found: '해당 관리자 계정을 찾지 못했어요.',
     image_url_not_allowed: '허용되지 않은 이미지 주소예요. 앱에서 생성한 이미지만 사용할 수 있어요.',
+    login_failed: '로그인이 서버에서 끊겼어요. 비밀번호 칸에 Cloudflare ADMIN_PIN을 넣어 다시 시도해 주세요.',
+    auth_hash_failed: '비밀번호 검사가 서버에서 실패했어요. Cloudflare ADMIN_PIN으로 들어가 주세요.',
+    d1_quota:
+      '오늘 회원 DB 읽기 한도를 다 썼어요. 비밀번호 칸에 ADMIN_PIN을 넣으면 바로 들어갑니다. UTC 자정(한국 아침 9시)에 한도가 리셋됩니다.',
   }
   if (code === 'rate_limited') {
     const sec = Number(data?.retryAfterSec)
@@ -886,7 +928,7 @@ function showPinGate(message) {
 }
 
 function isLoggedIn() {
-  return Boolean(getSessionToken())
+  return Boolean(getSessionToken() || getStoredAdminPin())
 }
 
 function clearAllAuth() {
@@ -894,7 +936,63 @@ function clearAllAuth() {
   clearSessionToken()
 }
 
-function readGallery() {
+function isStorageQuotaError(err) {
+  return Boolean(
+    err &&
+      (err.name === 'QuotaExceededError' ||
+        err.code === 22 ||
+        err.code === 1014 ||
+        /quota/i.test(String(err.message || err))),
+  )
+}
+
+const MEDIA_DB_NAME = 'storymag-keep'
+const MEDIA_DB_VERSION = 1
+let galleryMem = null
+let deskMem = null
+let mediaDbPromise = null
+
+function openKeepDb() {
+  if (mediaDbPromise) return mediaDbPromise
+  mediaDbPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(MEDIA_DB_NAME, MEDIA_DB_VERSION)
+    req.onupgradeneeded = () => {
+      const db = req.result
+      if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv')
+    }
+    req.onsuccess = () => resolve(req.result)
+    req.onerror = () => {
+      mediaDbPromise = null
+      reject(req.error || new Error('keep_db_open_failed'))
+    }
+  })
+  return mediaDbPromise
+}
+
+function keepDbGet(key) {
+  return openKeepDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const req = db.transaction('kv', 'readonly').objectStore('kv').get(key)
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => reject(req.error)
+      }),
+  )
+}
+
+function keepDbSet(key, value) {
+  return openKeepDb().then(
+    (db) =>
+      new Promise((resolve, reject) => {
+        const tx = db.transaction('kv', 'readwrite')
+        tx.objectStore('kv').put(value, key)
+        tx.oncomplete = () => resolve()
+        tx.onerror = () => reject(tx.error)
+      }),
+  )
+}
+
+function readGalleryFromLocal() {
   try {
     const raw = localStorage.getItem(GALLERY_STORAGE_KEY)
     return raw ? JSON.parse(raw) : []
@@ -903,8 +1001,58 @@ function readGallery() {
   }
 }
 
+function richerGalleryItem(a, b) {
+  if (!a) return b
+  if (!b) return a
+  const next = { ...b, ...a }
+  if (String(b.imageUrl || '').length > String(a.imageUrl || '').length) next.imageUrl = b.imageUrl
+  if (String(b.videoUrl || '').length > String(a.videoUrl || '').length) next.videoUrl = b.videoUrl
+  return next
+}
+
+function mergeGalleryLists(primary, secondary) {
+  const map = new Map()
+  for (const item of [...(secondary || []), ...(primary || [])]) {
+    if (!item?.id) continue
+    map.set(item.id, richerGalleryItem(map.get(item.id), item))
+  }
+  return [...map.values()]
+}
+
+function readGallery() {
+  if (Array.isArray(galleryMem)) return galleryMem
+  return readGalleryFromLocal()
+}
+
 function writeGallery(items) {
-  localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(items))
+  const list = Array.isArray(items) ? items.slice() : []
+  galleryMem = list
+  void persistGalleryKeep(list)
+}
+
+function persistGalleryKeep(list) {
+  return keepDbSet(GALLERY_STORAGE_KEY, list)
+    .then(() => {
+      try {
+        localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(list))
+      } catch (err) {
+        if (isStorageQuotaError(err)) {
+          try {
+            localStorage.removeItem(GALLERY_STORAGE_KEY)
+          } catch {
+            /* IndexedDB에 원본이 있으므로 로컬만 비움 */
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn('gallery keep save failed', err)
+      try {
+        localStorage.setItem(GALLERY_STORAGE_KEY, JSON.stringify(list))
+      } catch {
+        /* 용량이 차도 메모리 목록은 유지 */
+      }
+    })
 }
 
 function saveToGallery(entry) {
@@ -1195,6 +1343,7 @@ function showVideoResult(videoUrl, options) {
   setYoutubeStatus('', false)
   setBgmStatus('', false)
   applyVideoPlaybackRate()
+  playResultVideoLoop()
   renderBgmSlots().catch(() => {})
   videoResultSection.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
@@ -1203,6 +1352,7 @@ function hideVideoResult() {
   if (currentResult.videoUrl?.startsWith('blob:')) {
     URL.revokeObjectURL(currentResult.videoUrl)
   }
+  resultVideo.pause()
   resultVideo.removeAttribute('src')
   currentResult.videoUrl = null
   currentResult.originalVideoUrl = null
@@ -1270,6 +1420,18 @@ function getSelectedReviseMode() {
   const v = document.querySelector('input[name="revise-mode"]:checked')?.value || 'pin'
   if (v === 'region' || v === 'erase' || v === 'pin' || v === 'text') return v
   return 'pin'
+}
+
+function wantsObjectEraseClient(text) {
+  const t = polishConceptText(text || '')
+  if (/나체|누드|벗기|옷벗|undress|\bnude\b|\bnaked\b/i.test(t)) return false
+  return (
+    /선택(?:한)?\s*(?:사람|사물|인물|영역).{0,12}(?:지우|지워|제거|없애)/i.test(t) ||
+    /(?:사람|인물|사물).{0,10}(?:을|를)?\s*(?:완전히\s*)?(?:지우|지워|제거|없애)/i.test(t) ||
+    (/(?:옆|다른)\s*(?:사람|인물)/i.test(t) && /지우|지워|제거|없애/i.test(t)) ||
+    /배경(?:으로|에)?\s*메워|자연스럽게\s*메워/i.test(t) ||
+    /지워\s*줘|지우기|지워(?:요|라)?$|erase|remove\s*(?:the\s*)?(?:masked|selected)\s*(?:person|people|object)/i.test(t)
+  )
 }
 
 /** 올가미 지우기 전용 수정 문구 — 서버가 content-aware fill로 해석 */
@@ -1648,9 +1810,10 @@ function updateRegionList() {
 /** 닫힌 다각형 합집합 → 마스크(흰=수정, 가장자리 소프트). */
 function buildMaskDataUrlFromRegion() {
   const lasso = ensureReviseLasso()
-  const erase = getSelectedReviseMode() === 'erase'
+  const erase =
+    getSelectedReviseMode() === 'erase' || wantsObjectEraseClient(revisionText?.value || '')
   return (
-    lasso?.buildMaskDataUrl?.(768, erase ? { expandPx: 18, blurPx: 3.5 } : undefined) || null
+    lasso?.buildMaskDataUrl?.(768, erase ? { expandPx: 32, blurPx: 4 } : undefined) || null
   )
 }
 
@@ -1664,8 +1827,8 @@ function loadImageElement(src) {
 }
 
 /**
- * 마스크 안을 주변 배경색으로 먼저 메움.
- * 인페인트가 원본 얼굴 픽셀을 보고 사람을 다시 그리는 실수를 막는다.
+ * 마스크 안을 코너·테두리 배경색으로 메움.
+ * 옆 사람 피부색을 구멍으로 밀어 넣으면 엔진이 새 얼굴을 복원한다.
  */
 async function prefillMaskedHole(imageSrc, maskDataUrl) {
   const [img, maskImg] = await Promise.all([loadImageElement(imageSrc), loadImageElement(maskDataUrl)])
@@ -1674,62 +1837,77 @@ async function prefillMaskedHole(imageSrc, maskDataUrl) {
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
-  const ctx = canvas.getContext('2d')
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
   ctx.drawImage(img, 0, 0, w, h)
   const maskCanvas = document.createElement('canvas')
   maskCanvas.width = w
   maskCanvas.height = h
-  const mctx = maskCanvas.getContext('2d')
+  const mctx = maskCanvas.getContext('2d', { willReadFrequently: true })
   mctx.drawImage(maskImg, 0, 0, w, h)
   const pix = ctx.getImageData(0, 0, w, h)
   const mask = mctx.getImageData(0, 0, w, h).data
   const data = pix.data
-  const n = w * h
-  const seen = new Uint8Array(n)
-  const qx = new Int32Array(n)
-  const qy = new Int32Array(n)
-  const qr = new Uint8Array(n)
-  const qg = new Uint8Array(n)
-  const qb = new Uint8Array(n)
-  let head = 0
-  let tail = 0
-  for (let p = 0, i = 0; p < n; p += 1, i += 4) {
-    const hole = mask[i] > 80
-    if (hole) continue
-    seen[p] = 1
-    qx[tail] = p % w
-    qy[tail] = (p / w) | 0
-    qr[tail] = data[i]
-    qg[tail] = data[i + 1]
-    qb[tail] = data[i + 2]
-    tail += 1
+  let sr = 0
+  let sg = 0
+  let sb = 0
+  let sc = 0
+  const take = (x, y) => {
+    if (x < 0 || y < 0 || x >= w || y >= h) return
+    const i = (y * w + x) * 4
+    if (mask[i] > 80) return
+    sr += data[i]
+    sg += data[i + 1]
+    sb += data[i + 2]
+    sc += 1
   }
-  const dirs = [1, 0, -1, 0, 0, 1, 0, -1]
-  while (head < tail) {
-    const x = qx[head]
-    const y = qy[head]
-    const r = qr[head]
-    const g = qg[head]
-    const b = qb[head]
-    head += 1
-    for (let d = 0; d < 4; d += 1) {
-      const nx = x + dirs[d * 2]
-      const ny = y + dirs[d * 2 + 1]
-      if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue
-      const np = ny * w + nx
-      if (seen[np]) continue
-      if (mask[np * 4] <= 80) continue
-      seen[np] = 1
-      const o = np * 4
-      data[o] = r
-      data[o + 1] = g
-      data[o + 2] = b
-      qx[tail] = nx
-      qy[tail] = ny
-      qr[tail] = r
-      qg[tail] = g
-      qb[tail] = b
-      tail += 1
+  const band = Math.max(6, Math.round(Math.min(w, h) * 0.06))
+  for (let y = 0; y < band; y += 2) {
+    for (let x = 0; x < band; x += 2) {
+      take(x, y)
+      take(w - 1 - x, y)
+      take(x, h - 1 - y)
+      take(w - 1 - x, h - 1 - y)
+    }
+  }
+  for (let x = 0; x < w; x += 3) {
+    take(x, 0)
+    take(x, h - 1)
+  }
+  for (let y = 0; y < h; y += 3) {
+    take(0, y)
+    take(w - 1, y)
+  }
+  const br = sc ? sr / sc : 210
+  const bg = sc ? sg / sc : 210
+  const bb = sc ? sb / sc : 210
+  for (let i = 0; i < mask.length; i += 4) {
+    if (mask[i] > 80) {
+      data[i] = br
+      data[i + 1] = bg
+      data[i + 2] = bb
+    }
+  }
+  const copy = new Uint8ClampedArray(data)
+  for (let y = 1; y < h - 1; y += 1) {
+    for (let x = 1; x < w - 1; x += 1) {
+      const p = (y * w + x) * 4
+      if (mask[p] <= 80) continue
+      let r = 0
+      let g = 0
+      let b = 0
+      let n = 0
+      for (let dy = -1; dy <= 1; dy += 1) {
+        for (let dx = -1; dx <= 1; dx += 1) {
+          const o = ((y + dy) * w + (x + dx)) * 4
+          r += copy[o]
+          g += copy[o + 1]
+          b += copy[o + 2]
+          n += 1
+        }
+      }
+      data[p] = r / n
+      data[p + 1] = g / n
+      data[p + 2] = b / n
     }
   }
   ctx.putImageData(pix, 0, 0)
@@ -2982,6 +3160,7 @@ function showResult(imageUrl, engineLabel, fallbackUsed, options) {
   }
   currentResult.prompt = prompt || ''
   syncTwoPeopleCheckboxFromSource()
+  void lockTwoPeopleFromStill(imageUrl)
   currentResult.size = size
   currentResult.itemId = itemId
   currentResult.mood = mood
@@ -3035,6 +3214,7 @@ function renderGallery() {
   if (adminGalleryGrid && adminGalleryEmpty) {
     renderGalleryInto(adminItems, adminGalleryGrid, adminGalleryEmpty, 'fashion')
   }
+  syncGalleryPickButtons()
 }
 
 /** 저장된 항목의 genMode를 바꿔서 「내 갤러리」 ↔ 「관리자 전용 갤러리」 사이로 옮긴다. */
@@ -3052,6 +3232,39 @@ function moveGalleryItem(itemId, nextMode) {
   }
 }
 
+function syncGalleryPickButtons() {
+  const items = readGallery()
+  const freeN = items.filter((item) => item.genMode !== 'fashion' && galleryPickedIds.has(item.id)).length
+  const adminN = items.filter((item) => item.genMode === 'fashion' && galleryPickedIds.has(item.id)).length
+  if (deletePickedGalleryButton) {
+    deletePickedGalleryButton.hidden = freeN === 0
+    deletePickedGalleryButton.textContent = freeN ? `고른 ${freeN}개 삭제` : '고른 것 삭제'
+  }
+  if (deletePickedAdminGalleryButton) {
+    deletePickedAdminGalleryButton.hidden = adminN === 0
+    deletePickedAdminGalleryButton.textContent = adminN ? `고른 ${adminN}개 삭제` : '고른 것 삭제'
+  }
+}
+
+function deletePickedGalleryItems(mode) {
+  const fashion = mode === 'fashion'
+  const items = readGallery()
+  const picked = items.filter((item) => {
+    const mine = fashion ? item.genMode === 'fashion' : item.genMode !== 'fashion'
+    return mine && galleryPickedIds.has(item.id)
+  })
+  if (!picked.length) return
+  if (!window.confirm(`고른 ${picked.length}개를 삭제할까요? (영구 저장된 파일도 함께 삭제돼요)`)) return
+  picked.forEach((item) => {
+    deletePermanentMediaIfNeeded(item.imageUrl)
+    deletePermanentMediaIfNeeded(item.videoUrl)
+    galleryPickedIds.delete(item.id)
+  })
+  const drop = new Set(picked.map((item) => item.id))
+  writeGallery(items.filter((item) => !drop.has(item.id)))
+  renderGallery()
+}
+
 function renderGalleryInto(items, gridEl, emptyEl, currentMode) {
   gridEl.innerHTML = ''
   emptyEl.hidden = items.length > 0
@@ -3061,7 +3274,8 @@ function renderGalleryInto(items, gridEl, emptyEl, currentMode) {
     .reverse()
     .forEach((item) => {
       const cell = document.createElement('div')
-      cell.className = 'gallery__item'
+      cell.className = galleryPickedIds.has(item.id) ? 'gallery__item is-picked' : 'gallery__item'
+      cell.dataset.id = item.id
 
       const img = document.createElement('img')
       img.src = item.imageUrl
@@ -3082,99 +3296,25 @@ function renderGalleryInto(items, gridEl, emptyEl, currentMode) {
         cell.appendChild(videoTag)
       }
 
-      // 버튼이 여러 개 겹쳐 덕지덕지 붙어 보이던 문제 — 체크박스 하나로 감춰두고,
-      // 체크하면 드롭다운(select)으로 작업(쇼츠/이동/삭제)을 고르게 한다.
       const menuToggleLabel = document.createElement('label')
       menuToggleLabel.className = 'gallery__item-menu-toggle'
       const menuCheckbox = document.createElement('input')
       menuCheckbox.type = 'checkbox'
+      menuCheckbox.checked = galleryPickedIds.has(item.id)
+      menuCheckbox.setAttribute('aria-label', '이 칸 고르기')
       menuToggleLabel.appendChild(menuCheckbox)
       menuToggleLabel.addEventListener('click', (event) => event.stopPropagation())
-      cell.appendChild(menuToggleLabel)
-
-      const menuSelect = document.createElement('select')
-      menuSelect.className = 'gallery__item-menu'
-      menuSelect.hidden = true
-      const menuOptions = [{ value: '', label: '작업 선택…' }]
-      menuOptions.push({
-        value: 'shorts',
-        // "YouTube 올리기"라고만 쓰면 클릭 즉시 실제로 업로드되는 것처럼 보이지만, 실제로는
-        // 결과 패널을 열어줄 뿐이다(실제 준비는 그 안의 "한 번에 준비" 버튼을 눌러야 함) —
-        // 오해를 줄이기 위해 "준비"를 붙인다.
-        label: item.videoUrl ? 'YouTube 올리기 준비' : '쇼츠 비디오 만들기',
-      })
-      if (isAdminUser()) {
-        menuOptions.push({
-          value: 'move',
-          label: currentMode === 'fashion' ? '일러스트 갤러리로 이동' : '소지함으로 이동',
-        })
-      }
-      menuOptions.push({ value: 'delete', label: '삭제' })
-      menuOptions.forEach(({ value, label }) => {
-        const option = document.createElement('option')
-        option.value = value
-        option.textContent = label
-        menuSelect.appendChild(option)
-      })
-      menuSelect.addEventListener('click', (event) => event.stopPropagation())
       menuCheckbox.addEventListener('click', (event) => event.stopPropagation())
       menuCheckbox.addEventListener('change', () => {
-        menuSelect.hidden = !menuCheckbox.checked
+        if (menuCheckbox.checked) galleryPickedIds.add(item.id)
+        else galleryPickedIds.delete(item.id)
+        cell.classList.toggle('is-picked', menuCheckbox.checked)
+        syncGalleryPickButtons()
       })
-      menuSelect.addEventListener('change', () => {
-        const action = menuSelect.value
-        menuSelect.value = ''
-        menuCheckbox.checked = false
-        menuSelect.hidden = true
-        if (action === 'delete') {
-          if (!window.confirm('이 항목을 삭제할까요? (영구 저장된 파일도 함께 삭제돼요)')) return
-          deletePermanentMediaIfNeeded(item.imageUrl)
-          deletePermanentMediaIfNeeded(item.videoUrl)
-          const remaining = readGallery().filter((entry) => entry.id !== item.id)
-          writeGallery(remaining)
-          renderGallery()
-          return
-        }
-        if (action === 'move') {
-          moveGalleryItem(item.id, currentMode === 'fashion' ? 'free' : 'fashion')
-          return
-        }
-        if (action === 'shorts') {
-          const prompt = item.description || item.prompt || ''
-          showResult(item.imageUrl, item.engineLabel, item.fallbackUsed, {
-            size: item.size,
-            itemId: item.id,
-            videoUrl: item.videoUrl,
-            prompt,
-            youtubeDraft: item.youtubeDraft || null,
-            accepted: true,
-            mood: item.mood,
-            engine: item.engine,
-            genMode: item.genMode,
-            reviseRound: item.reviseRound || 0,
-          })
-          // 예전엔 여기서 곧바로 requestAnimate()를 호출해서, 모션 힌트를 확인/입력할
-          // 기회도 없이 (게다가 이전 이미지용으로 남아있던 모션 힌트 그대로) 영상 생성이
-          // 시작되는 문제가 있었다. 이제는 애니메이트 패널로 이동만 시키고, 사용자가
-          // 모션 힌트를 확인한 뒤 직접 「쇼츠 비디오 만들기」를 눌러야 생성이 시작된다.
-          if (!item.videoUrl) {
-            animatePanel.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            motionField?.focus()
-            setAnimateStatus('모션 힌트를 확인하거나 입력한 뒤 「쇼츠 비디오 만들기」를 눌러 주세요.', false)
-          } else {
-            // "YouTube 올리기 준비"를 눌러도 자동으로 업로드되지 않는다 — YouTube Data API
-            // 연동이 없어서, 실제로는 이 패널에서 "한 번에 준비" 버튼을 직접 눌러야
-            // 영상 다운로드 + 제목·설명 복사 + 업로드 창 열기가 진행된다. 패널로 스크롤하고
-            // 그 사실을 명확히 안내한다.
-            document.getElementById('youtube-panel')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-            setYoutubeStatus('아래 「한 번에 준비」를 누르면 영상 받기·제목·설명 복사·YouTube 열기가 순서대로 진행돼요.', false)
-          }
-        }
-      })
-      cell.appendChild(menuSelect)
+      cell.appendChild(menuToggleLabel)
 
       cell.addEventListener('click', (event) => {
-        if (event.target === menuToggleLabel || event.target === menuCheckbox || event.target === menuSelect) return
+        if (event.target === menuToggleLabel || event.target === menuCheckbox) return
         showResult(item.imageUrl, item.engineLabel, item.fallbackUsed, {
           size: item.size,
           itemId: item.id,
@@ -3761,6 +3901,9 @@ function animateErrorMessage(data, response) {
   if (response && (response.status === 504 || response.status === 524 || response.status === 502)) {
     return '서버/게이트웨이 오류예요. 새로고침 후 다시 시도해 주세요. (엔진 시작이 끊긴 경우일 수 있어요)'
   }
+  if (response && response.status === 500) {
+    return '서버가 시작 전에 끊겼어요. 같은 장으로 한 번만 다시 눌러 주세요.'
+  }
   if (response && !response.ok) return `요청 실패 (HTTP ${response.status})`
   return '알 수 없는 오류'
 }
@@ -3840,7 +3983,7 @@ function wantsPartnerIntimateClient(text) {
   const t = String(text || '')
     .replace(/\bno(?:t)?\s+(?:a\s+)?kiss(?:es|ing)?\b/gi, ' ')
     .replace(/키스\s*(?:금지|없이|말고)/g, ' ')
-  return /키스|입맞춤|포옹|껴안|남자가|남자는|남여|남녀|커플|두\s*사람|partner|kiss|hug|couple|both\s*(?:become|nude|naked)/i.test(
+  return /키스|입맞춤|포옹|껴안|지퍼|남자가|남자는|남자 바지|남여|남녀|커플|두\s*사람|partner|kiss|hug|zipper|couple|both\s*(?:become|nude|naked)/i.test(
     t,
   )
 }
@@ -3862,18 +4005,37 @@ function sourceLooksLikeTwoPeople(text) {
 function sourceHasTwoPeopleClient(motion) {
   if (isSoloSelfMotion(motion)) return false
   if (document.getElementById('animate-two-people')?.checked) return true
+  if (document.getElementById('desk-two-people')?.checked) return true
   if (sourceLooksLikeTwoPeople(motion)) return true
   if (sourceLooksLikeTwoPeople(currentResult.prompt)) return true
   if (sourceLooksLikeTwoPeople(descriptionField?.value)) return true
   return false
 }
 
+function setTwoPeopleChecked(on) {
+  if (!on) return
+  const deskTwo = document.getElementById('desk-two-people')
+  const animateTwo = document.getElementById('animate-two-people')
+  if (deskTwo) deskTwo.checked = true
+  if (animateTwo) animateTwo.checked = true
+}
+
 function syncTwoPeopleCheckboxFromSource() {
-  const el = document.getElementById('animate-two-people')
-  if (!el) return
-  el.checked = sourceLooksLikeTwoPeople(
-    `${currentResult.prompt || ''} ${descriptionField?.value || ''}`,
-  )
+  if (
+    sourceLooksLikeTwoPeople(`${currentResult.prompt || ''} ${descriptionField?.value || ''}`)
+  ) {
+    setTwoPeopleChecked(true)
+  }
+}
+
+async function lockTwoPeopleFromStill(imageUrl) {
+  if (!imageUrl || typeof countDeskSceneFaces !== 'function') return
+  try {
+    const n = await countDeskSceneFaces(imageUrl, 8000)
+    if (n >= 2) setTwoPeopleChecked(true)
+  } catch (_) {
+    /* 얼굴 감지가 실패해도 체크를 풀지 않음 */
+  }
 }
 
 function maybeAutoCheckTwoPeople(motion) {
@@ -3887,7 +4049,7 @@ function maybeAutoCheckTwoPeople(motion) {
 function wantsHeteroIntimateClient(text) {
   const t = text || ''
   if (!t) return false
-  if (/여여|두\s*여자|lesbian|two\s*women/i.test(t)) return false
+  if (/여여|두\s*여자|만지기 없음|lesbian|two\s*women/i.test(t)) return false
   const intimate =
     wantsUndressActionClient(t) ||
     /키스|입맞춤|가슴|유방|유두|보지|애무|만지|주무르|나체|누드|kiss|breast|fondl|caress|nude|naked/i.test(t)
@@ -3904,13 +4066,13 @@ function appendHeteroCastHint(motion) {
   if (!wantsHeteroIntimateClient(t)) return t
   if (/여여\s*키스\s*금지|남자와\s*여자만\s*키스|남자는 남자로/.test(t)) return t
   const hint = wantsUndressActionClient(t)
-    ? ' (남녀만: 여자는 나체. 남자는 상의만, 바지 유지. 자지 금지. 남자는 남자로. 여여 금지)'
+    ? ' (남녀만: 여자는 나체. 남자 옷은 유지. 자지 금지. 남자는 남자로. 여여 금지)'
     : ' (남녀만: 소스 남자가 여자와 동작. 남자는 남자로 유지. 여여 키스 금지)'
   return (t.slice(0, 400 - hint.length) + hint).trim()
 }
 
 /**
- * @param {{ motionOverride?: string, durationSec?: number, skipHide?: boolean, statusPrefix?: string, persist?: boolean, keepBusy?: boolean, bodyProject?: boolean, clipRole?: 'single'|'dual-a'|'dual-b', landmarks?: BodyLandmarksClient, guideImageDataUrl?: string, sourcePeople?: 1|2 }} [options]
+ * @param {{ motionOverride?: string, durationSec?: number, skipHide?: boolean, statusPrefix?: string, persist?: boolean, keepBusy?: boolean, bodyProject?: boolean, clipRole?: 'single'|'dual-a'|'dual-b', landmarks?: BodyLandmarksClient, guideImageDataUrl?: string, sourcePeople?: 1|2, sourceCast?: 'ww'|'mw' }} [options]
  * @returns {Promise<{ ok: boolean, videoUrl?: string }>}
  */
 async function requestAnimate(options = {}) {
@@ -3934,6 +4096,7 @@ async function requestAnimate(options = {}) {
   }
   const sourcePeople =
     options.sourcePeople === 1 || options.sourcePeople === 2 ? options.sourcePeople : undefined
+  const sourceCast = options.sourceCast === 'ww' || options.sourceCast === 'mw' ? options.sourceCast : undefined
   let sourceBust = options.sourceBust === true
   if (options.sourceBust == null && typeof window.deskPhotoNeedsBodyExtend === 'function') {
     try {
@@ -3949,6 +4112,7 @@ async function requestAnimate(options = {}) {
   }
   if (
     sourcePeople !== 1 &&
+    sourcePeople !== 2 &&
     wantsPartnerIntimateClient(motionPeek) &&
     !isSoloSelfMotion(motionPeek) &&
     !sourceHasTwoPeopleClient(motionPeek)
@@ -4032,18 +4196,23 @@ async function requestAnimate(options = {}) {
   )
 
   try {
-    let imageDataUrl =
-      guideImageDataUrl ||
-      currentResult.imageDataUrl ||
-      (typeof currentResult.imageUrl === 'string' && currentResult.imageUrl.startsWith('data:image/')
+    const httpUrl =
+      typeof currentResult.imageUrl === 'string' && /^https:\/\//i.test(currentResult.imageUrl)
         ? currentResult.imageUrl
-        : undefined)
-    let imageUrl =
-      imageDataUrl || guideImageDataUrl
+        : ''
+    const stableHttp =
+      /r2\.dev|r2\.cloudflarestorage\.com|\.fal\.media$|fal\.ai/i.test(httpUrl)
+    let imageDataUrl = guideImageDataUrl
+      ? guideImageDataUrl
+      : stableHttp
         ? undefined
-        : currentResult.imageUrl || undefined
+        : currentResult.imageDataUrl ||
+          (typeof currentResult.imageUrl === 'string' && currentResult.imageUrl.startsWith('data:image/')
+            ? currentResult.imageUrl
+            : undefined)
+    let imageUrl = imageDataUrl ? undefined : httpUrl || undefined
 
-    if (!imageDataUrl && imageUrl) {
+    if (!imageDataUrl && imageUrl && !stableHttp) {
       await cacheImageForAnimate(imageUrl)
       imageDataUrl = currentResult.imageDataUrl || undefined
       if (imageDataUrl) imageUrl = undefined
@@ -4069,7 +4238,9 @@ async function requestAnimate(options = {}) {
         clipRole: options.clipRole === 'dual-a' || options.clipRole === 'dual-b' ? options.clipRole : 'single',
         bustHeight: getSelectedBustHeightShorts(),
         sourcePeople,
+        sourceCast,
         sourceBust: sourceBust || undefined,
+        genMode: getGenMode(),
       }),
     })
     const rawText = await response.text()
@@ -4248,6 +4419,27 @@ async function mergeShortsVideos(videoUrls) {
     throw new Error(data?.message || data?.error || 'merge_failed')
   }
   return data.videoUrl
+}
+
+/** Desk에서 다음 15초가 나오면 이전 편 뒤에 이어 붙여 같은 항목으로 저장한다. */
+async function appendAndPersistDeskShorts(prevUrl, nextUrl, prompt, motion) {
+  const mergedUrl = await mergeShortsVideos([prevUrl, nextUrl])
+  const draft = buildYoutubeShortsDraft({
+    prompt,
+    motion,
+    genMode: currentResult.genMode,
+  })
+  showVideoResult(mergedUrl, { prompt, motion, youtubeDraft: draft })
+  updateGalleryItemVideo(currentResult.itemId, mergedUrl, draft)
+  const prevPermanent = typeof isPermanentMediaUrl === 'function' && isPermanentMediaUrl(prevUrl) ? prevUrl : null
+  persistImageToPermanentStorage(mergedUrl).then((permanentUrl) => {
+    if (!permanentUrl) return
+    applyPersistedVideoUrl(currentResult.itemId, mergedUrl, permanentUrl)
+    if (prevPermanent) deletePermanentMediaIfNeeded(prevPermanent)
+    setAnimateStatus('이전 편과 이번 편을 한 파일로 저장했습니다.', false)
+    setFormStatus('이전 편과 이번 편을 한 파일로 저장했습니다.', false)
+  })
+  return mergedUrl
 }
 
 /**
@@ -4515,19 +4707,46 @@ authSubmitButton?.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok || !data.ok || !data.token) {
+    const raw = await response.text()
+    let data = {}
+    try {
+      data = raw ? JSON.parse(raw) : {}
+    } catch {
+      pinError.textContent =
+        '로그인이 서버에서 끊겼어요. 비밀번호 칸에 ADMIN_PIN을 넣어 다시 시도해 주세요.'
+      pinError.hidden = false
+      return
+    }
+    const pinFallback = async () => {
+      const me = await fetch('/api/auth/me', {
+        headers: { 'x-admin-pin': password },
+      })
+      const meData = await me.json().catch(() => ({}))
+      return me.ok && meData.ok
+    }
+
+    if ((!response.ok || !data.ok || (!data.token && !data.pinAuth)) && (await pinFallback())) {
+      data = { ok: true, pinAuth: true, user: { email } }
+    }
+
+    if (!data.ok || (!data.token && !data.pinAuth)) {
       pinError.textContent = authErrorMessage(data.error, data)
       pinError.hidden = false
       return
     }
     clearAllAuth()
     const loginId = data.user?.email || email
-    setSessionToken(data.token, loginId)
+    if (data.pinAuth || !data.token) setStoredAdminPin(password)
+    if (data.token) setSessionToken(data.token, loginId)
+    else {
+      localStorage.setItem(USER_STORAGE_KEY, loginId)
+      rememberLoginId(loginId)
+    }
     rememberLoginId(loginId)
     if (authEmailInput) authEmailInput.value = loginId
     if (authPasswordInput) authPasswordInput.value = ''
     if (authInviteInput) authInviteInput.value = ''
+    if (isAdminUser()) setAppArea('admin')
     showApp()
   } catch {
     pinError.textContent = '네트워크 오류가 났어요. 잠시 후 다시 시도해 주세요.'
@@ -4724,9 +4943,19 @@ form.addEventListener('submit', async (event) => {
       size: sizeField.value,
       mode: getGenMode(),
       precision: Boolean(precisionModeField?.checked),
+      imageUrls: conceptRefUrls(),
     })
 
-    if (data.ok && data.pending && data.predictionId) {
+    if (data.ok && data.pending && data.statusUrl && data.responseUrl) {
+      stopTimer()
+      const mixUrl = await pollConceptMixUntilDone(data.statusUrl, data.responseUrl, setFormStatus)
+      if (!mixUrl) {
+        setFormStatus('참고 이미지를 비비지 못했어요. 다시 눌러 주세요.', true)
+        return
+      }
+      data.pending = false
+      data.imageUrl = mixUrl
+    } else if (data.ok && data.pending && data.predictionId) {
       stopTimer()
       const polled = await pollGenerateImageUntilDone(data.predictionId, setFormStatus)
       if (polled.unauthorized) {
@@ -4804,6 +5033,13 @@ form.addEventListener('submit', async (event) => {
     }
 
     let imageUrl = data.imageUrl
+    if (typeof isNearlyBlackImage === 'function' && imageUrl && (await isNearlyBlackImage(imageUrl))) {
+      setFormStatus(
+        '엔진이 빈 장을 냈습니다. 같은 참고와 옷벗김으로 다시 눌러 주세요. (성인 장면은 다른 엔진으로 다시 보냅니다.)',
+        true,
+      )
+      return
+    }
     const resultOpts = {
       size: sizeField.value,
       itemId: null,
@@ -4841,7 +5077,13 @@ form.addEventListener('submit', async (event) => {
       setFormStatus('장면이 나왔습니다. 얼굴을 붙이는 중…', false)
       try {
         const stamped = await Promise.race([
-          applyDeskWorkFaces(imageUrl, { fast: true, skipFaceCount: true }),
+          applyDeskWorkFaces(imageUrl, {
+            skipFaceCount: true,
+            preferPaste: false,
+            skipPasteFallback: true,
+            engineOrder: ['insight'],
+            hardLimitSec: 28,
+          }),
           new Promise((resolve) => {
             window.setTimeout(() => resolve({ timeout: true }), 25000)
           }),
@@ -4932,8 +5174,9 @@ async function prepareImageDataUrl(file, maxDim = 2200) {
     el.src = original
   })
   const longSide = Math.max(img.naturalWidth, img.naturalHeight)
-  const tooHeavy = typeof original === 'string' && original.length > 9_000_000
-  if (!tooHeavy && longSide <= maxDim) return original
+  const isJpeg = typeof original === 'string' && /^data:image\/jpeg/i.test(original)
+  const tooHeavy = typeof original === 'string' && original.length > 1_200_000
+  if (!tooHeavy && longSide <= maxDim && isJpeg) return original
 
   const scale = Math.min(1, maxDim / longSide)
   const canvas = document.createElement('canvas')
@@ -4941,7 +5184,7 @@ async function prepareImageDataUrl(file, maxDim = 2200) {
   canvas.height = Math.max(1, Math.round(img.naturalHeight * scale))
   const ctx = canvas.getContext('2d')
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', 0.95)
+  return canvas.toDataURL('image/jpeg', 0.9)
 }
 
 async function loadImageFromFile(file) {
@@ -5011,29 +5254,272 @@ async function loadImageFromFile(file) {
   }
 }
 
-loadImageButton?.addEventListener('click', () => loadImageInput?.click())
+const conceptRefs = [null, null]
+let conceptRefPickSlot = -1
+
+function conceptRefUrls() {
+  return conceptRefs.filter(Boolean)
+}
+
+function clearConceptRefs() {
+  conceptRefs[0] = null
+  conceptRefs[1] = null
+  renderConceptRefs()
+}
+
+function renderConceptRefs() {
+  document.querySelectorAll('.concept-ref').forEach((btn) => {
+    const idx = Number(btn.getAttribute('data-ref') || '0')
+    const url = conceptRefs[idx]
+    const empty = btn.querySelector('.concept-ref__empty')
+    const img = btn.querySelector('.concept-ref__img')
+    const x = btn.querySelector('.concept-ref__x')
+    btn.classList.toggle('is-on', Boolean(url))
+    if (empty) empty.hidden = Boolean(url)
+    if (img) {
+      img.hidden = !url
+      img.src = url || ''
+    }
+    if (x) x.hidden = !url
+  })
+}
+
+async function uploadConceptFile(file) {
+  const dataUrl = await prepareImageDataUrl(file)
+  const response = await fetch('/api/upload-image', {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ dataUrl }),
+  })
+  const data = await response.json().catch(() => ({}))
+  if (response.status === 401) {
+    clearAllAuth()
+    showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+    return ''
+  }
+  if (!data.ok || !data.imageUrl) {
+    throw new Error(data.message || data.error || 'upload_failed')
+  }
+  return data.imageUrl
+}
+
+async function addConceptRefFiles(files, slot) {
+  const list = (files || []).filter(isImageFileLike).slice(0, 2)
+  if (!list.length) {
+    setFormStatus('이미지 파일만 넣을 수 있어요 (PNG/JPEG/WEBP).', true)
+    return
+  }
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+  const stopTimer = startProgressTimer(setFormStatus, '참고 이미지를 올리는 중…')
+  try {
+    for (const file of list) {
+      const url = await uploadConceptFile(file)
+      if (!url) return
+      const idx =
+        typeof slot === 'number' && slot >= 0 && slot <= 1 ? slot : conceptRefs[0] ? 1 : 0
+      conceptRefs[idx] = url
+      slot = -1
+    }
+    renderConceptRefs()
+    const n = conceptRefUrls().length
+    setFormStatus(
+      n >= 2
+        ? '참고 두 장을 넣었습니다. 생성하면 한 장면에 비빕니다.'
+        : '참고 한 장을 넣었습니다. 한 장 더 넣으면 둘이 비빕니다.',
+      false,
+    )
+  } catch (error) {
+    setFormStatus(`참고 이미지를 넣지 못했어요: ${error instanceof Error ? error.message : String(error)}`, true)
+  } finally {
+    stopTimer()
+    if (loadImageInput) loadImageInput.value = ''
+    conceptRefPickSlot = -1
+  }
+}
+
+async function pollConceptMixUntilDone(statusUrl, responseUrl, onTick) {
+  const startedAt = Date.now()
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const elapsedSec = Math.round((Date.now() - startedAt) / 1000)
+    if (elapsedSec >= 180) return ''
+    if (typeof onTick === 'function') onTick(`참고 이미지를 비비는 중… ${elapsedSec}초`, false)
+    await new Promise((resolve) => setTimeout(resolve, attempt < 4 ? 1500 : 2500))
+    const response = await fetch('/api/tale-scene-status', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ statusUrl, responseUrl }),
+    })
+    const data = await response.json().catch(() => ({}))
+    if (data.status === 'succeeded' && data.imageUrl) return data.imageUrl
+    if (data.status === 'failed' || data.ok === false) return ''
+  }
+  return ''
+}
+
+function conceptRefSlotFromEvent(event) {
+  const btn = event.target?.closest?.('.concept-ref')
+  if (!btn) return -1
+  const idx = Number(btn.getAttribute('data-ref'))
+  return idx === 0 || idx === 1 ? idx : -1
+}
+
+function nextConceptRefSlot() {
+  const hover = window.__conceptRefHoverSlot
+  if ((hover === 0 || hover === 1) && !conceptRefs[hover]) return hover
+  if (!conceptRefs[0]) return 0
+  if (!conceptRefs[1]) return 1
+  if (hover === 0 || hover === 1) return hover
+  if (conceptRefPickSlot === 0 || conceptRefPickSlot === 1) return conceptRefPickSlot
+  return 1
+}
+
+async function pasteConceptRefSlot(idx) {
+  const slot = idx === 0 || idx === 1 ? idx : nextConceptRefSlot()
+  conceptRefPickSlot = slot
+  window.__conceptRefHoverSlot = slot
+  try {
+    const file = await readClipboardImageFile()
+    if (!file) {
+      setFormStatus('복사한 사진을 Ctrl+V로 붙이거나, 칸에 끌어다 놓으세요.', true)
+      return
+    }
+    await addConceptRefFiles([file], slot)
+  } catch {
+    setFormStatus('복사한 사진을 Ctrl+V로 붙이거나, 칸에 끌어다 놓으세요.', true)
+  }
+}
+
+loadImageButton?.addEventListener('click', () => {
+  conceptRefPickSlot = conceptRefs[0] ? (conceptRefs[1] ? 1 : 1) : 0
+  loadImageInput?.click()
+})
 loadImageInput?.addEventListener('change', () => {
-  const file = loadImageInput.files?.[0]
-  if (file) loadImageFromFile(file)
+  const files = [...(loadImageInput.files || [])]
+  if (files.length) void addConceptRefFiles(files, conceptRefPickSlot)
+})
+document.querySelectorAll('.concept-ref').forEach((btn) => {
+  const idx = Number(btn.getAttribute('data-ref') || '0')
+  btn.addEventListener('pointerenter', () => {
+    window.__conceptRefHoverSlot = idx
+    conceptRefPickSlot = idx
+  })
+  btn.addEventListener('click', (event) => {
+    if (event.target?.classList?.contains('concept-ref__x')) {
+      event.preventDefault()
+      conceptRefs[idx] = null
+      renderConceptRefs()
+      return
+    }
+    if (event.target?.closest?.('.concept-ref__paste')) {
+      event.preventDefault()
+      event.stopPropagation()
+      void pasteConceptRefSlot(idx)
+      return
+    }
+    conceptRefPickSlot = idx
+    window.__conceptRefHoverSlot = idx
+    loadImageInput?.click()
+  })
+  btn.addEventListener('paste', (event) => {
+    const files = pickImageFilesFromDataTransfer(event.clipboardData)
+    if (!files.length) return
+    event.preventDefault()
+    event.stopPropagation()
+    conceptRefPickSlot = idx
+    window.__conceptRefHoverSlot = idx
+    void addConceptRefFiles(files, idx)
+  })
+  btn.addEventListener('dragenter', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    btn.classList.add('is-drag')
+  })
+  btn.addEventListener('dragover', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+    btn.classList.add('is-drag')
+  })
+  btn.addEventListener('dragleave', (event) => {
+    if (btn.contains(event.relatedTarget)) return
+    btn.classList.remove('is-drag')
+  })
+  btn.addEventListener('drop', (event) => {
+    event.preventDefault()
+    event.stopPropagation()
+    btn.classList.remove('is-drag')
+    const files = pickImageFilesFromDataTransfer(event.dataTransfer)
+    if (files.length) void addConceptRefFiles(files, idx)
+  })
 })
 
-/** 클립보드/드롭에서 첫 이미지 파일 추출 (캡처·파일 탐색기 드래그 모두) */
-function pickImageFileFromDataTransfer(dataTransfer) {
-  if (!dataTransfer) return null
+/** 클립보드/드롭에서 이미지 파일 추출 (최대 2장) */
+function isImageFileLike(file) {
+  if (!file) return false
+  const type = String(file.type || '').toLowerCase()
+  if (type.startsWith('image/')) return true
+  if (type && type !== 'application/octet-stream') return false
+  const name = String(file.name || '')
+  if (/\.(png|jpe?g|webp|gif|bmp|heic|heif|jfif)$/i.test(name)) return true
+  return !type
+}
+
+function isDeskMakeOpen() {
+  const desk = document.getElementById('adult-desk')
+  const make = document.getElementById('adult-desk-make')
+  return Boolean(desk && !desk.hidden && make && !make.hidden)
+}
+
+function isDeskAssembleOpen() {
+  const panel = document.getElementById('desk-assemble')
+  return isDeskMakeOpen() && Boolean(panel && !panel.hidden)
+}
+
+function deskHasFileDrag(event) {
+  const types = event.dataTransfer?.types
+  if (!types) return false
+  return Array.from(types).includes('Files')
+}
+
+function pickImageFilesFromDataTransfer(dataTransfer) {
+  if (!dataTransfer) return []
+  const out = []
   const files = dataTransfer.files
   if (files?.length) {
     for (const file of files) {
-      if (String(file.type || '').startsWith('image/')) return file
+      if (isImageFileLike(file)) out.push(file)
     }
   }
-  const items = dataTransfer.items
-  if (items?.length) {
-    for (const item of items) {
-      if (item.kind === 'file' && String(item.type || '').startsWith('image/')) {
-        const file = item.getAsFile()
-        if (file) return file
+  if (!out.length) {
+    const items = dataTransfer.items
+    if (items?.length) {
+      for (const item of items) {
+        const type = String(item.type || '')
+        if (item.kind === 'file' && (type.startsWith('image/') || !type)) {
+          const file = item.getAsFile()
+          if (isImageFileLike(file)) out.push(file)
+        }
       }
     }
+  }
+  return out.slice(0, 2)
+}
+
+function pickImageFileFromDataTransfer(dataTransfer) {
+  return pickImageFilesFromDataTransfer(dataTransfer)[0] || null
+}
+
+async function readClipboardImageFile() {
+  if (!navigator.clipboard?.read) return null
+  const items = await navigator.clipboard.read()
+  for (const item of items) {
+    const type = item.types.find((one) => String(one).startsWith('image/'))
+    if (!type) continue
+    const blob = await item.getType(type)
+    if (blob) return new File([blob], `paste-${Date.now()}.png`, { type: blob.type || type })
   }
   return null
 }
@@ -5049,28 +5535,80 @@ document.addEventListener('paste', (event) => {
   const faceswapPanel = document.getElementById('admin-faceswap-panel')
   if (faceswapPanel && !faceswapPanel.hidden) return
   if (!isStudioImageLoadContext()) return
-  // 텍스트만 붙여넣는 경우는 가로채지 않음 (설명 칸 등)
-  const file = pickImageFileFromDataTransfer(event.clipboardData)
+  const files = pickImageFilesFromDataTransfer(event.clipboardData)
+  const file = files[0] || null
   if (!file) return
-  const desk = document.getElementById('adult-desk')
-  const deskMake = document.getElementById('adult-desk-make')
-  if (desk && !desk.hidden && deskMake && !deskMake.hidden) {
+  const conceptZone = Boolean(event.target?.closest?.('#description-dropzone, #concept-refs'))
+  if (isDeskMakeOpen() && !conceptZone) {
     const tag = event.target
     if (tag && (tag.tagName === 'INPUT' || tag.tagName === 'TEXTAREA') && tag.id === 'desk-work-title') {
-      return
+      /* 작품 이름 칸이어도 사진이면 CAST에 붙인다 */
     }
     event.preventDefault()
-    if (typeof window.__deskApplyCastFile === 'function' && (window.__deskPasteCast === 'woman' || window.__deskPasteCast === 'man')) {
-      void window.__deskApplyCastFile(window.__deskPasteCast, file)
+    if (isDeskAssembleOpen() && typeof window.__deskAssembleAddFile === 'function') {
+      void window.__deskAssembleAddFile(file)
       return
     }
-    if (typeof window.__deskApplySceneFile === 'function') {
-      void window.__deskApplySceneFile(file)
+    if (typeof window.__deskTakeCastFiles === 'function') {
+      void window.__deskTakeCastFiles(files)
+      return
+    }
+    if (typeof window.__deskApplyCastFile === 'function') {
+      const pasteCast =
+        window.__deskPasteCast === 'woman' || window.__deskPasteCast === 'man'
+          ? window.__deskPasteCast
+          : window.__deskLastCast === 'woman' || window.__deskLastCast === 'man'
+            ? window.__deskLastCast
+            : 'woman'
+      void window.__deskApplyCastFile(pasteCast, file)
       return
     }
   }
   event.preventDefault()
-  void loadImageFromFile(file)
+  const slot = conceptRefSlotFromEvent(event)
+  void addConceptRefFiles(files, slot >= 0 ? slot : nextConceptRefSlot())
+})
+
+document.addEventListener('dragover', (event) => {
+  if (!isDeskMakeOpen() || !deskHasFileDrag(event)) return
+  const make = document.getElementById('adult-desk-make')
+  if (!make?.contains(event.target)) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+})
+
+document.addEventListener('drop', (event) => {
+  if (!isDeskMakeOpen()) return
+  const files = pickImageFilesFromDataTransfer(event.dataTransfer)
+  if (!files.length) return
+  const make = document.getElementById('adult-desk-make')
+  if (!make?.contains(event.target)) return
+  const target = event.target
+  if (isDeskAssembleOpen() && typeof window.__deskAssembleAddFile === 'function') {
+    event.preventDefault()
+    event.stopPropagation()
+    void window.__deskAssembleAddFile(files[0])
+    return
+  }
+  if (target.closest?.('#desk-scene-paste, #desk-scene-upload, #desk-scene-input')) {
+    event.preventDefault()
+    if (typeof window.__deskApplySceneFile === 'function') void window.__deskApplySceneFile(files[0])
+    return
+  }
+  const person = document.querySelector('.adult-desk__person')
+  if (
+    person?.contains(target) ||
+    target.closest?.('.desk-cast, .desk-cast-paste, #desk-cast-woman, #desk-cast-man')
+  ) {
+    event.preventDefault()
+    event.stopPropagation()
+    const hit = target.closest?.('#desk-cast-woman, #desk-cast-paste-w')
+      ? 'woman'
+      : target.closest?.('#desk-cast-man, #desk-cast-paste-m')
+        ? 'man'
+        : ''
+    if (typeof window.__deskTakeCastFiles === 'function') void window.__deskTakeCastFiles(files, hit)
+  }
 })
 
 // 캐릭터/컨셉 영역: 폴더에서 마우스로 끌어다 놓기
@@ -5105,12 +5643,13 @@ descriptionDropzone?.addEventListener('drop', (event) => {
   event.preventDefault()
   descriptionDragDepth = 0
   setDescriptionDropActive(false)
-  const file = pickImageFileFromDataTransfer(event.dataTransfer)
-  if (!file) {
+  const files = pickImageFilesFromDataTransfer(event.dataTransfer)
+  if (!files.length) {
     setFormStatus('이미지 파일만 끌어다 놓을 수 있어요 (PNG/JPEG/WEBP/GIF).', true)
     return
   }
-  void loadImageFromFile(file)
+  const slot = conceptRefSlotFromEvent(event)
+  void addConceptRefFiles(files, slot >= 0 ? slot : undefined)
 })
 
 // fal/replicate 임시 CDN 링크는 시간이 지나면 만료된다. 「수용하기」/영상 완성 시점에
@@ -5512,8 +6051,8 @@ reviseApplyButton.addEventListener('click', async () => {
 
   try {
     let refineImageUrl = currentResult.imageUrl
-    if (reviseModeUi === 'erase' && maskDataUrl) {
-      setReviseStatus('지울 자리를 배경색으로 먼저 메운 뒤 다듬는 중…', false)
+    if ((reviseModeUi === 'erase' || wantsObjectEraseClient(revision)) && maskDataUrl) {
+      setReviseStatus('지울 자리를 배경색으로 메우는 중…', false)
       const source = await loadCurrentResultDataUrl()
       const prefilled = await prefillMaskedHole(source, maskDataUrl)
       refineImageUrl = await uploadImageDataUrl(prefilled)
@@ -5810,6 +6349,7 @@ function startNewShoot() {
   resetGuideFields()
   guideDescLocked = false
   if (descriptionField) descriptionField.value = ''
+  clearConceptRefs()
   if (scenePreviewEl) scenePreviewEl.hidden = true
   if (motionField) motionField.value = ''
   currentResult.imageUrl = ''
@@ -5855,7 +6395,7 @@ function syncGenModeUi() {
       genModeHint.hidden = true
     } else if (admin) {
       genModeHint.hidden = false
-      genModeHint.textContent = '장면을 자유 서술로 그립니다. 성인 화보는 상단 「화보 스튜디오」로 가세요.'
+      genModeHint.textContent = '장면을 자유 서술로 그립니다. 성인 장면은 성인 엔진으로 그립니다.'
     } else {
       genModeHint.textContent = ''
       genModeHint.hidden = true
@@ -5998,6 +6538,7 @@ clearGalleryButton.addEventListener('click', () => {
   items.filter((item) => item.genMode !== 'fashion').forEach((item) => {
     deletePermanentMediaIfNeeded(item.imageUrl)
     deletePermanentMediaIfNeeded(item.videoUrl)
+    galleryPickedIds.delete(item.id)
   })
   writeGallery(items.filter((item) => item.genMode === 'fashion'))
   renderGallery()
@@ -6009,10 +6550,14 @@ clearAdminGalleryButton?.addEventListener('click', () => {
   items.filter((item) => item.genMode === 'fashion').forEach((item) => {
     deletePermanentMediaIfNeeded(item.imageUrl)
     deletePermanentMediaIfNeeded(item.videoUrl)
+    galleryPickedIds.delete(item.id)
   })
   writeGallery(items.filter((item) => item.genMode !== 'fashion'))
   renderGallery()
 })
+
+deletePickedGalleryButton?.addEventListener('click', () => deletePickedGalleryItems('free'))
+deletePickedAdminGalleryButton?.addEventListener('click', () => deletePickedGalleryItems('fashion'))
 
 // ─── 갤러리 백업 (내보내기 / 가져오기) ─────────────────────────────────────
 // 갤러리는 이 브라우저의 localStorage에만 있어서, 캐시를 지우거나 기기를 바꾸면
@@ -6168,10 +6713,14 @@ async function bootAuth() {
   sessionStorage.removeItem(LEGACY_PIN_STORAGE_KEY)
 
   const token = getSessionToken()
-  if (token) {
+  const pin = getStoredAdminPin()
+  if (token || pin) {
     try {
+      const headers = {}
+      if (token) headers['x-session-token'] = token
+      if (pin) headers['x-admin-pin'] = pin
       const response = await fetch('/api/auth/me', {
-        headers: { 'x-session-token': token },
+        headers,
       })
       const data = await response.json().catch(() => ({}))
       if (response.ok && data.ok) {
@@ -6181,6 +6730,7 @@ async function bootAuth() {
           showPinGate(authErrorMessage('solo_admin_only'))
           return
         }
+        if (isAdminUser() && !localStorage.getItem(APP_AREA_KEY)) setAppArea('admin')
         showApp()
         return
       }
@@ -6305,6 +6855,7 @@ function syncAdminWorkspaceUi() {
       syncResultVisibilityForArea(area === 'admin' ? 'fashion' : 'free')
     }
   }
+  if (isAdminArea) syncDeskStageEmpty()
 
   if (shortsEmpty) shortsEmpty.hidden = true
 
@@ -6689,6 +7240,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   }
 
   function logFs(step, detail) {
+    if (step === 'face_box_fallback' || step === 'scene_faces_empty' || step === 'face_box_error') return
     try {
       console.info('[faceswap]', step, detail || '')
     } catch (_) {
@@ -6744,23 +7296,97 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return { ...fb, x, y, w, h }
   }
 
-  async function detectFaceBox(imageDataUrl, kind) {
+  const faceBoxMemo = new Map()
+  function faceBoxMemoKey(dataUrl, kind) {
+    const s = String(dataUrl || '')
+    return `${kind}:${s.length}:${s.slice(48, 120)}:${s.slice(-40)}`
+  }
+  function faceBoxMemoGet(key) {
+    return faceBoxMemo.has(key) ? faceBoxMemo.get(key) : null
+  }
+  function faceBoxMemoSet(key, value) {
+    if (faceBoxMemo.size > 28) {
+      const first = faceBoxMemo.keys().next().value
+      if (first) faceBoxMemo.delete(first)
+    }
+    faceBoxMemo.set(key, value)
+    return value
+  }
+
+  async function estimateFaceBoxFromImage(src) {
     try {
+      const img = await loadHtmlImage(src)
+      const maxW = 96
+      const scale = maxW / Math.max(img.naturalWidth, 1)
+      const w = Math.max(24, Math.round(img.naturalWidth * scale))
+      const h = Math.max(24, Math.round(img.naturalHeight * scale))
+      const c = document.createElement('canvas')
+      c.width = w
+      c.height = h
+      const ctx = c.getContext('2d', { willReadFrequently: true })
+      ctx.drawImage(img, 0, 0, w, h)
+      const { data } = ctx.getImageData(0, 0, w, h)
+      const scanH = Math.round(h * 0.44)
+      let minX = w
+      let minY = h
+      let maxX = 0
+      let maxY = 0
+      let n = 0
+      for (let y = 1; y < scanH; y += 1) {
+        for (let x = 1; x < w - 1; x += 1) {
+          const i = (y * w + x) * 4
+          const r = data[i]
+          const g = data[i + 1]
+          const b = data[i + 2]
+          if (data[i + 3] < 40) continue
+          const luma = r * 0.299 + g * 0.587 + b * 0.114
+          if (luma < 72 || luma > 232) continue
+          if (r < 82 || r < g - 6 || r < b + 6) continue
+          const sat = Math.max(r, g, b) - Math.min(r, g, b)
+          if (sat < 14 || sat > 128) continue
+          n += 1
+          if (x < minX) minX = x
+          if (y < minY) minY = y
+          if (x > maxX) maxX = x
+          if (y > maxY) maxY = y
+        }
+      }
+      if (n < 18) return null
+      const pad = 3
+      const x = Math.max(0, (minX - pad) / w)
+      const y = Math.max(0, (minY - pad) / h)
+      const bw = Math.min(1 - x, (maxX - minX + pad * 2) / w)
+      const bh = Math.min(1 - y, (maxY - minY + pad * 2) / h)
+      if (bw < 0.08 || bh < 0.08 || bh > 0.55) return null
+      return { x, y, w: bw, h: bh }
+    } catch (_) {
+      return null
+    }
+  }
+
+  async function detectFaceBox(imageDataUrl, kind) {
+    const key = faceBoxMemoKey(imageDataUrl, `one:${kind || ''}`)
+    const hit = faceBoxMemoGet(key)
+    if (hit) return hit
+    try {
+      const small = await compressToJpegDataUrl(imageDataUrl, 1024, 0.82)
       const response = await fetch('/api/face-box', {
         method: 'POST',
         headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageDataUrl }),
+        body: JSON.stringify({ imageDataUrl: small }),
       })
       const data = await response.json().catch(() => ({}))
       if (data?.ok && data.face && typeof data.face.w === 'number') {
         logFs('face_box_ok', { kind, x: data.face.x, y: data.face.y, w: data.face.w, h: data.face.h })
-        return clampNormFace(data.face, kind)
+        return faceBoxMemoSet(key, clampNormFace(data.face, kind))
       }
       logFs('face_box_fallback', { kind, http: response.status, error: data?.error })
     } catch (err) {
       logFs('face_box_error', { kind, message: err instanceof Error ? err.message : String(err) })
     }
-    return heuristicFaceBox(kind)
+    const local = await estimateFaceBoxFromImage(imageDataUrl)
+    if (local) return faceBoxMemoSet(key, clampNormFace(local, kind))
+    return faceBoxMemoSet(key, heuristicFaceBox(kind))
   }
 
   function remapFacePoint(p, sx, sy, sw, sh, iw, ih) {
@@ -6775,7 +7401,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
    * 증명사진 모서리의 파란/회색 스튜디오 배경만 지움. 가운데(얼굴·머리)는 보호.
    */
   function keyIdStudioBackdrop(canvas, opts = {}) {
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
     const w = canvas.width
     const h = canvas.height
     const img = ctx.getImageData(0, 0, w, h)
@@ -6833,13 +7459,23 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
    * ② 증명사진에서 얼굴(+머리)만 투명 PNG로 자름. 파란/회색 카드 배경은 버림.
    */
   async function extractIdFacePng(idDataUrl) {
-    const img = await loadHtmlImage(idDataUrl)
-    const face = await detectFaceBox(idDataUrl, 'id')
+    let workUrl = idDataUrl
+    try {
+      const cut = await isolateOutpaintedPerson(idDataUrl)
+      if (cut && cut.width > 24 && cut.height > 24 && !subjectLooksLikePhotoCard(cut)) {
+        punchIdPhotoBackdrop(cut)
+        workUrl = cut.toDataURL('image/png')
+      }
+    } catch (err) {
+      console.warn('id face isolate failed', err)
+    }
+    const img = await loadHtmlImage(workUrl)
+    const face = await detectFaceBox(workUrl, 'id')
     const iw = img.naturalWidth
     const ih = img.naturalHeight
-    const padX = face.w * 0.16
-    const padYTop = face.h * 0.38
-    const padYBot = face.h * 0.08
+    const padX = face.w * 0.22
+    const padYTop = face.h * 0.48
+    const padYBot = face.h * 0.16
     const sx = Math.max(0, Math.round((face.x - padX) * iw))
     const sy = Math.max(0, Math.round((face.y - padYTop) * ih))
     const sw = Math.min(iw - sx, Math.round((face.w + padX * 2) * iw))
@@ -6849,26 +7485,27 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     canvas.height = Math.max(8, sh)
     const ctx = canvas.getContext('2d')
     ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
+    punchIdPhotoBackdrop(canvas)
     keyIdStudioBackdrop(canvas)
     const mask = document.createElement('canvas')
     mask.width = canvas.width
     mask.height = canvas.height
     const mctx = mask.getContext('2d')
     const cx = canvas.width / 2
-    const cy = canvas.height * 0.48
-    const rx = canvas.width * 0.44
-    const ry = canvas.height * 0.5
+    const cy = canvas.height * 0.46
+    const rx = canvas.width * 0.42
+    const ry = canvas.height * 0.48
     const grad = mctx.createRadialGradient(
       cx,
       cy,
-      Math.min(rx, ry) * 0.55,
+      Math.min(rx, ry) * 0.5,
       cx,
       cy,
       Math.max(rx, ry),
     )
     grad.addColorStop(0, 'rgba(0,0,0,1)')
-    grad.addColorStop(0.72, 'rgba(0,0,0,1)')
-    grad.addColorStop(0.9, 'rgba(0,0,0,0.35)')
+    grad.addColorStop(0.7, 'rgba(0,0,0,1)')
+    grad.addColorStop(0.88, 'rgba(0,0,0,0.4)')
     grad.addColorStop(1, 'rgba(0,0,0,0)')
     mctx.fillStyle = grad
     mctx.beginPath()
@@ -6892,12 +7529,26 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
    */
   async function extractIdSubjectPng(idDataUrl) {
     const img = await loadHtmlImage(idDataUrl)
-    const canvas = document.createElement('canvas')
+    let canvas = document.createElement('canvas')
     canvas.width = img.naturalWidth
     canvas.height = img.naturalHeight
     const ctx = canvas.getContext('2d')
     ctx.drawImage(img, 0, 0)
-    keyIdStudioBackdrop(canvas, { protectTorso: true })
+    let isolated = false
+    try {
+      const cut = await isolateOutpaintedPerson(idDataUrl)
+      if (cut && cut.width > 24 && cut.height > 24) {
+        canvas = cut
+        isolated = true
+      }
+    } catch (err) {
+      console.warn('id subject isolate failed', err)
+    }
+    if (!isolated) {
+      keyIdStudioBackdrop(canvas, { protectTorso: true })
+      defringeCutout(canvas)
+    }
+    punchIdPhotoBackdrop(canvas)
     defringeCutout(canvas)
     const flat = document.createElement('canvas')
     flat.width = canvas.width
@@ -7053,18 +7704,18 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   }
   async function looksLikeEmptyExtend(src, referenceSrc) {
     const band = await regionLumaStats(src, 0.52, 0.36)
-    if (band.variance >= 90 && band.mean < 190) return false
+    if (band.variance >= 40 && band.mean < 205) return false
     if (referenceSrc) {
       const ref = await regionLumaStats(referenceSrc, 0.52, 0.36)
-      return band.variance <= ref.variance + 18
+      return band.variance < 18 && band.mean > 188 && band.variance <= ref.variance + 6
     }
-    return band.variance < 80 || band.mean > 185
+    return band.variance < 22 && band.mean > 198
   }
 
   function isolatedStillBust(canvas) {
     if (!canvas || !canvas.width || !canvas.height) return true
     const ratio = canvas.height / Math.max(canvas.width, 1)
-    return ratio < 1.55 || opaqueRatio(canvas) < 0.04
+    return ratio < 1.52 || opaqueRatio(canvas) < 0.04
   }
 
   function cropNonBackground(canvas) {
@@ -7353,6 +8004,51 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return false
   }
 
+  function punchIdPhotoBackdrop(canvas) {
+    if (!canvas || !canvas.width) return
+    const ctx = canvas.getContext('2d')
+    const w = canvas.width
+    const h = canvas.height
+    const img = ctx.getImageData(0, 0, w, h)
+    const d = img.data
+    const top = Math.round(h * 0.48)
+    for (let y = 0; y < top; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const i = (y * w + x) * 4
+        if (d[i + 3] < 16) continue
+        const nx = x / w
+        const inFace = nx > 0.3 && nx < 0.7 && y > h * 0.04 && y < h * 0.4
+        const r = d[i]
+        const g = d[i + 1]
+        const b = d[i + 2]
+        const luma = r * 0.299 + g * 0.587 + b * 0.114
+        const sat = Math.max(r, g, b) - Math.min(r, g, b)
+        const wall = luma > 148 && sat < 36
+        if (wall && !inFace) d[i + 3] = 0
+      }
+    }
+    ctx.putImageData(img, 0, 0)
+  }
+
+  function subjectLooksLikePhotoCard(canvas) {
+    if (!canvas || !canvas.width) return true
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    const w = canvas.width
+    const h = canvas.height
+    const pts = [
+      [2, 2],
+      [w - 3, 2],
+      [2, Math.max(2, Math.round(h * 0.08))],
+      [w - 3, Math.max(2, Math.round(h * 0.08))],
+    ]
+    let opaque = 0
+    for (const [x, y] of pts) {
+      const p = ctx.getImageData(Math.max(0, x), Math.max(0, y), 1, 1).data
+      if (p[3] > 200) opaque += 1
+    }
+    return opaque >= 3
+  }
+
   async function cutRemoteBackground(imageUrl) {
     try {
       const response = await fetch('/api/remove-background', {
@@ -7373,7 +8069,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
    * 옷·피부처럼 채도/명암이 있는 덩어리는 남긴다.
    */
   function dropStudioIslands(canvas) {
-    const ctx = canvas.getContext('2d')
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
     const w = canvas.width
     const h = canvas.height
     const img = ctx.getImageData(0, 0, w, h)
@@ -7500,17 +8196,207 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     ctx.putImageData(img, 0, 0)
   }
 
-  /** 얼굴+상의를 세로 캔버스 위에 두고, 아래는 인페인트로 몸통을 그리게 함. */
+  function trimWhiteBoardBottom(canvas) {
+    if (!canvas || !canvas.width) return canvas
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    const w = canvas.width
+    const h = canvas.height
+    const img = ctx.getImageData(0, 0, w, h)
+    const d = img.data
+    let cut = h
+    const x0 = Math.round(w * 0.18)
+    const x1 = Math.max(x0 + 1, Math.round(w * 0.82))
+    const midW = x1 - x0
+    for (let y = h - 1; y > Math.round(h * 0.55); y -= 1) {
+      let white = 0
+      for (let x = x0; x < x1; x += 1) {
+        const i = (y * w + x) * 4
+        if (d[i + 3] < 16) continue
+        if (d[i] > 200 && d[i + 1] > 200 && d[i + 2] > 200) white += 1
+      }
+      if (white / midW > 0.82) cut = y
+      else break
+    }
+    if (cut >= h - 4 || cut <= h * 0.58) return canvas
+    const keep = document.createElement('canvas')
+    keep.width = w
+    keep.height = cut
+    keep.getContext('2d').drawImage(canvas, 0, 0, w, cut, 0, 0, w, cut)
+    return keep
+  }
+
+  /** 얼굴+어깨+가슴만 남기고, 책상·팻말은 자른다. */
+  async function cropPhotoToShoulders(dataUrl) {
+    const img = await loadHtmlImage(dataUrl)
+    const iw = img.naturalWidth
+    const ih = img.naturalHeight
+    let face = await estimateFaceBoxFromImage(dataUrl)
+    if (face && face.h > 0.42) face = { ...face, h: 0.3, y: Math.min(face.y, 0.1) }
+    let sx = 0
+    let sy = 0
+    let sw = iw
+    let sh = Math.round(ih * 0.48)
+    if (face && face.h >= 0.04) {
+      const padX = Math.max(0.16, face.w * 1.05)
+      const padTop = face.h * 0.75
+      const padBot = face.h * 1.25
+      sx = Math.max(0, Math.round((face.x - padX) * iw))
+      sy = Math.max(0, Math.round((face.y - padTop) * ih))
+      sw = Math.min(iw - sx, Math.round((face.w + padX * 2) * iw))
+      sh = Math.min(ih - sy, Math.round((face.h + padTop + padBot) * ih), Math.round(ih * 0.55))
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(8, sw)
+    canvas.height = Math.max(8, sh)
+    canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height)
+    return trimWhiteBoardBottom(canvas).toDataURL('image/jpeg', 0.94)
+  }
+
+  function punchBottomLedge(canvas) {
+    if (!canvas || !canvas.width) return
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    const w = canvas.width
+    const h = canvas.height
+    const img = ctx.getImageData(0, 0, w, h)
+    const d = img.data
+    const y0 = Math.round(h * 0.62)
+    for (let y = y0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const i = (y * w + x) * 4
+        if (d[i + 3] < 16) continue
+        const luma = d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+        const sat = Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2])
+        if (luma > 176 && sat < 48) d[i + 3] = 0
+      }
+    }
+    ctx.putImageData(img, 0, 0)
+  }
+
+  async function cropSubjectOffDesk(subject) {
+    if (!subject?.pngDataUrl) return subject
+    const img = await loadHtmlImage(subject.pngDataUrl)
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    ctx.drawImage(img, 0, 0)
+    punchBottomLedge(canvas)
+    const trimmed = cropNonBackground(canvas)
+    punchBottomLedge(trimmed)
+    const flat = document.createElement('canvas')
+    flat.width = trimmed.width
+    flat.height = trimmed.height
+    const fctx = flat.getContext('2d')
+    fctx.fillStyle = '#f4f4f4'
+    fctx.fillRect(0, 0, flat.width, flat.height)
+    fctx.drawImage(trimmed, 0, 0)
+    return {
+      pngDataUrl: trimmed.toDataURL('image/png'),
+      flatDataUrl: flat.toDataURL('image/jpeg', 0.92),
+      w: trimmed.width,
+      h: trimmed.height,
+    }
+  }
+
+  async function looksLikeHoldingBoard(src) {
+    if (!src) return false
+    const lower = await regionLumaStats(src, 0.78, 0.18)
+    if (lower.variance >= 28) return false
+    const img = await loadHtmlImage(src)
+    const w = Math.min(80, img.naturalWidth)
+    const h = Math.min(120, img.naturalHeight)
+    if (!w || !h) return false
+    const c = document.createElement('canvas')
+    c.width = w
+    c.height = h
+    const ctx = c.getContext('2d', { willReadFrequently: true })
+    ctx.drawImage(img, 0, 0, w, h)
+    const { data } = ctx.getImageData(0, 0, w, h)
+    let run = 0
+    let best = 0
+    const y0 = Math.round(h * 0.42)
+    const y1 = Math.round(h * 0.78)
+    for (let y = y0; y < y1; y += 1) {
+      const mid0 = Math.round(w * 0.22)
+      const mid1 = Math.max(mid0 + 1, Math.round(w * 0.78))
+      const midW = mid1 - mid0
+      let centerWhite = 0
+      for (let x = mid0; x < mid1; x += 1) {
+        const i = (y * w + x) * 4
+        if (data[i] > 198 && data[i + 1] > 198 && data[i + 2] > 198) centerWhite += 1
+      }
+      if (centerWhite / midW > 0.78) {
+        run += 1
+        if (run > best) best = run
+      } else run = 0
+    }
+    return best >= Math.max(4, Math.round(h * 0.06))
+  }
+
+  function sampleLayerShirt(layered) {
+    const w = layered.width
+    const h = layered.height
+    const ctx = layered.getContext('2d', { willReadFrequently: true })
+    const sw = Math.max(4, Math.round(w * 0.44))
+    const sh = Math.max(4, Math.round(h * 0.35))
+    const data = ctx.getImageData(Math.round(w * 0.28), Math.round(h * 0.55), sw, sh).data
+    let r = 0
+    let g = 0
+    let b = 0
+    let n = 0
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < 80) continue
+      const luma = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114
+      if (luma > 225 || luma < 28) continue
+      r += data[i]
+      g += data[i + 1]
+      b += data[i + 2]
+      n += 1
+    }
+    if (n < 12) return [88, 92, 98]
+    return [Math.round(r / n), Math.round(g / n), Math.round(b / n)]
+  }
+
+  function paintSoftStandingHint(ctx, cw, ch, dx, dy, dw, dh, layered) {
+    const [r, g, b] = sampleLayerShirt(layered)
+    const neckY = dy + dh - 6
+    const midX = cw / 2
+    const torsoW = dw * 1.02
+    const hipY = neckY + ch * 0.2
+    const feetY = ch * 0.91
+    const legW = torsoW * 0.22
+    const gap = torsoW * 0.08
+    ctx.save()
+    ctx.globalAlpha = 0.38
+    ctx.fillStyle = `rgb(${r},${g},${b})`
+    ctx.beginPath()
+    ctx.moveTo(midX - torsoW * 0.5, neckY)
+    ctx.lineTo(midX + torsoW * 0.5, neckY)
+    ctx.lineTo(midX + torsoW * 0.42, hipY)
+    ctx.lineTo(midX - torsoW * 0.42, hipY)
+    ctx.closePath()
+    ctx.fill()
+    ctx.fillRect(midX - gap / 2 - legW, hipY - 4, legW, feetY - hipY)
+    ctx.fillRect(midX + gap / 2, hipY - 4, legW, feetY - hipY)
+    ctx.globalAlpha = 0.5
+    ctx.fillStyle = '#2c2c2c'
+    ctx.fillRect(midX - gap / 2 - legW - 4, feetY - 10, legW + 8, 14)
+    ctx.fillRect(midX + gap / 2 - 4, feetY - 10, legW + 8, 14)
+    ctx.restore()
+  }
+
   async function buildBodyExtendCanvas(subject) {
-    const [cw, ch] = [768, 1024]
+    const [cw, ch] = [768, 1152]
     const png = await loadHtmlImage(subject.pngDataUrl)
     const canvas = document.createElement('canvas')
     canvas.width = cw
     canvas.height = ch
     const ctx = canvas.getContext('2d')
-    ctx.fillStyle = '#d9d9d9'
-    ctx.fillRect(0, 0, cw, ch)
-    const scale = Math.min((ch * 0.26) / Math.max(png.naturalHeight, 1), (cw * 0.4) / Math.max(png.naturalWidth, 1))
+    paintSeamlessStudio(ctx, cw, ch)
+    const scale = Math.min(
+      (ch * 0.42) / Math.max(png.naturalHeight, 1),
+      (cw * 0.52) / Math.max(png.naturalWidth, 1),
+    )
     const dw = Math.round(png.naturalWidth * scale)
     const dh = Math.round(png.naturalHeight * scale)
     const dx = Math.round((cw - dw) / 2)
@@ -7518,9 +8404,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     const layered = document.createElement('canvas')
     layered.width = dw
     layered.height = dh
-    const lctx = layered.getContext('2d')
+    const lctx = layered.getContext('2d', { willReadFrequently: true })
     lctx.drawImage(png, 0, 0, dw, dh)
-    const fadeH = Math.max(16, Math.round(dh * 0.22))
+    const fadeH = Math.max(16, Math.round(dh * 0.12))
     const fade = lctx.getImageData(0, dh - fadeH, dw, fadeH)
     for (let y = 0; y < fadeH; y += 1) {
       const t = y / Math.max(fadeH - 1, 1)
@@ -7531,33 +8417,123 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
     }
     lctx.putImageData(fade, 0, dh - fadeH)
+    paintSoftStandingHint(ctx, cw, ch, dx, dy, dw, dh, layered)
     ctx.drawImage(layered, dx, dy)
-
-    const mask = document.createElement('canvas')
-    mask.width = cw
-    mask.height = ch
-    const mctx = mask.getContext('2d')
-    mctx.fillStyle = '#ffffff'
-    mctx.fillRect(0, 0, cw, ch)
-    mctx.globalCompositeOperation = 'destination-out'
-    mctx.drawImage(layered, dx, dy)
-    mctx.globalCompositeOperation = 'source-over'
-    mctx.fillStyle = '#ffffff'
-    mctx.fillRect(dx + Math.round(dw * 0.08), dy + dh - fadeH, Math.round(dw * 0.84), fadeH + 8)
-    const raw = mctx.getImageData(0, 0, cw, ch)
-    for (let p = 0; p < raw.data.length; p += 4) {
-      const keep = raw.data[p + 3] < 128
-      const v = keep ? 0 : 255
-      raw.data[p] = v
-      raw.data[p + 1] = v
-      raw.data[p + 2] = v
-      raw.data[p + 3] = 255
-    }
-    mctx.putImageData(raw, 0, 0)
     return {
       image: canvas.toDataURL('image/jpeg', 0.92),
-      mask: mask.toDataURL('image/png'),
+      subjectLayer: layered.toDataURL('image/png'),
+      cw,
+      ch,
+      dx,
+      dy,
+      dw,
+      dh,
     }
+  }
+
+  async function restoreProtectedExtendPixels(resultUrl, prepared) {
+    if (!resultUrl || !prepared?.image || !prepared?.mask) return resultUrl
+    const [out, src, mask] = await Promise.all([
+      loadHtmlImage(resultUrl),
+      loadHtmlImage(prepared.image),
+      loadHtmlImage(prepared.mask),
+    ])
+    const w = out.naturalWidth
+    const h = out.naturalHeight
+    if (!w || !h) return resultUrl
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(out, 0, 0, w, h)
+    const srcC = document.createElement('canvas')
+    srcC.width = w
+    srcC.height = h
+    srcC.getContext('2d').drawImage(src, 0, 0, w, h)
+    const maskC = document.createElement('canvas')
+    maskC.width = w
+    maskC.height = h
+    maskC.getContext('2d').drawImage(mask, 0, 0, w, h)
+    const outData = ctx.getImageData(0, 0, w, h)
+    const srcData = srcC.getContext('2d').getImageData(0, 0, w, h)
+    const maskData = maskC.getContext('2d').getImageData(0, 0, w, h)
+    const od = outData.data
+    const sd = srcData.data
+    const md = maskData.data
+    for (let i = 0; i < od.length; i += 4) {
+      if (md[i] >= 128) continue
+      od[i] = sd[i]
+      od[i + 1] = sd[i + 1]
+      od[i + 2] = sd[i + 2]
+    }
+    ctx.putImageData(outData, 0, 0)
+    return canvas.toDataURL('image/jpeg', 0.92)
+  }
+
+  async function stampOriginalFaceOnExtend(resultUrl, idDataUrl) {
+    if (!resultUrl || !idDataUrl) return resultUrl
+    const facePng = await extractIdFacePng(idDataUrl)
+    const probeImg = await loadHtmlImage(facePng.pngDataUrl)
+    const probe = document.createElement('canvas')
+    probe.width = probeImg.naturalWidth
+    probe.height = probeImg.naturalHeight
+    probe.getContext('2d').drawImage(probeImg, 0, 0)
+    if (subjectLooksLikePhotoCard(probe)) return resultUrl
+    const boxes = await detectSceneFaceBoxes(resultUrl, 1, { guessIfMissing: false })
+    if (!boxes.length) return resultUrl
+    const box = boxes.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0]
+    const crop = await cropHeadFromBox(resultUrl, box)
+    const pasted = await pasteFacePngOnCrop(crop.dataUrl, facePng, {
+      maxFaceH: crop.sh * 0.92,
+      skipEraseFill: true,
+    })
+    return pasteHeadOntoFull(resultUrl, pasted, crop)
+  }
+
+  async function keepOriginalIdOnExtend(resultUrl, prepared) {
+    if (!resultUrl || !prepared?.subjectLayer) return resultUrl
+    const [img, png] = await Promise.all([
+      loadHtmlImage(resultUrl),
+      loadHtmlImage(prepared.subjectLayer),
+    ])
+    const src = document.createElement('canvas')
+    src.width = png.naturalWidth
+    src.height = png.naturalHeight
+    src.getContext('2d').drawImage(png, 0, 0)
+    if (subjectLooksLikePhotoCard(src)) return resultUrl
+    const headH = Math.max(8, Math.round(png.naturalHeight * 0.58))
+    const head = document.createElement('canvas')
+    head.width = png.naturalWidth
+    head.height = headH
+    const hctx = head.getContext('2d')
+    hctx.drawImage(png, 0, 0, png.naturalWidth, headH, 0, 0, png.naturalWidth, headH)
+    const fadeH = Math.max(12, Math.round(headH * 0.3))
+    const fade = hctx.getImageData(0, headH - fadeH, head.width, fadeH)
+    for (let y = 0; y < fadeH; y += 1) {
+      const t = y / Math.max(fadeH - 1, 1)
+      const a = 1 - t * t
+      for (let x = 0; x < head.width; x += 1) {
+        const i = (y * head.width + x) * 4 + 3
+        fade.data[i] = Math.round(fade.data[i] * a)
+      }
+    }
+    hctx.putImageData(fade, 0, headH - fadeH)
+    if (subjectLooksLikePhotoCard(head)) return resultUrl
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth
+    canvas.height = img.naturalHeight
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, 0, 0)
+    const sx = img.naturalWidth / Math.max(prepared.cw, 1)
+    const sy = img.naturalHeight / Math.max(prepared.ch, 1)
+    ctx.drawImage(
+      head,
+      Math.round(prepared.dx * sx),
+      Math.round(prepared.dy * sy),
+      Math.round(prepared.dw * sx),
+      Math.round(headH * sy),
+    )
+    return canvas.toDataURL('image/jpeg', 0.92)
   }
 
   function genderHeightFactor(gender) {
@@ -7791,15 +8767,22 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
       }
     }
-    if (sn > 0) {
-      ctx.save()
-      ctx.translate(anchorTx, anchorTy)
-      ctx.rotate(rotation)
-      ctx.fillStyle = `rgb(${Math.round(sr / sn)},${Math.round(sg / sn)},${Math.round(sb / sn)})`
-      ctx.beginPath()
-      ctx.ellipse(0, eraseRy * 0.04, eraseRx, eraseRy, 0, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.restore()
+    if (sn > 0 && !opts.skipEraseFill) {
+      const avgR = sr / sn
+      const avgG = sg / sn
+      const avgB = sb / sn
+      const luma = avgR * 0.299 + avgG * 0.587 + avgB * 0.114
+      const sat = Math.max(avgR, avgG, avgB) - Math.min(avgR, avgG, avgB)
+      if (!(luma > 168 && sat < 38)) {
+        ctx.save()
+        ctx.translate(anchorTx, anchorTy)
+        ctx.rotate(rotation)
+        ctx.fillStyle = `rgb(${Math.round(avgR)},${Math.round(avgG)},${Math.round(avgB)})`
+        ctx.beginPath()
+        ctx.ellipse(0, eraseRy * 0.04, eraseRx, eraseRy, 0, 0, Math.PI * 2)
+        ctx.fill()
+        ctx.restore()
+      }
     }
 
     const layer = document.createElement('canvas')
@@ -9349,6 +10332,19 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   async function detectSceneFaceBoxes(imageDataUrl, expectedCount, opts) {
     const want = Math.max(1, expectedCount || 1)
     const guessIfMissing = opts?.guessIfMissing !== false
+    const localOnly = Boolean(opts?.localOnly)
+    const key = faceBoxMemoKey(imageDataUrl, `multi:${want}:${guessIfMissing}:${localOnly}`)
+    const hit = faceBoxMemoGet(key)
+    if (hit) return hit
+    const local = await estimateFaceBoxFromImage(imageDataUrl)
+    if (local && (localOnly || want === 1)) return faceBoxMemoSet(key, [local])
+    if (localOnly) {
+      if (!guessIfMissing) return faceBoxMemoSet(key, [])
+      return faceBoxMemoSet(
+        key,
+        Array.from({ length: want }, (_, i) => heuristicPoseHeadBox(i, want)),
+      )
+    }
     try {
       const small = await compressToJpegDataUrl(imageDataUrl, 1024, 0.82)
       const response = await fetch('/api/face-box', {
@@ -9361,16 +10357,22 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const boxes = list.filter((f) => f && typeof f.w === 'number' && f.w >= 0.03)
       const uniq = []
       for (const box of boxes.sort((a, b) => a.x - b.x)) {
-        if (uniq.some((u) => iouNormBoxes(u, box) > 0.55)) continue
+        const mergeIou = typeof opts?.mergeIou === 'number' ? opts.mergeIou : 0.55
+        if (uniq.some((u) => iouNormBoxes(u, box) > mergeIou)) continue
         uniq.push(box)
       }
-      if (uniq.length) return uniq
+      if (uniq.length) return faceBoxMemoSet(key, uniq)
       logFs('scene_faces_empty', { http: response.status, error: data?.error, want, guessIfMissing })
     } catch (err) {
       logFs('scene_faces_error', { message: err instanceof Error ? err.message : String(err) })
     }
-    if (!guessIfMissing) return []
-    return Array.from({ length: want }, (_, i) => heuristicPoseHeadBox(i, want))
+    const again = await estimateFaceBoxFromImage(imageDataUrl)
+    if (again) return faceBoxMemoSet(key, [again])
+    if (!guessIfMissing) return faceBoxMemoSet(key, [])
+    return faceBoxMemoSet(
+      key,
+      Array.from({ length: want }, (_, i) => heuristicPoseHeadBox(i, want)),
+    )
   }
 
   async function swapHeadCrop(cropDataUrl, faceDataUrl, gender, engineOrder, hardLimitSec) {
@@ -9565,19 +10567,23 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return { dataUrl: url }
   }
 
-  async function extendOneIdBody(idDataUrl, gender, index, total) {
+  async function extendOneIdBody(idDataUrl, gender, index, total, opts) {
     setStatus(`이어그리기 · ${index}/${total} 사진 붙이는 중…`, false)
-    const subject = await extractIdSubjectPng(idDataUrl)
+    const source = opts?.faceSrc || idDataUrl
+    const bustSrc = await cropPhotoToShoulders(source)
+    const subject = await cropSubjectOffDesk(await extractIdSubjectPng(bustSrc))
     const prepared = await buildBodyExtendCanvas(subject)
-    const runOnce = async (withMask, label) => {
+    const runJob = async (image, label) => {
       const job = await postTaleSceneJob(
         {
           composeMode: 'extend-body',
-          images: withMask ? [prepared.image, prepared.mask] : [prepared.image],
+          images: image === source ? [source] : [image, source],
           description: '같은 옷으로 허리 다리 신발까지',
           photoreal: true,
           refKind: 'face',
           gender0: gender || 'female',
+          aspectRatio: '3:4',
+          extendStyle: 'stand',
         },
         label,
         140,
@@ -9586,27 +10592,53 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const display = await ensureStableDataUrl(job.imageUrl)
       return { display, remoteUrl: job.imageUrl }
     }
-    const isBadExtend = async (result) => {
+    const extendLooksLikeClone = (faces) => {
+      const list = (faces || []).filter((f) => f && f.w >= 0.045 && f.h >= 0.045)
+      if (list.length < 2) return false
+      const ranked = list.slice().sort((a, b) => b.w * b.h - a.w * a.h)
+      const main = ranked[0]
+      const extras = ranked.slice(1).filter((f) => f.w * f.h >= main.w * main.h * 0.3)
+      if (!extras.length) return false
+      return extras.some((f) => {
+        const dy = Math.abs(f.y + f.h / 2 - (main.y + main.h / 2))
+        return dy > Math.max(main.h, f.h) * 0.65
+      })
+    }
+    const isHardFail = async (result) => {
       if (!result || !result.display) return true
       if (await isSolidBlackPhoto(result.display)) return true
       if (await looksLikeEmptyExtend(result.display, prepared.image)) return true
-      const cut = await isolateOutpaintedPerson(result.display, result.remoteUrl)
-      if (isolatedStillBust(cut)) return true
-      result.isolated = cut
+      const faces = []
+      const localFace = await estimateFaceBoxFromImage(result.display)
+      if (localFace) faces.push(localFace)
+      if (extendLooksLikeClone(faces)) return true
       return false
     }
-    let result = await runOnce(false, `${index}/${total} 몸통 이어그리는 중`)
+    const isBadExtend = async (result) => {
+      if (await isHardFail(result)) return true
+      const localFace = await estimateFaceBoxFromImage(result.display)
+      const faceH = localFace?.h || 0
+      const lower = await regionLumaStats(result.display, 0.68, 0.28)
+      const hasLegs = lower.variance >= 22 || lower.mean < 190
+      if ((await looksLikeHoldingBoard(result.display)) && !hasLegs) return true
+      if (faceH >= 0.36 && !hasLegs) return true
+      try {
+        const cut = await isolateOutpaintedPerson(result.display, result.remoteUrl)
+        if (cut) result.isolated = cut
+      } catch (_) {
+        /* CAST는 display를 씀 */
+      }
+      return false
+    }
+    let result = await runJob(source, `${index}/${total} 서서 전신 그리는 중`)
     if (!result || result.auth) return result
     if (await isBadExtend(result)) {
-      setStatus(`${index}/${total} 몸통이 안 나와 마스크로 다시 이어그립니다…`, false)
-      result = await runOnce(true, `${index}/${total} 몸통 이어그리는 중`)
+      setStatus(`${index}/${total} 전신이 안 나와 상반신으로 다시 세웁니다…`, false)
+      result = await runJob(bustSrc, `${index}/${total} 서서 전신 그리는 중`)
       if (!result || result.auth) return result
     }
-    if (await isBadExtend(result)) {
-      setStatus(
-        `${index}/${total} 몸통을 이어그리지 못했어요. 상반신만 나와 완성으로 치지 않습니다.`,
-        true,
-      )
+    if (!result?.display || (await isHardFail(result))) {
+      setStatus(`${index}/${total} 전신이 안 붙었습니다. 책상·팻말 상반신은 완성으로 치지 않습니다. 1 몸 잇기만 다시 누르세요.`, true)
       return null
     }
     return {
@@ -9700,7 +10732,32 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         )
         return
       }
-      const shown = await displayResult(job.imageUrl)
+      let outUrl = job.imageUrl
+      if (typeof lockPoseFacesOntoResult === 'function') {
+        setStatus('올린 얼굴을 붙이는 중…', false)
+        const photos = images
+          .map((dataUrl, i) => ({
+            dataUrl,
+            gender:
+              i === 0
+                ? gender0 || 'female'
+                : gender1 && gender1 !== 'none'
+                  ? gender1
+                  : 'male',
+          }))
+          .filter((p) => p.dataUrl)
+        try {
+          const locked = await lockPoseFacesOntoResult(displayForCheck, photos, {
+            preferPaste: true,
+            skipPasteFallback: false,
+            hardLimitSec: 16,
+          })
+          if (locked?.url && (locked.locked || 0) > 0) outUrl = locked.url
+        } catch (err) {
+          console.warn('scene body face lock failed', err)
+        }
+      }
+      const shown = await displayResult(outUrl)
       if (!shown) return
       setStatus('완성! 한글 요청으로 장면을 만들었어요. 아래 결과를 확인하세요.', false)
     } catch (error) {
@@ -10092,6 +11149,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
 
   async function lockShortsIdentityOntoFrame(frameUrl, idUrl, opts) {
     if (!frameUrl || !idUrl) return { url: frameUrl, locked: 0, reason: 'missing' }
+    if (typeof deskLockedCast === 'function' && deskLockedCast().sceneInWomanSlot) {
+      return { url: frameUrl, locked: 0, reason: 'scene_cast' }
+    }
     const frame = await ensureStableDataUrl(frameUrl)
     const id = await ensureStableDataUrl(idUrl)
     if (!frame || !id) return { url: frameUrl, locked: 0, reason: 'missing' }
@@ -10118,7 +11178,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   globalThis.lockPoseFacesOntoResult = lockPoseFacesOntoResult
   globalThis.postTaleSceneJob = postTaleSceneJob
   globalThis.extendOneIdBody = extendOneIdBody
+  globalThis.isolateOutpaintedPerson = isolateOutpaintedPerson
+  globalThis.extractIdFacePng = extractIdFacePng
+  globalThis.paintSeamlessStudio = paintSeamlessStudio
+  globalThis.drawFootContactShadow = drawFootContactShadow
   globalThis.detectSceneFaceBoxes = detectSceneFaceBoxes
+  globalThis.estimateFaceBoxFromImage = estimateFaceBoxFromImage
   globalThis.cropHeadFromBox = cropHeadFromBox
   globalThis.ensureStableDataUrl = ensureStableDataUrl
 })()
@@ -10126,10 +11191,26 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
 
 const DESK_WORKS_KEY = 'storymag-desk-works'
 
-function readDeskWorks() {
+function unpackDeskWork(work) {
+  if (!work || typeof work !== 'object') return work
+  const next = { ...work }
+  if (!next.woman && next.womanFace) next.woman = next.womanFace
+  if (!next.man && next.manFace) next.man = next.manFace
+  return next
+}
+
+function packDeskWork(work) {
+  if (!work || typeof work !== 'object') return work
+  const next = { ...work }
+  if (next.woman && next.woman === next.womanFace) next.woman = ''
+  if (next.man && next.man === next.manFace) next.man = ''
+  return next
+}
+
+function readDeskWorksFromLocal() {
   try {
     const raw = JSON.parse(localStorage.getItem(DESK_WORKS_KEY) || '{}')
-    const works = Array.isArray(raw.works) ? raw.works : []
+    const works = Array.isArray(raw.works) ? raw.works.map(unpackDeskWork) : []
     const currentId = typeof raw.currentId === 'string' ? raw.currentId : works[0]?.id || ''
     return { works, currentId }
   } catch {
@@ -10137,13 +11218,100 @@ function readDeskWorks() {
   }
 }
 
-function writeDeskWorks(data) {
-  try {
-    localStorage.setItem(DESK_WORKS_KEY, JSON.stringify(data))
-  } catch (err) {
-    console.warn('desk works save failed', err)
-    throw err
+function mergeDeskStores(primary, secondary) {
+  const map = new Map()
+  for (const work of [...(secondary?.works || []), ...(primary?.works || [])]) {
+    if (!work?.id) continue
+    const prev = map.get(work.id)
+    map.set(work.id, prev ? unpackDeskWork({ ...prev, ...work }) : unpackDeskWork(work))
   }
+  const works = [...map.values()]
+  const currentId = primary?.currentId || secondary?.currentId || works[0]?.id || ''
+  return { works, currentId }
+}
+
+function readDeskWorks() {
+  if (deskMem) {
+    return {
+      works: deskMem.works.map(unpackDeskWork),
+      currentId: deskMem.currentId,
+    }
+  }
+  return readDeskWorksFromLocal()
+}
+
+function writeDeskWorks(data) {
+  const currentId = data?.currentId || ''
+  const works = Array.isArray(data?.works) ? data.works.map(unpackDeskWork) : []
+  deskMem = { works, currentId }
+  void persistDeskKeep(deskMem)
+}
+
+function persistDeskKeep(store) {
+  const payload = {
+    currentId: store.currentId || '',
+    works: (store.works || []).map(unpackDeskWork),
+  }
+  return keepDbSet(DESK_WORKS_KEY, payload)
+    .then(() => {
+      try {
+        localStorage.setItem(
+          DESK_WORKS_KEY,
+          JSON.stringify({
+            currentId: payload.currentId,
+            works: payload.works.map(packDeskWork),
+          }),
+        )
+      } catch (err) {
+        if (isStorageQuotaError(err)) {
+          try {
+            localStorage.removeItem(DESK_WORKS_KEY)
+          } catch {
+            /* IndexedDB에 원본이 있으므로 로컬만 비움 */
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      console.warn('desk works save failed', err)
+      try {
+        localStorage.setItem(
+          DESK_WORKS_KEY,
+          JSON.stringify({
+            currentId: payload.currentId,
+            works: payload.works.map(packDeskWork),
+          }),
+        )
+      } catch {
+        /* 용량이 차도 CAST 메모리는 유지 */
+      }
+    })
+}
+
+async function hydrateStorymagStores() {
+  const localGallery = readGalleryFromLocal()
+  const localDesk = readDeskWorksFromLocal()
+  try {
+    const [idbGallery, idbDesk] = await Promise.all([
+      keepDbGet(GALLERY_STORAGE_KEY),
+      keepDbGet(DESK_WORKS_KEY),
+    ])
+    galleryMem = mergeGalleryLists(
+      Array.isArray(idbGallery) ? idbGallery : [],
+      localGallery,
+    )
+    deskMem = mergeDeskStores(
+      idbDesk && typeof idbDesk === 'object' ? idbDesk : { works: [], currentId: '' },
+      localDesk,
+    )
+  } catch {
+    galleryMem = localGallery
+    deskMem = localDesk
+  }
+  await Promise.all([persistGalleryKeep(galleryMem), persistDeskKeep(deskMem)])
+  renderGallery()
+  if (typeof window.syncDeskWorkUi === 'function') window.syncDeskWorkUi()
+  if (typeof restoreDeskWorkScene === 'function') restoreDeskWorkScene()
 }
 
 function currentDeskWork() {
@@ -10165,12 +11333,102 @@ function ensureDeskWork() {
     title: '작품 1',
     woman: '',
     man: '',
+    womanFace: '',
+    manFace: '',
+    womanFull: false,
+    manFull: false,
     scene: '',
     scenePrompt: '',
     sceneSize: '',
   }
   writeDeskWorks({ works: [work], currentId: work.id })
   return work
+}
+
+function deskIdPhoto(work, role) {
+  if (!work) return ''
+  const face = role === 'man' ? work.manFace : work.womanFace
+  const body = role === 'man' ? work.man : work.woman
+  if (face && !/^data:image\/png/i.test(String(face))) return face
+  return body || face || ''
+}
+
+function deskMwPatch(extra) {
+  return {
+    sourceCast: 'mw',
+    verifiedSourceCast: 'mw',
+    pair: 'mw',
+    peopleCount: 2,
+    ...(extra || {}),
+  }
+}
+
+/** 여 칸 이름과 사진 속 인원·성별을 섞지 않는다. 여여는 통과시키지 않는다. */
+function deskLockedCast(work) {
+  const w = work || currentDeskWork() || {}
+  const bothSlots = Boolean(w.woman && w.man)
+  const stored = Number(w.peopleCount) || 0
+  const peopleCount = Math.max(stored, bothSlots ? 2 : w.woman || w.man ? 1 : 0)
+  const verifiedSourceCast = bothSlots || w.verifiedSourceCast === 'mw' ? 'mw' : ''
+  const sourceCast = peopleCount >= 2 ? verifiedSourceCast : ''
+  const unverified = peopleCount >= 2 && !sourceCast
+  const sourceKind =
+    w.sourceKind === 'scene' || w.sourceKind === 'portrait' || w.sourceKind === 'pair'
+      ? w.sourceKind
+      : peopleCount >= 2 && !bothSlots
+        ? 'scene'
+        : bothSlots
+          ? 'pair'
+          : peopleCount
+            ? 'portrait'
+            : ''
+  const people =
+    sourceCast === 'mw'
+      ? [
+          { index: 0, gender: 'female', action: 'edit' },
+          { index: 1, gender: 'male', action: 'preserve' },
+        ]
+      : peopleCount === 1 && w.man && !w.woman
+        ? [{ index: 0, gender: 'male', action: 'edit' }]
+        : peopleCount === 1
+          ? [{ index: 0, gender: 'female', action: 'edit' }]
+          : []
+  return {
+    sourceKind,
+    peopleCount,
+    sourceCast,
+    verifiedSourceCast: sourceCast,
+    unverified,
+    genders: people.map((p) => p.gender),
+    people,
+    targetPersonIndex: 0,
+    preservePersonIndexes: people.filter((p) => p.action === 'preserve').map((p) => p.index),
+    couple: peopleCount >= 2,
+    hetero: sourceCast === 'mw',
+    sceneInWomanSlot: sourceKind === 'scene' && Boolean(w.woman) && !w.man,
+  }
+}
+
+function deskCastUnverified(work) {
+  const cast = deskLockedCast(work)
+  return cast.peopleCount > 1 && !cast.verifiedSourceCast
+}
+
+function deskFaceRefs(work) {
+  const w = work || currentDeskWork()
+  const cast = deskLockedCast(w)
+  if (cast.sceneInWomanSlot) return []
+  const refs = []
+  const woman = deskIdPhoto(w, 'woman')
+  const man = deskIdPhoto(w, 'man')
+  if (woman && man && woman === man) return []
+  if (woman) refs.push({ dataUrl: woman, gender: 'female', targetPersonIndex: 0 })
+  if (man) refs.push({ dataUrl: man, gender: 'male', targetPersonIndex: 1 })
+  return refs
+}
+
+function deskCastPhotos() {
+  return deskFaceRefs(currentDeskWork()).map((ref) => ({ dataUrl: ref.dataUrl, gender: ref.gender }))
 }
 
 function updateCurrentDeskWork(patch) {
@@ -10188,6 +11446,10 @@ function createDeskWork() {
     title: '작품 1',
     woman: '',
     man: '',
+    womanFace: '',
+    manFace: '',
+    womanFull: false,
+    manFull: false,
     scene: '',
     scenePrompt: '',
     sceneSize: '',
@@ -10204,15 +11466,6 @@ function selectDeskWork(id) {
   return currentDeskWork()
 }
 
-function deskCastPhotos() {
-  const work = currentDeskWork()
-  if (!work) return []
-  const photos = []
-  if (work.woman) photos.push({ dataUrl: work.womanFace || work.woman, gender: 'female' })
-  if (work.man) photos.push({ dataUrl: work.manFace || work.man, gender: 'male' })
-  return photos
-}
-
 async function captureDeskLeadsFromScene(imageUrl) {
   if (!imageUrl || typeof globalThis.detectSceneFaceBoxes !== 'function') {
     return { count: 0 }
@@ -10221,21 +11474,34 @@ async function captureDeskLeadsFromScene(imageUrl) {
     typeof globalThis.ensureStableDataUrl === 'function'
       ? await globalThis.ensureStableDataUrl(imageUrl)
       : imageUrl
-  const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, { guessIfMissing: false })
+  const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, {
+    guessIfMissing: false,
+    mergeIou: 0.82,
+  })
   if (!boxes.length) return { count: 0 }
   const sorted = boxes.slice().sort((a, b) => a.x - b.x)
   const left = await globalThis.cropHeadFromBox(stable, sorted[0])
   const right = sorted[1] ? await globalThis.cropHeadFromBox(stable, sorted[1]) : null
-  const patch = {
-    woman: left.dataUrl,
-    man: right?.dataUrl || '',
-    womanFace: left.dataUrl,
-    manFace: right?.dataUrl || '',
+  if (!right) {
+    const work = currentDeskWork()
+    if (!work?.woman) {
+      updateCurrentDeskWork({ woman: left.dataUrl, womanFace: left.dataUrl, womanFull: false })
+    }
+    return { count: 1 }
   }
-  updateCurrentDeskWork(patch)
-  const two = document.getElementById('desk-two-people')
-  if (two && right) two.checked = true
-  return { count: right ? 2 : 1 }
+  updateCurrentDeskWork(
+    deskMwPatch({
+      woman: left.dataUrl,
+      man: right.dataUrl,
+      womanFace: left.dataUrl,
+      manFace: right.dataUrl,
+      womanFull: false,
+      manFull: false,
+      sourceKind: 'pair',
+    }),
+  )
+  setTwoPeopleChecked(true)
+  return { count: 2 }
 }
 
 function swapDeskCastSlots() {
@@ -10246,10 +11512,12 @@ function swapDeskCastSlots() {
     man: work.woman || '',
     womanFace: work.manFace || work.man || '',
     manFace: work.womanFace || work.woman || '',
+    womanFull: Boolean(work.manFull),
+    manFull: Boolean(work.womanFull),
   })
 }
 
-async function compactDeskScene(src, maxEdge = 1280, quality = 0.8) {
+async function compactDeskScene(src, maxEdge = 1920, quality = 0.92) {
   const img = await loadDeskImage(src)
   const w0 = img.naturalWidth || 1
   const h0 = img.naturalHeight || 1
@@ -10257,7 +11525,10 @@ async function compactDeskScene(src, maxEdge = 1280, quality = 0.8) {
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(w0 * scale))
   canvas.height = Math.max(1, Math.round(h0 * scale))
-  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+  const ctx = canvas.getContext('2d')
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
   return canvas.toDataURL('image/jpeg', quality)
 }
 
@@ -10271,7 +11542,7 @@ async function persistDeskWorkScene(imageUrl) {
       compact = (await globalThis.ensureStableDataUrl(imageUrl)) || imageUrl
     }
     if (String(compact).startsWith('data:image/')) {
-      compact = await compactDeskScene(compact, 1280, 0.8)
+      compact = await compactDeskScene(compact, 1280, 0.86)
     }
   } catch (err) {
     console.warn('desk scene compact failed', err)
@@ -10281,15 +11552,23 @@ async function persistDeskWorkScene(imageUrl) {
     scenePrompt: currentResult.prompt || '',
     sceneSize: currentResult.size || '',
   }
+  const retries = [
+    [960, 0.78],
+    [720, 0.72],
+  ]
   try {
     updateCurrentDeskWork(patch)
   } catch {
-    try {
-      patch.scene = await compactDeskScene(compact, 720, 0.68)
-      updateCurrentDeskWork(patch)
-    } catch (err) {
-      console.warn('desk scene save failed', err)
+    for (const [edge, q] of retries) {
+      try {
+        patch.scene = await compactDeskScene(compact, edge, q)
+        updateCurrentDeskWork(patch)
+        return
+      } catch (_) {
+        /* quota — try smaller */
+      }
     }
+    console.warn('desk scene save failed')
   }
 }
 
@@ -10304,7 +11583,7 @@ function restoreDeskWorkScene() {
     engine: 'desk-scene',
     isShortsEndFrame: true,
   })
-  const lead = work.woman || work.man
+  const lead = deskIdPhoto(work, 'woman') || deskIdPhoto(work, 'man')
   if (lead) shortsFaceIdStill = lead
   return true
 }
@@ -10339,6 +11618,15 @@ function clearDeskWorkCast() {
     updateCurrentDeskWork({
       woman: '',
       man: '',
+      womanFace: '',
+      manFace: '',
+      womanFull: false,
+      manFull: false,
+      peopleCount: 0,
+      sourceKind: '',
+      sourceCast: '',
+      verifiedSourceCast: '',
+      pair: '',
       scene: '',
       scenePrompt: '',
       sceneSize: '',
@@ -10355,27 +11643,49 @@ window.persistDeskWorkScene = persistDeskWorkScene
 window.clearDeskWorkScene = clearDeskWorkScene
 window.clearDeskWorkCast = clearDeskWorkCast
 
+async function stampDeskCastFaces(imageUrl) {
+  if (!imageUrl || typeof applyDeskWorkFaces !== 'function') return imageUrl
+  if (!deskCastPhotos().length) return imageUrl
+  try {
+    const stamped = await applyDeskWorkFaces(imageUrl, {
+      skipFaceCount: deskCastPhotos().length >= 2,
+      preferPaste: false,
+      skipPasteFallback: true,
+      engineOrder: ['insight'],
+      hardLimitSec: 28,
+    })
+    if (stamped?.url && !stamped.skipped && (stamped.locked || 0) > 0) return stamped.url
+  } catch (err) {
+    console.warn('desk cast face stamp failed', err)
+  }
+  return imageUrl
+}
+
 async function applyDeskWorkFaces(imageUrl, opts) {
   const photos =
     Array.isArray(opts?.photos) && opts.photos.length ? opts.photos.filter(Boolean) : deskCastPhotos()
   if (!photos.length || typeof globalThis.lockPoseFacesOntoResult !== 'function') {
     return { url: imageUrl, locked: 0 }
   }
-  if (photos.length === 1 && !opts?.skipFaceCount && typeof countDeskSceneFaces === 'function') {
+  if (photos.length === 1 && typeof countDeskSceneFaces === 'function') {
     const faces = await countDeskSceneFaces(imageUrl)
     if (faces >= 2) {
       return { url: imageUrl, locked: 0, skipped: true, reason: 'extra_person' }
     }
   }
-  const fast = Boolean(opts?.fast)
+  const preferPaste = Boolean(opts?.preferPaste)
+  const fast = Boolean(opts?.fast) && !preferPaste
   const result = await globalThis.lockPoseFacesOntoResult(imageUrl, photos, {
     guessIfMissing: photos.length >= 2 ? false : undefined,
-    hardLimitSec: fast ? 16 : undefined,
-    engineOrder: fast ? ['insight'] : undefined,
-    skipPasteFallback: fast,
-    preferPaste: Boolean(opts?.preferPaste),
+    hardLimitSec: opts?.hardLimitSec ?? (fast || preferPaste ? 16 : undefined),
+    engineOrder: preferPaste ? undefined : fast ? ['insight'] : opts?.engineOrder,
+    skipPasteFallback: preferPaste ? false : fast || Boolean(opts?.skipPasteFallback),
+    preferPaste,
   })
   if (photos.length >= 2 && (result?.locked || 0) < 2) {
+    if ((result?.locked || 0) > 0 && result?.url) {
+      return { url: result.url, locked: result.locked, skipped: false, reason: 'partial_faces' }
+    }
     return { url: imageUrl, locked: 0, skipped: true, reason: result?.reason || 'need_two_faces' }
   }
   return result
@@ -10390,35 +11700,105 @@ function loadDeskImage(src) {
   })
 }
 
-function deskComposeSize() {
+function deskComposeKind() {
   const size = currentResult?.size || document.getElementById('size')?.value || 'story'
-  if (size === 'landscape') return [1280, 832]
-  if (size === 'square') return [1024, 1024]
-  return [832, 1216]
+  if (size === 'landscape') return 'landscape'
+  if (size === 'square') return 'square'
+  return 'story'
+}
+
+function deskComposeSize() {
+  if (globalThis.DeskPipeline?.composeSize) return globalThis.DeskPipeline.composeSize(deskComposeKind())
+  const kind = deskComposeKind()
+  if (kind === 'landscape') return [1920, 1248]
+  if (kind === 'square') return [1536, 1536]
+  return [1248, 1920]
+}
+
+function paintDeskStudio(ctx, cw, ch) {
+  if (typeof globalThis.paintSeamlessStudio === 'function') {
+    globalThis.paintSeamlessStudio(ctx, cw, ch)
+    return
+  }
+  const wall = ctx.createLinearGradient(0, 0, 0, ch)
+  wall.addColorStop(0, '#f4f4f4')
+  wall.addColorStop(0.72, '#ececec')
+  wall.addColorStop(1, '#d8d8d8')
+  ctx.fillStyle = wall
+  ctx.fillRect(0, 0, cw, ch)
+}
+
+function deskSourceSize(src) {
+  return {
+    w: src.naturalWidth || src.width || 1,
+    h: src.naturalHeight || src.height || 1,
+  }
+}
+
+async function deskIsolatePerson(src) {
+  if (typeof globalThis.isolateOutpaintedPerson === 'function') {
+    try {
+      const cut = await globalThis.isolateOutpaintedPerson(src)
+      if (cut && cut.width > 24 && cut.height > 24) return cut
+    } catch (err) {
+      console.warn('desk isolate failed', err)
+    }
+  }
+  const img = await loadDeskImage(src)
+  const canvas = document.createElement('canvas')
+  canvas.width = img.naturalWidth
+  canvas.height = img.naturalHeight
+  canvas.getContext('2d').drawImage(img, 0, 0)
+  return canvas
+}
+
+function deskFitBodyScale(src, cw, ch, heightFactor) {
+  const { w, h } = deskSourceSize(src)
+  const targetH = ch * 0.86 * (heightFactor || 1)
+  return Math.min(targetH / Math.max(h, 1), (cw * 0.4) / Math.max(w, 1), (ch * 0.9) / Math.max(h, 1))
+}
+
+async function composeDeskSoloStill(src) {
+  if (!src) return ''
+  if (globalThis.DeskPipeline?.composePlate) {
+    return globalThis.DeskPipeline.composePlate([{ src, heightFactor: 1 }], deskComposeKind())
+  }
+  return src
 }
 
 async function composeDeskCoupleStill(leftSrc, rightSrc) {
-  const left = await loadDeskImage(leftSrc)
-  const right = await loadDeskImage(rightSrc)
+  if (globalThis.DeskPipeline?.composePlate) {
+    return globalThis.DeskPipeline.composePlate(
+      [
+        { src: leftSrc, heightFactor: 0.89 },
+        { src: rightSrc, heightFactor: 1 },
+      ],
+      deskComposeKind(),
+    )
+  }
+  const [leftCut, rightCut] = await Promise.all([deskIsolatePerson(leftSrc), deskIsolatePerson(rightSrc)])
   const [cw, ch] = deskComposeSize()
   const canvas = document.createElement('canvas')
   canvas.width = cw
   canvas.height = ch
   const ctx = canvas.getContext('2d')
-  ctx.fillStyle = '#b8b4ae'
-  ctx.fillRect(0, 0, cw, ch)
-  const draw = (img, cx, maxW) => {
-    const scale = Math.min((ch * 0.9) / Math.max(img.naturalHeight, 1), maxW / Math.max(img.naturalWidth, 1))
-    const dw = Math.round(img.naturalWidth * scale)
-    const dh = Math.round(img.naturalHeight * scale)
-    ctx.drawImage(img, Math.round(cx - dw / 2), Math.round((ch - dh) / 2), dw, dh)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  paintDeskStudio(ctx, cw, ch)
+  const ground = Math.round(ch * 0.94)
+  const draw = (cut, cx, heightFactor) => {
+    const { w, h } = deskSourceSize(cut)
+    const scale = deskFitBodyScale(cut, cw, ch, heightFactor)
+    const dw = Math.round(w * scale)
+    const dh = Math.round(h * scale)
+    ctx.drawImage(cut, Math.round(cx - dw / 2), ground - dh, dw, dh)
   }
-  draw(left, cw * 0.36, cw * 0.52)
-  draw(right, cw * 0.66, cw * 0.52)
-  return canvas.toDataURL('image/jpeg', 0.92)
+  draw(leftCut, cw * 0.34, 0.89)
+  draw(rightCut, cw * 0.66, 1)
+  return canvas.toDataURL('image/jpeg', 0.95)
 }
 
-async function countDeskSceneFaces(imageUrl) {
+async function countDeskSceneFaces(imageUrl, waitMs = 4000) {
   if (!imageUrl || typeof globalThis.detectSceneFaceBoxes !== 'function') return 0
   const work = Promise.resolve()
     .then(async () => {
@@ -10426,12 +11806,15 @@ async function countDeskSceneFaces(imageUrl) {
         typeof globalThis.ensureStableDataUrl === 'function'
           ? await globalThis.ensureStableDataUrl(imageUrl)
           : imageUrl
-      const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, { guessIfMissing: false })
+      const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, {
+        guessIfMissing: false,
+        mergeIou: 0.82,
+      })
       return Array.isArray(boxes) ? boxes.length : 0
     })
     .catch(() => 0)
   const timed = new Promise((resolve) => {
-    window.setTimeout(() => resolve(0), 4000)
+    window.setTimeout(() => resolve(0), Math.max(500, waitMs))
   })
   return Promise.race([work, timed])
 }
@@ -10452,26 +11835,36 @@ function applyDeskScenePixels(dataUrl, title) {
 
 async function ensureDeskCoupleInScene() {
   const work = currentDeskWork()
-  if (!work?.woman || !work?.man) {
-    return { ok: false, message: '키스·포옹은 여 칸과 남 칸에 모두 사진이 있어야 합니다.' }
+  const scene = currentResult?.imageUrl || work?.scene || work?.woman || work?.man || ''
+  if (!scene) {
+    return { ok: false, message: '지금 장이나 여 칸 사진이 있어야 키스·포옹·지퍼를 찍습니다.' }
   }
-  const scene = currentResult?.imageUrl || work.scene || work.woman
-  const faces = await countDeskSceneFaces(scene)
+  const faces = typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(scene, 8000) : 0
   if (faces >= 2) {
-    try {
-      const stamped = await applyDeskWorkFaces(scene)
-      if (stamped?.url && !stamped.skipped) {
-        if (stamped.url !== scene) applyDeskScenePixels(stamped.url, '주연 얼굴')
-        return { ok: true }
-      }
-    } catch (err) {
-      console.warn('desk couple stamp failed', err)
-    }
+    setTwoPeopleChecked(true)
+    return { ok: true }
   }
-  const left = faces <= 1 ? scene : work.woman
-  const composed = await composeDeskCoupleStill(left, work.man)
-  applyDeskScenePixels(composed, '두 사람 시작')
-  return { ok: true, composed: true }
+  if (work?.woman && work?.man) {
+    const left = faces <= 1 ? scene : work.woman
+    const composed = await composeDeskCoupleStill(left, work.man)
+    applyDeskScenePixels(composed, '두 사람 시작')
+    setTwoPeopleChecked(true)
+    return { ok: true, composed: true }
+  }
+  setTwoPeopleChecked(true)
+  return { ok: true }
+}
+
+function syncDeskStageEmpty() {
+  const empty = document.getElementById('adult-desk-stage-empty')
+  if (!empty) return
+  const assemble = document.getElementById('desk-assemble')
+  if (assemble && !assemble.hidden) {
+    empty.hidden = true
+    return
+  }
+  const hasShot = Boolean(currentResult?.imageUrl || currentResult?.videoUrl)
+  empty.hidden = hasShot
 }
 
 function placeAdultDeskNodes() {
@@ -10485,6 +11878,7 @@ function placeAdultDeskNodes() {
   if (getAppArea() === 'admin') {
     if (stage && result && result.parentElement !== stage) stage.appendChild(result)
     if (keep && gallery && gallery.parentElement !== keep) keep.appendChild(gallery)
+    syncDeskStageEmpty()
   } else {
     if (result && formPanel && result.parentElement !== host) formPanel.after(result)
     if (gallery && gallery.parentElement !== host) host.appendChild(gallery)
@@ -10496,14 +11890,14 @@ function placeAdultDeskNodes() {
 
 function initAdultDesk() {
   const looks = [
-    { id: 'silk', label: '슬립', text: '실크 슬립 원피스만 입은 성인 한국 여성, 노브라, 슬립 한 겹, 브라팬티 세트 아님, 화보 사진' },
-    { id: 'black', label: '검은 드레스', text: '검은 드레스를 입은 성인 한국 여성, 화보 사진' },
-    { id: 'dress', label: '원피스', text: '원피스를 입은 성인 한국 여성, 화보 사진' },
-    { id: 'shirt', label: '셔츠', text: '흰 셔츠만 입은 성인 한국 여성, 화보 사진' },
-    { id: 'jeans', label: '청바지', text: '흰 티와 청바지를 입은 성인 한국 여성, 화보 사진' },
-    { id: 'robe', label: '가운', text: '가운을 걸친 성인 한국 여성, 화보 사진' },
-    { id: 'towel', label: '타올', text: '흰 타올을 두른 성인 한국 여성, 화보 사진' },
-    { id: 'nude', label: '나체', text: '나체의 성인 한국 여성, 화보 사진' },
+    { id: 'silk', label: '슬립', text: '슬립 한 겹' },
+    { id: 'black', label: '검은 드레스', text: '검은 드레스' },
+    { id: 'dress', label: '원피스', text: '원피스' },
+    { id: 'shirt', label: '셔츠', text: '흰 셔츠' },
+    { id: 'jeans', label: '청바지', text: '흰 티와 청바지' },
+    { id: 'robe', label: '가운', text: '가운' },
+    { id: 'towel', label: '타올', text: '흰 타올' },
+    { id: 'nude', label: '나체', text: '나체' },
   ]
   const places = [
     { id: 'hotel', label: '호텔', text: '호텔 룸' },
@@ -10518,6 +11912,7 @@ function initAdultDesk() {
     { id: 'stand', label: '서기', text: '서서' },
     { id: 'sit', label: '앉기', text: '앉아' },
     { id: 'lie', label: '눕기', text: '침대에 누워' },
+    { id: 'hug', label: '포옹', text: '서로 안기게' },
     { id: 'lean', label: '기대기', text: '벽에 기대어' },
     { id: 'window', label: '창가', text: '창가에 서서' },
     { id: 'back', label: '뒤돌아', text: '살짝 뒤돌아보며' },
@@ -10526,8 +11921,12 @@ function initAdultDesk() {
     { id: 'cross', label: '다리꼬기', text: '다리를 꼬고 앉아' },
   ]
   const moves = [
-    { id: 'kiss', label: '키스', motion: '두 사람이 서로 적극적으로 키스한다. 옷은 그대로.' },
-    { id: 'hug', label: '포옹', motion: '두 사람이 서로 안는다. 옷은 그대로.' },
+    {
+      id: 'kiss',
+      label: '키스',
+      motion: '키스. 두 사람이 서로 적극적으로 입술을 맞대고 키스한다. 옷은 그대로. 같은 두 얼굴. 서양인 교체 금지. 원본 구도 유지.',
+    },
+    { id: 'hug', label: '포옹', motion: '두 사람이 가볍게 서로 안는다. 옷은 그대로. 같은 두 얼굴. 원본 구도 유지.' },
     { id: 'come', label: '다가가기', motion: '그가 그녀에게 한 걸음 다가간다. 옷은 그대로.' },
     { id: 'turn', label: '고개', motion: '고개를 천천히 돌린다. 옷은 그대로.' },
     { id: 'walk', label: '걷기', motion: '천천히 몇 걸음 걷는다. 옷은 그대로.' },
@@ -10536,12 +11935,30 @@ function initAdultDesk() {
     {
       id: 'undress',
       label: '벗기',
-      motion: '옷벗김. 혼자.',
-      motionCouple: '옷벗김. 여자는 나체. 남자는 상의만, 바지 유지.',
+      motion: '옷벗김. 혼자. 원본 구도 유지. 클로즈업 금지.',
+      motionCouple:
+        '옷벗김. 여자만 나체. 남자 옷은 유지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.',
     },
-    { id: 'breast', label: '가슴', motion: '혼자. 자신의 가슴을 양손으로 주무른다.' },
-    { id: 'hands', label: '손', motion: '혼자. 자신의 손으로 몸을 만진다.' },
-    { id: 'zipper', label: '지퍼', motion: '여자가 남자 바지 지퍼에 손을 넣는다. 바지는 유지.' },
+    {
+      id: 'breast',
+      label: '가슴',
+      motion:
+        '혼자. 자신의 가슴을 양손으로 주무른다. 지금 옷 유지. 끝까지 양손이 가슴에 있다. 옷 다시 입히기 금지. 원본 구도 유지. 새 사람 금지.',
+      motionCouple: '남자가 여자의 가슴을 만진다. 같은 두 사람. 새 사람 금지. 원본 구도 유지. 클로즈업 금지.',
+    },
+    {
+      id: 'hands',
+      label: '손',
+      motion:
+        '혼자. 왼손은 가슴을, 오른손은 보지를 만진다. 지금 옷 유지. 끝까지 그 손. 옷 다시 입히기 금지. 원본 구도 유지. 새 사람 금지.',
+      motionCouple: '남자가 한 손은 여자의 가슴을, 한 손은 보지를 동시에 만진다. 같은 두 사람. 새 사람 금지.',
+    },
+    { id: 'zipper', label: '지퍼', motion: '여자가 남자 바지 지퍼를 내린다. 바지는 유지.' },
+    {
+      id: 'melt',
+      label: '옷 녹이기',
+      motion: '올린 같은 사람 옷만 고른 옷으로 천천히 녹인다. 얼굴·몸 유지. 새 사람 금지. 원본 구도 유지.',
+    },
   ]
   const packs = { look: looks, place: places, pose: poses, move: moves }
   const MULTI = new Set(['pose', 'move'])
@@ -10551,7 +11968,7 @@ function initAdultDesk() {
     look: 'silk',
     place: 'hotel',
     pose: ['stand'],
-    move: ['undress'],
+    move: [],
     job: 'still',
     len: 15,
   }
@@ -10576,6 +11993,7 @@ function initAdultDesk() {
   }
   const fillAll = () => {
     fill('desk-looks', looks, 'look')
+    fill('desk-looks-move', looks, 'look')
     fill('desk-places', places, 'place')
     fill('desk-poses', poses, 'pose')
     fill('desk-moves', moves, 'move')
@@ -10585,6 +12003,20 @@ function initAdultDesk() {
   const pickText = (list, id) => list.find((x) => x.id === id)?.text || ''
   const pickMotions = () =>
     state.move.map((id) => moves.find((item) => item.id === id)).filter(Boolean)
+
+  const meltMotionForLook = (couple) => {
+    const look = looks.find((item) => item.id === state.look) || looks[0]
+    const clothes = look.label || String(look.text || '')
+    if (look.id === 'nude') {
+      return couple
+        ? '이 사진 같은 두 사람. 여자 옷만 녹여 나체. 남자 옷은 유지. 자세·구도 유지. 남자는 남자로. 여여 금지. 새 사람 금지.'
+        : '이 사진 같은 사람. 지금 옷만 녹여 나체. 얼굴·몸·자세 유지. 새 사람 금지. 서서 다시 찍기 금지.'
+    }
+    if (couple) {
+      return `이 사진 같은 두 사람. 여자 옷만 ${clothes}으로 천천히 녹인다. 남자 옷은 유지. 자세·구도 유지. 새 사람 금지.`
+    }
+    return `이 사진 같은 사람. 지금 옷만 ${clothes}으로 천천히 녹인다. 얼굴·몸·자세 유지. 새 사람 금지. 서서 다시 찍기 금지.`
+  }
 
   const compileStill = () => {
     const look = pickText(looks, state.look)
@@ -10600,7 +12032,7 @@ function initAdultDesk() {
         'ONLY the source man. Do not draw a second adult.',
       ].join(', ')
     }
-    if (work?.woman && work?.man) {
+    if (deskLockedCast(work).couple) {
       const womanLook = look
         .replace(/,?\s*화보 사진/g, '')
         .replace(/성인 한국 여성/, '여자')
@@ -10626,43 +12058,142 @@ function initAdultDesk() {
       .join(', ')
   }
 
-  const compileLookOnly = () => {
+  const compileLookOnly = (coupleInScene = false) => {
     const look = pickText(looks, state.look)
     const work = currentDeskWork()
-    if (work?.woman && work?.man) {
-      return `${look.replace(/,?\s*화보 사진/g, '').replace(/성인 한국 여성/, '여자')}, 남자 옷은 유지. 옷만 녹이기.`
+    const nude = state.look === 'nude'
+    const couple = coupleInScene || deskLockedCast(work).couple
+    if (couple) {
+      return nude
+        ? '원본을 그 자리에서만 고친다. 사람 수·얼굴·포옹·카메라·배경 유지. 사람 추가·교체·복제·성별 바꾸기 금지. 여자만 옷을 녹여 나체. 남자는 보존. 여여·흰 스튜디오 금지.'
+        : `원본을 그 자리에서만 고친다. 사람 수·얼굴·포옹·카메라·배경 유지. 사람 추가·교체·복제·성별 바꾸기 금지. 여자만 옷을 ${look}으로 녹인다. 남자는 보존. 여여·흰 스튜디오 금지.`
     }
-    return `${look}. 올린 몸 위에 옷만 녹이기. 얼굴·몸매 유지.`
+    return nude
+      ? '이 사진 같은 사람. 옷을 녹여 나체가 된다. 얼굴·몸·자세·구도 유지. 새 사람·화보 모델 금지.'
+      : `이 사진 같은 사람. 옷만 ${look}으로 녹인다. 얼굴·몸·자세·구도 유지. 새 사람·화보 모델 금지.`
   }
 
   const compilePlaceOnly = () => {
     const place = pickText(places, state.place)
     const work = currentDeskWork()
-    const couple = Boolean(work?.woman && work?.man)
+    const couple = deskLockedCast(work).couple
     const stand = state.pose.includes('stand')
     const sit = state.pose.includes('sit')
     const lie = state.pose.includes('lie')
+    const hug = state.pose.includes('hug')
     const extras = state.pose
-      .filter((id) => id !== 'stand' && id !== 'sit' && id !== 'lie')
+      .filter((id) => id !== 'stand' && id !== 'sit' && id !== 'lie' && id !== 'hug')
       .map((id) => pickText(poses, id))
       .filter(Boolean)
     const pose = couple
       ? [
-          stand && sit ? '여자는 앉아, 남자는 옆에 서서. 한 장. 둘 다 얼굴이 보임.' : '',
-          stand && !sit && !lie ? '두 사람 모두 서서. 한 장.' : '',
-          sit && !stand && !lie ? '두 사람 모두 앉아. 한 장.' : '',
-          lie ? '두 사람 모두 침대에 누워. 서서 찍기 금지.' : '',
+          hug ? '지금 떨어져 선 두 사람을 가볍게 서로 안기게 한다. 옷은 유지. 둘 다 얼굴이 보임.' : '',
+          !hug && stand && sit ? '선 자세를 바꿔 여자는 앉히고 남자는 옆에 서게 한다. 한 장. 둘 다 얼굴이 보임.' : '',
+          !hug && stand && !sit && !lie ? '두 사람 모두 서서. 한 장.' : '',
+          !hug && sit && !stand && !lie ? '지금 선 자세를 바꿔 두 사람 모두 앉힌다. 소파나 침대에 앉아. 서서 유지 금지.' : '',
+          !hug && lie ? '지금 선 자세를 바꿔 두 사람 모두 침대에 눕힌다. 서서 찍기 금지.' : '',
           ...extras,
         ]
           .filter(Boolean)
           .join(', ')
       : [
-          state.pose.map((id) => pickText(poses, id)).filter(Boolean).join(', '),
-          lie ? '침대에 누운 전신. 서서 찍기 금지.' : '',
+          sit && !lie ? '지금 선 자세를 바꿔 앉힌다. 소파나 침대에 앉아. 서서 유지 금지.' : '',
+          lie ? '지금 선 자세를 바꿔 침대에 눕힌다. 전신. 서서 찍기 금지.' : '',
+          !sit && !lie
+            ? state.pose
+                .filter((id) => id !== 'hug')
+                .map((id) => pickText(poses, id))
+                .filter(Boolean)
+                .join(', ')
+            : extras.join(', '),
         ]
           .filter(Boolean)
           .join(', ')
-    return [place, pose].filter(Boolean).join(', ')
+    return [place, pose, sit || lie || hug ? '얼굴은 같은 사람' : '방은 바꾸고 얼굴은 유지']
+      .filter(Boolean)
+      .join(', ')
+  }
+
+  const setDeskStepOn = (step, on) => {
+    const btn = document.querySelector(`[data-desk-step="${step}"]`)
+    if (!btn) return
+    btn.disabled = !on
+    btn.setAttribute('aria-disabled', on ? 'false' : 'true')
+  }
+
+  const setDeskCardsOn = (rootId, on) => {
+    const root = document.getElementById(rootId)
+    if (!root) return
+    root.classList.toggle('is-off', !on)
+    root.querySelectorAll('[data-desk-pick]').forEach((el) => {
+      el.disabled = !on
+      el.setAttribute('aria-disabled', on ? 'false' : 'true')
+    })
+  }
+
+  let deskGateSeq = 0
+  let deskStillRunning = false
+  const deskLeadIsReady = async (url, markedFull) => {
+    if (!url) return false
+    if (markedFull) return true
+    return !(await deskPhotoNeedsBodyExtend(url))
+  }
+
+  const syncDeskGates = async () => {
+    const seq = ++deskGateSeq
+    const work = currentDeskWork()
+    const hasWoman = Boolean(work?.woman)
+    const hasMan = Boolean(work?.man)
+    const hasCast = hasWoman || hasMan
+    const womanReady = hasWoman ? await deskLeadIsReady(work.woman, work.womanFull) : false
+    const manReady = hasMan ? await deskLeadIsReady(work.man, work.manFull) : false
+    if (seq !== deskGateSeq) return
+    const needBody =
+      (hasWoman && !womanReady) || (hasMan && !manReady)
+    const bothReady = hasWoman && hasMan && womanReady && manReady
+    const oneReady = (hasWoman && womanReady && !hasMan) || (hasMan && manReady && !hasWoman)
+    const scene = currentResult?.imageUrl || work?.scene || ''
+    let coupleScene = Boolean(work?.assembledPair)
+    if (bothReady && scene && !coupleScene && typeof countDeskSceneFaces === 'function') {
+      coupleScene = (await countDeskSceneFaces(scene, 6000)) >= 2
+      if (seq !== deskGateSeq) return
+    }
+    const canBody = hasCast
+    const canTogether = bothReady
+    const canOutfit = hasCast
+    const canMove = oneReady || coupleScene || (hasCast && !needBody && Boolean(scene) && !bothReady)
+    if (deskStillRunning) return
+    setDeskStepOn('body', canBody)
+    setDeskStepOn('together', canTogether)
+    setDeskStepOn('look', canOutfit)
+    setDeskStepOn('place', canOutfit)
+    const togetherBtn = document.querySelector('[data-desk-step="together"]')
+    if (togetherBtn) togetherBtn.hidden = !hasWoman || !hasMan
+    const assembleOpen = document.getElementById('desk-assemble-open')
+    if (assembleOpen) {
+      const canAssemble = hasCast && !needBody
+      assembleOpen.hidden = state.job !== 'still'
+      assembleOpen.disabled = !canAssemble
+      assembleOpen.setAttribute('aria-disabled', canAssemble ? 'false' : 'true')
+    }
+    const stillPacks = document.getElementById('desk-still-packs')
+    if (stillPacks) stillPacks.classList.toggle('is-off', !canOutfit)
+    setDeskCardsOn('desk-looks', canOutfit)
+    setDeskCardsOn('desk-places', canOutfit)
+    setDeskCardsOn('desk-poses', canOutfit)
+    setDeskCardsOn('desk-looks-move', canMove)
+    setDeskCardsOn('desk-moves', canMove)
+    const videoPacks = document.getElementById('desk-video-packs')
+    if (videoPacks) videoPacks.classList.toggle('is-off', !canMove)
+    const run = document.getElementById('desk-run')
+    if (run && state.job === 'video') run.disabled = !canMove
+    const hint = document.getElementById('desk-still-hint')
+    if (hint) {
+      if (!hasCast) hint.textContent = '여 칸이나 남 칸에 사진을 넣으세요. 그다음 1 몸 잇기만 됩니다.'
+      else if (needBody) hint.textContent = '일반 사진은 바로 3 옷 녹이기. 증명·상반신만 1 몸 잇기를 먼저 하면 전신으로 녹입니다.'
+      else if (bothReady && !coupleScene) hint.textContent = '2 한 장면은 오려서 키를 맞춥니다. 얼굴을 다시 그리지 않습니다.'
+      else hint.textContent = '3은 옷만, 4는 방만. 얼굴은 붙인 픽셀을 유지합니다.'
+    }
   }
 
   const syncJobUi = () => {
@@ -10675,19 +12206,29 @@ function initAdultDesk() {
     if (stillPacks) stillPacks.hidden = state.job !== 'still'
     if (stillSteps) stillSteps.hidden = state.job !== 'still'
     if (videoPacks) videoPacks.hidden = state.job !== 'video'
+    const assembleOpen = document.getElementById('desk-assemble-open')
+    if (assembleOpen) assembleOpen.hidden = state.job !== 'still'
+    const assemblePanel = document.getElementById('desk-assemble')
+    if (assemblePanel && state.job !== 'still') {
+      assemblePanel.hidden = true
+      syncDeskStageEmpty()
+    }
     const run = document.getElementById('desk-run')
     if (run) {
       run.hidden = state.job !== 'video'
       if (state.job === 'video') {
-        run.textContent =
-          state.move.length > 1 ? `움직이기 · 이번 ${moves.find((m) => m.id === state.move[0])?.label || '1편'}` : '움직이기'
+        const labels = state.move
+          .map((id) => moves.find((item) => item.id === id)?.label)
+          .filter(Boolean)
+        run.textContent = labels.length ? `움직이기 · ${labels.join('·')}` : '움직이기'
       }
     }
+    void syncDeskGates()
   }
 
   const syncCastSlot = (role) => {
     const work = currentDeskWork()
-    const url = work?.[role] || ''
+    const url = deskIdPhoto(work, role) || work?.[role] || ''
     const img = document.getElementById(`desk-cast-${role}-img`)
     const empty = document.getElementById(`desk-cast-${role}-empty`)
     if (!img || !empty) return
@@ -10718,8 +12259,8 @@ function initAdultDesk() {
     }
     syncCastSlot('woman')
     syncCastSlot('man')
-    dropSoloCoupleMoves()
     syncTwoPeopleForMoves()
+    void syncDeskGates()
   }
 
   document.getElementById('adult-desk')?.addEventListener('click', (event) => {
@@ -10757,6 +12298,24 @@ function initAdultDesk() {
           } else if (key === 'move' && list.length >= MOVE_MAX) {
             setFormStatus(`움직임은 한 번에 ${MOVE_MAX}개까지입니다. 고른 걸 끄고 다시 고르세요.`, true)
           } else {
+            if (key === 'pose' && (id === 'stand' || id === 'sit' || id === 'lie' || id === 'hug')) {
+              ;['stand', 'sit', 'lie', 'hug'].forEach((drop) => {
+                if (drop === id) return
+                const dropAt = list.indexOf(drop)
+                if (dropAt >= 0) list.splice(dropAt, 1)
+              })
+            }
+            if (key === 'move') {
+              if (id === 'melt') {
+                ;['undress', 'breast', 'hands'].forEach((drop) => {
+                  const dropAt = list.indexOf(drop)
+                  if (dropAt >= 0) list.splice(dropAt, 1)
+                })
+              } else if (id === 'undress' || id === 'breast' || id === 'hands') {
+                const dropAt = list.indexOf('melt')
+                if (dropAt >= 0) list.splice(dropAt, 1)
+              }
+            }
             list.push(id)
           }
         } else {
@@ -10773,7 +12332,15 @@ function initAdultDesk() {
           packs[key],
           key,
         )
+        if (key === 'look') fill('desk-looks-move', looks, 'look')
         syncJobUi()
+        if (state.job === 'still' && (key === 'look' || key === 'place' || key === 'pose')) {
+          if (document.getElementById('desk-still-packs')?.classList.contains('is-off')) {
+            setFormStatus('여 칸이나 남 칸에 사진을 넣은 뒤 옷을 고르세요.', true)
+            return
+          }
+          void runDeskStillCard(key)
+        }
       }
     }
     const workChip = event.target.closest('[data-desk-work]')
@@ -10786,13 +12353,60 @@ function initAdultDesk() {
 
   let castTarget = 'woman'
   const applyDeskCastFile = async (role, file) => {
-    if (!file || !String(file.type || '').startsWith('image/')) {
+    if (!isImageFileLike(file)) {
       setFormStatus('이미지 파일만 넣을 수 있습니다.', true)
       return
     }
     try {
-      const dataUrl = await prepareImageDataUrl(file, 720)
-      updateCurrentDeskWork({ [role]: dataUrl, [`${role}Face`]: dataUrl })
+      let dataUrl = await prepareImageDataUrl(file, 1280)
+      try {
+        dataUrl = await compactDeskScene(dataUrl, 1280, 0.86)
+      } catch {
+        /* use prepared jpeg */
+      }
+      updateCurrentDeskWork({
+        [role]: dataUrl,
+        [`${role}Face`]: dataUrl,
+        [`${role}Full`]: false,
+        pair: role === 'man' ? 'mw' : currentDeskWork()?.man ? currentDeskWork()?.pair || 'mw' : currentDeskWork()?.pair,
+      })
+      const faces =
+        typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(dataUrl, 8000) : 0
+      if (faces >= 2) {
+        updateCurrentDeskWork(
+          deskMwPatch({
+            [`${role}Full`]: true,
+            sourceKind: 'scene',
+          }),
+        )
+        setTwoPeopleChecked(true)
+        showResult(dataUrl, '주연 사진', false, {
+          accepted: true,
+          prompt: currentResult.prompt || '',
+          size: sizeField?.value || 'story',
+          genMode: 'fashion',
+          engine: 'cast',
+        })
+        shortsFaceIdStill = dataUrl
+        syncWorkUi()
+        setFormStatus(
+          '한 장에 두 사람이 있습니다. 남녀로 보고, 여자 옷만 녹입니다. 남자는 남자로 둡니다.',
+          false,
+        )
+        return
+      }
+      const both = Boolean(currentDeskWork()?.woman && currentDeskWork()?.man)
+      updateCurrentDeskWork(
+        both
+          ? deskMwPatch({ sourceKind: 'pair' })
+          : {
+              peopleCount: 1,
+              sourceKind: 'portrait',
+              sourceCast: '',
+              verifiedSourceCast: '',
+              pair: '',
+            },
+      )
       syncWorkUi()
       setFormStatus(role === 'man' ? '남 얼굴을 작품에 넣었습니다.' : '여 얼굴을 작품에 넣었습니다.', false)
     } catch (err) {
@@ -10800,7 +12414,7 @@ function initAdultDesk() {
     }
   }
   const applyDeskSceneFile = async (file) => {
-    if (!file || !String(file.type || '').startsWith('image/')) {
+    if (!isImageFileLike(file)) {
       setFormStatus('이미지 파일만 넣을 수 있습니다.', true)
       return
     }
@@ -10824,40 +12438,135 @@ function initAdultDesk() {
   window.__deskApplyCastFile = applyDeskCastFile
   window.__deskApplySceneFile = applyDeskSceneFile
 
-  const wireDeskDrop = (el, onFile) => {
+  const nextDeskCastRole = () => {
+    const work = currentDeskWork()
+    if (window.__deskPasteCast === 'woman' || window.__deskPasteCast === 'man') return window.__deskPasteCast
+    if (!work?.woman) return 'woman'
+    if (!work?.man) return 'man'
+    return window.__deskLastCast === 'man' ? 'man' : 'woman'
+  }
+
+  window.__deskTakeCastFiles = async (files, preferredRole) => {
+    const list = (files || []).filter(isImageFileLike).slice(0, 2)
+    if (!list.length) {
+      setFormStatus('이미지 파일만 넣을 수 있습니다. Ctrl+V 또는 칸에 끌어다 놓으세요.', true)
+      return
+    }
+    if (list.length >= 2) {
+      await applyDeskCastFile('woman', list[0])
+      await applyDeskCastFile('man', list[1])
+      return
+    }
+    const role = preferredRole === 'man' || preferredRole === 'woman' ? preferredRole : nextDeskCastRole()
+    window.__deskLastCast = role
+    window.__deskPasteCast = role
+    await applyDeskCastFile(role, list[0])
+  }
+
+  const applyDeskClipboard = async (target) => {
+    window.__deskLastCast = target === 'scene' ? window.__deskLastCast : target
+    if (target === 'woman' || target === 'man') window.__deskPasteCast = target
+    try {
+      const file = await readClipboardImageFile()
+      if (!file) {
+        setFormStatus('복사한 사진을 Ctrl+V로 붙이거나, 칸에 끌어다 놓으세요.', true)
+        return
+      }
+      if (target === 'scene') {
+        window.__deskLastCast = ''
+        await applyDeskSceneFile(file)
+        return
+      }
+      await applyDeskCastFile(target, file)
+    } catch {
+      setFormStatus('복사한 사진을 Ctrl+V로 붙이거나, 칸에 끌어다 놓으세요.', true)
+    }
+  }
+  document.getElementById('desk-cast-paste-w')?.addEventListener('click', () => {
+    void applyDeskClipboard('woman')
+  })
+  document.getElementById('desk-cast-paste-m')?.addEventListener('click', () => {
+    void applyDeskClipboard('man')
+  })
+  document.getElementById('desk-scene-paste')?.addEventListener('click', () => {
+    void applyDeskClipboard('scene')
+  })
+
+  const wireDeskDrop = (el, onFiles) => {
     if (!el) return
+    el.addEventListener('dragenter', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      el.classList.add('is-drag')
+    })
     el.addEventListener('dragover', (event) => {
       event.preventDefault()
       event.stopPropagation()
       if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
       el.classList.add('is-drag')
     })
-    el.addEventListener('dragleave', () => el.classList.remove('is-drag'))
+    el.addEventListener('dragleave', (event) => {
+      if (el.contains(event.relatedTarget)) return
+      el.classList.remove('is-drag')
+    })
     el.addEventListener('drop', (event) => {
       event.preventDefault()
       event.stopPropagation()
       el.classList.remove('is-drag')
-      const file = pickImageFileFromDataTransfer(event.dataTransfer)
-      if (file) void onFile(file)
+      const files = pickImageFilesFromDataTransfer(event.dataTransfer)
+      if (files.length) void onFiles(files)
     })
   }
 
   document.getElementById('desk-cast-woman')?.addEventListener('pointerenter', () => {
     window.__deskPasteCast = 'woman'
+    window.__deskLastCast = 'woman'
   })
   document.getElementById('desk-cast-man')?.addEventListener('pointerenter', () => {
     window.__deskPasteCast = 'man'
+    window.__deskLastCast = 'man'
+  })
+  document.getElementById('adult-desk-stage')?.addEventListener('pointerenter', () => {
+    window.__deskPasteCast = ''
   })
   document.querySelector('.adult-desk__person')?.addEventListener('pointerleave', () => {
     window.__deskPasteCast = ''
   })
+  ;['desk-cast-woman', 'desk-cast-man'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('paste', (event) => {
+      const files = pickImageFilesFromDataTransfer(event.clipboardData)
+      if (!files.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      const role = id === 'desk-cast-man' ? 'man' : 'woman'
+      window.__deskLastCast = role
+      window.__deskPasteCast = role
+      void window.__deskTakeCastFiles(files, role)
+    })
+  })
+  ;['desk-cast-paste-w', 'desk-cast-paste-m'].forEach((id) => {
+    document.getElementById(id)?.addEventListener('paste', (event) => {
+      const files = pickImageFilesFromDataTransfer(event.clipboardData)
+      if (!files.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      const role = id.endsWith('-m') ? 'man' : 'woman'
+      window.__deskLastCast = role
+      window.__deskPasteCast = role
+      void window.__deskTakeCastFiles(files, role)
+    })
+  })
 
   document.getElementById('desk-cast-woman')?.addEventListener('click', () => {
     castTarget = 'woman'
+    window.__deskLastCast = 'woman'
+    window.__deskPasteCast = 'woman'
     document.getElementById('desk-cast-input')?.click()
   })
   document.getElementById('desk-cast-man')?.addEventListener('click', () => {
     castTarget = 'man'
+    window.__deskLastCast = 'man'
+    window.__deskPasteCast = 'man'
     document.getElementById('desk-cast-input')?.click()
   })
   document.getElementById('desk-cast-input')?.addEventListener('change', async (event) => {
@@ -10866,9 +12575,17 @@ function initAdultDesk() {
     if (!file) return
     await applyDeskCastFile(castTarget, file)
   })
-  wireDeskDrop(document.getElementById('desk-cast-woman'), (file) => applyDeskCastFile('woman', file))
-  wireDeskDrop(document.getElementById('desk-cast-man'), (file) => applyDeskCastFile('man', file))
-  wireDeskDrop(document.querySelector('.adult-desk__person'), (file) => applyDeskSceneFile(file))
+  wireDeskDrop(document.getElementById('desk-cast-woman'), (files) => window.__deskTakeCastFiles(files, 'woman'))
+  wireDeskDrop(document.getElementById('desk-cast-man'), (files) => window.__deskTakeCastFiles(files, 'man'))
+  wireDeskDrop(document.querySelector('.desk-cast'), (files) => window.__deskTakeCastFiles(files))
+  wireDeskDrop(document.getElementById('desk-cast-paste-w'), (files) => window.__deskTakeCastFiles(files, 'woman'))
+  wireDeskDrop(document.getElementById('desk-cast-paste-m'), (files) => window.__deskTakeCastFiles(files, 'man'))
+  wireDeskDrop(document.querySelector('.adult-desk__person'), (files) => {
+    const hit = window.__deskPasteCast === 'man' ? 'man' : window.__deskPasteCast === 'woman' ? 'woman' : ''
+    void window.__deskTakeCastFiles(files, hit)
+  })
+  wireDeskDrop(document.getElementById('desk-scene-paste'), (files) => applyDeskSceneFile(files[0]))
+  wireDeskDrop(document.getElementById('desk-scene-upload'), (files) => applyDeskSceneFile(files[0]))
   document.getElementById('desk-work-new')?.addEventListener('click', () => {
     createDeskWork()
     clearDeskStage()
@@ -10933,27 +12650,14 @@ function initAdultDesk() {
     else syncAdminWorkspaceUi()
   })
 
-  const deskHasTwoLeads = () => {
-    const work = currentDeskWork()
-    return Boolean(work?.woman && work?.man)
-  }
+  const deskHasTwoLeads = () => deskLockedCast(currentDeskWork()).couple
 
   const dropSoloCoupleMoves = () => {
-    if (deskHasTwoLeads()) return []
-    const coupleIds = new Set(['kiss', 'hug', 'come', 'zipper'])
-    const dropped = state.move.filter((id) => coupleIds.has(id))
-    if (!dropped.length) return []
-    state.move = state.move.filter((id) => !coupleIds.has(id))
-    fill('desk-moves', moves, 'move')
-    syncJobUi()
-    return dropped
+    return []
   }
 
   const setTwoPeopleBoxes = (on) => {
-    const deskTwo = document.getElementById('desk-two-people')
-    const animateTwo = document.getElementById('animate-two-people')
-    if (deskTwo) deskTwo.checked = on
-    if (animateTwo) animateTwo.checked = on
+    if (on) setTwoPeopleChecked(true)
   }
 
   const syncTwoPeopleForMoves = () => {
@@ -10975,7 +12679,7 @@ function initAdultDesk() {
       genMode: 'fashion',
       engine: 'cast',
     })
-    shortsFaceIdStill = url
+    shortsFaceIdStill = deskIdPhoto(work, 'woman') || deskIdPhoto(work, 'man') || url
     return Boolean(currentResult.imageUrl)
   }
 
@@ -10989,61 +12693,116 @@ function initAdultDesk() {
       setFormStatus('여 칸이나 남 칸에 사진을 넣거나, 장면 사진을 올리세요.', true)
       return
     }
-    const droppedIds = dropSoloCoupleMoves()
-    picked = pickMotions()
-    if (droppedIds.length && !picked.length) {
-      setFormStatus('키스·포옹·지퍼는 남 칸에도 사람이 있어야 합니다. 여 사진만 있으면 벗기·가슴·손을 고르세요.', true)
-      return
-    }
-    if (droppedIds.length) {
-      const labels = droppedIds.map((id) => moves.find((item) => item.id === id)?.label || id).join('·')
-      setFormStatus(`한 사람 사진이라 ${labels}는 빼고 찍습니다.`, false)
-    }
     if (animatePanel) animatePanel.hidden = false
     const item = picked[0]
-    const rest = picked.slice(1)
-    setFormStatus(`${item.label} 한 편 찍는 중…`, false)
+    const rest = []
+    const labels = picked.map((one) => one.label).join('·')
+    setFormStatus(`${labels} 한 편 찍는 중…`, false)
     const coupleIds = new Set(['kiss', 'hug', 'come', 'zipper'])
-    if (coupleIds.has(item.id)) {
-      setFormStatus('남 칸 사람을 장면에 붙이는 중…', false)
+    if (picked.some((one) => coupleIds.has(one.id))) {
+      setFormStatus('지금 장 그대로 찍습니다…', false)
       const ready = await ensureDeskCoupleInScene()
       if (!ready.ok) {
-        setFormStatus(ready.message || '키스할 두 사람이 장면에 없습니다.', true)
+        setFormStatus(ready.message || '지금 장이 없습니다.', true)
         return
       }
       setTwoPeopleBoxes(true)
     }
-    const sourceFaceCount = await countDeskSceneFaces(currentResult.imageUrl)
-    const coupleInStill = sourceFaceCount >= 2
-    setTwoPeopleBoxes(coupleInStill)
+    const sourceFaceCount = await countDeskSceneFaces(currentResult.imageUrl, 8000)
+    const coupleInStill =
+      sourceFaceCount >= 2 ||
+      Boolean(document.getElementById('desk-two-people')?.checked) ||
+      picked.some((one) => coupleIds.has(one.id))
+    if (coupleInStill) setTwoPeopleBoxes(true)
     const savedPrompt = currentResult.prompt
     const alreadyNude = /이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude/i.test(savedPrompt || '')
     const coupleMove = coupleInStill
-    let motion = coupleMove && item.motionCouple ? item.motionCouple : item.motion
-    if (item.id === 'undress' && state.len <= 5 && !coupleMove) {
+    const onlyUndress = picked.length === 1 && picked[0].id === 'undress'
+    let motion = picked
+      .map((one) => {
+        if (one.id === 'melt') return meltMotionForLook(coupleMove)
+        return coupleMove && one.motionCouple ? one.motionCouple : one.motion
+      })
+      .join(' ')
+    if (onlyUndress && state.len <= 5 && !coupleMove) {
       motion = currentResult.isShortsEndFrame
         ? '옷벗김. 혼자. 다음 겹만.'
         : '옷벗김. 혼자. 한 겹만.'
-    } else if (alreadyNude && item.id === 'undress') {
-      motion = coupleMove
-        ? '옷벗김. 여자는 나체. 남자는 상의만, 바지 유지.'
-        : '옷벗김. 혼자.'
+    } else if (onlyUndress && coupleMove) {
+      motion = alreadyNude
+        ? '이미 나체 유지. 여자 나체, 남자 옷은 유지. 같은 두 얼굴.'
+        : '옷벗김. 여자만 나체. 남자 옷은 유지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.'
+    } else if (!coupleMove && picked.some((one) => one.id === 'undress') && picked.some((one) => one.id === 'breast' || one.id === 'hands')) {
+      motion = picked.some((one) => one.id === 'hands')
+        ? '옷벗김 후 왼손은 가슴을, 오른손은 보지를 만진다. 혼자. 원본 구도 유지. 새 사람 금지.'
+        : '옷벗김 후 자신의 가슴을 양손으로 주무른다. 혼자. 원본 구도 유지. 새 사람 금지.'
+    } else if (alreadyNude && onlyUndress) {
+      motion = '옷벗김. 혼자.'
     } else if (alreadyNude && !/이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude/i.test(motion)) {
       motion = `이미 완전 나체 유지(브라·팬티 되살림 금지). ${motion}`
     }
-    setFormStatus(`${item.label} 한 편 찍는 중…`, false)
+    const work = currentDeskWork()
+    const castBody = work?.woman || work?.man || ''
+    const meltOnly = picked.some((one) => one.id === 'melt')
+    if (castBody && !coupleInStill && (currentResult.isShortsEndFrame || meltOnly)) {
+      currentResult.imageUrl = castBody
+      if (String(castBody).startsWith('data:')) currentResult.imageDataUrl = castBody
+    }
+    if (coupleInStill && deskLockedCast(currentDeskWork()).sourceCast !== 'mw') {
+      setFormStatus('남녀 두 사람 구성을 확인하지 못해 쇼츠를 중단했습니다.', true)
+      setAnimateBusy(false)
+      return
+    }
+    setFormStatus(`${labels} 한 편 찍는 중…`, false)
+    const prevVideoUrl =
+      currentResult.isShortsEndFrame && currentResult.videoUrl ? currentResult.videoUrl : ''
     const clip = await requestAnimate({
       motionOverride: motion,
       durationSec: state.len,
-      persist: true,
-      statusPrefix: `[${item.label}] `,
-      sourcePeople: coupleInStill ? 2 : 1,
+      persist: !prevVideoUrl,
+      keepBusy: Boolean(prevVideoUrl),
+      statusPrefix: `[${labels}] `,
+        sourcePeople: coupleInStill ? 2 : 1,
+        sourceCast: coupleInStill ? deskLockedCast(currentDeskWork()).sourceCast || undefined : undefined,
     })
     if (!clip.ok || !clip.videoUrl) {
       setAnimateBusy(false)
       return
     }
-    const undressed = alreadyNude || item.id === 'undress' || /옷벗김|undress|strip/i.test(item.motion)
+    if (prevVideoUrl) {
+      setFormStatus('이전 편 뒤에 이번 편을 이어붙이는 중…', false)
+      setAnimateStatus('이전 편 뒤에 이번 편을 이어붙이는 중…', false)
+      try {
+        await appendAndPersistDeskShorts(
+          prevVideoUrl,
+          clip.videoUrl,
+          savedPrompt,
+          `${labels}`,
+        )
+        setFormStatus('이전 편과 이번 편을 한 파일로 저장했습니다.', false)
+      } catch (mergeErr) {
+        const draft = buildYoutubeShortsDraft({
+          prompt: savedPrompt,
+          motion: motion,
+          genMode: currentResult.genMode,
+        })
+        updateGalleryItemVideo(currentResult.itemId, clip.videoUrl, draft)
+        persistImageToPermanentStorage(clip.videoUrl).then((permanentUrl) => {
+          if (!permanentUrl) return
+          applyPersistedVideoUrl(currentResult.itemId, clip.videoUrl, permanentUrl)
+        })
+        setFormStatus(
+          `이번 편은 됐지만 이어붙이기에 실패했습니다: ${
+            mergeErr instanceof Error ? mergeErr.message : String(mergeErr)
+          }`,
+          true,
+        )
+      } finally {
+        setAnimateBusy(false)
+      }
+    }
+    const undressed =
+      alreadyNude || picked.some((one) => one.id === 'undress') || /옷벗김|undress|strip/i.test(motion)
     let endFrame = null
     try {
       endFrame = await captureVideoEndFrame(clip.videoUrl)
@@ -11051,27 +12810,56 @@ function initAdultDesk() {
       console.warn('desk next-cut frame failed', err)
     }
     if (endFrame?.startsWith('data:image/')) {
-      if (!coupleInStill) {
-        const faces = await countDeskSceneFaces(endFrame)
-        if (faces >= 2) {
-          setFormStatus(
-            `${item.label} 영상에 없는 남자가 생겼습니다. 가운데 장은 바꾸지 않았습니다. 이 편은 쓰지 말고 다시 벗기를 누르세요.`,
-            true,
-          )
-          state.move = rest.map((next) => next.id)
-          fill('desk-moves', moves, 'move')
-          syncJobUi()
-          return
-        }
+      const endFaces = await countDeskSceneFaces(endFrame, 8000)
+      if (!coupleInStill && endFaces >= 2) {
+        setFormStatus(
+          `${labels} 영상에 없는 남자가 생겼습니다. 가운데 장은 바꾸지 않았습니다. 이 편은 쓰지 말고 다시 누르세요.`,
+          true,
+        )
+        state.move = rest.map((next) => next.id)
+        fill('desk-moves', moves, 'move')
+        syncJobUi()
+        return
       }
+      if (coupleInStill && endFaces < 2) {
+        setFormStatus(
+          `${labels} 끝이 두 사람을 잃었습니다. 가운데는 바꾸지 않았습니다. 남은 동작은 두 사람이 보이는 장에서 누르세요.`,
+          true,
+        )
+        state.move = rest.map((next) => next.id)
+        fill('desk-moves', moves, 'move')
+        syncJobUi()
+        return
+      }
+      const work = currentDeskWork()
+      const cast = deskLockedCast(work)
       const stampPhotos = coupleInStill
-        ? deskCastPhotos()
-        : [currentDeskWork()?.woman || deskCastPhotos()[0]].filter(Boolean)
-      if (stampPhotos.length) {
-        setFormStatus('주연 얼굴을 다시 붙이는 중…', false)
+        ? cast.sceneInWomanSlot
+          ? []
+          : [
+              work?.woman ? { dataUrl: work.womanFace || work.woman, gender: 'female' } : null,
+              work?.man ? { dataUrl: work.manFace || work.man, gender: 'male' } : null,
+            ].filter(Boolean)
+        : [
+            {
+              dataUrl: work?.womanFace || work?.woman || deskCastPhotos()[0]?.dataUrl,
+              gender: 'female',
+            },
+          ].filter((p) => p.dataUrl)
+      if (stampPhotos.length >= 2 || (stampPhotos.length === 1 && !coupleInStill)) {
+        setFormStatus('주연 얼굴을 맞추는 중…', false)
         try {
-          const stamped = await applyDeskWorkFaces(endFrame, { fast: true, photos: stampPhotos })
-          if (stamped?.url && !stamped.skipped) endFrame = stamped.url
+          const stamped = await applyDeskWorkFaces(endFrame, {
+            photos: stampPhotos,
+            skipFaceCount: true,
+            preferPaste: false,
+            skipPasteFallback: true,
+            engineOrder: ['insight'],
+            hardLimitSec: 28,
+          })
+          if (stamped?.url && !stamped.skipped && (stamped.locked || 0) > 0 && stamped.method !== 'paste') {
+            endFrame = stamped.url
+          }
         } catch (err) {
           console.warn('desk next-cut face stamp failed', err)
         }
@@ -11079,9 +12867,9 @@ function initAdultDesk() {
       showResult(endFrame, '다음 컷 시작', false, {
         size: currentResult.size,
         itemId: currentResult.itemId,
-        videoUrl: clip.videoUrl,
+        videoUrl: currentResult.videoUrl || clip.videoUrl,
         prompt:
-          item.id === 'undress' && state.len <= 5
+          onlyUndress && state.len <= 5
             ? '한 겹만 녹임. 아래 옷은 원본 유지.'
             : undressed
               ? `${savedPrompt || ''} · already nude continuity. If panty remains, melt it off now.`.trim()
@@ -11094,7 +12882,7 @@ function initAdultDesk() {
       })
       currentResult.imageDataUrl = endFrame
       currentResult.imageUrl = endFrame
-      const lead = currentDeskWork()?.woman || currentDeskWork()?.man
+      const lead = deskIdPhoto(currentDeskWork(), 'woman') || deskIdPhoto(currentDeskWork(), 'man')
       if (lead) shortsFaceIdStill = lead
     }
     state.move = rest.map((next) => next.id)
@@ -11102,11 +12890,11 @@ function initAdultDesk() {
     syncJobUi()
     if (rest.length) {
       setFormStatus(
-        `${item.label} 한 편이 끝났습니다. 남은 ${rest.map((next) => next.label).join('·')}는 다시 누르면 이어집니다.`,
+        `${labels} 한 편이 끝났습니다. 남은 ${rest.map((next) => next.label).join('·')}를 다시 누르면 이 편 뒤에 이어 붙여 저장합니다.`,
         false,
       )
-    } else {
-      setFormStatus(`${item.label} 한 편이 끝났습니다.`, false)
+    } else if (!prevVideoUrl) {
+      setFormStatus(`${labels} 한 편이 끝났습니다.`, false)
     }
   }
 
@@ -11119,6 +12907,45 @@ function initAdultDesk() {
       img.src = url
     })
 
+  const deskBandPersonRatio = (url, y0n, y1n) =>
+    new Promise((resolve) => {
+      if (!url) {
+        resolve(0)
+        return
+      }
+      const img = new Image()
+      if (/^https?:\/\//i.test(url)) img.crossOrigin = 'anonymous'
+      img.onload = () => {
+        try {
+          const w = Math.min(64, img.naturalWidth)
+          const h = Math.min(64, img.naturalHeight)
+          if (!w || !h) {
+            resolve(0)
+            return
+          }
+          const c = document.createElement('canvas')
+          c.width = w
+          c.height = h
+          const ctx = c.getContext('2d', { willReadFrequently: true })
+          ctx.drawImage(img, 0, 0, w, h)
+          const y0 = Math.max(0, Math.floor(h * y0n))
+          const y1 = Math.min(h, Math.floor(h * y1n))
+          const hh = Math.max(1, y1 - y0)
+          const { data } = ctx.getImageData(0, y0, w, hh)
+          let person = 0
+          const n = data.length / 4
+          for (let i = 0; i < data.length; i += 4) {
+            if (data[i] < 228 || data[i + 1] < 228 || data[i + 2] < 228) person += 1
+          }
+          resolve(person / Math.max(n, 1))
+        } catch {
+          resolve(0)
+        }
+      }
+      img.onerror = () => resolve(0)
+      img.src = url
+    })
+
   const deskPhotoNeedsBodyExtend = async (dataUrl) => {
     if (!dataUrl) return false
     const stable =
@@ -11127,30 +12954,40 @@ function initAdultDesk() {
         : dataUrl
     const size = await deskImageSize(stable)
     const ratio = size.h / Math.max(size.w, 1)
-    if (typeof globalThis.detectSceneFaceBoxes !== 'function') return ratio < 1.55
-    const boxes = await globalThis.detectSceneFaceBoxes(stable, 1, { guessIfMissing: false })
-    if (!boxes.length) return ratio < 1.6
-    const box = boxes.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0]
-    const area = box.w * box.h
-    const faceBottom = box.y + box.h
-    if (box.h >= 0.2) return true
-    if (area >= 0.05) return true
-    if (faceBottom < 0.58 && box.h >= 0.14) return true
-    if (ratio < 1.45 && box.h >= 0.12) return true
-    return false
+    let face = null
+    if (typeof globalThis.estimateFaceBoxFromImage === 'function') {
+      face = await globalThis.estimateFaceBoxFromImage(stable)
+    }
+    if (!face && typeof globalThis.detectSceneFaceBoxes === 'function') {
+      const boxes = await globalThis.detectSceneFaceBoxes(stable, 1, {
+        guessIfMissing: false,
+        localOnly: true,
+      })
+      if (boxes.length) face = boxes.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0]
+    }
+    if (face) {
+      const faceCy = face.y + face.h / 2
+      if (faceCy >= 0.42 || face.y + face.h >= 0.55) return true
+    }
+    const feet = await deskBandPersonRatio(stable, 0.82, 0.99)
+    if (face && feet >= 0.035 && face.y < 0.28 && face.h < 0.32) return false
+    if (face && face.h >= 0.22 && feet < 0.03) return true
+    const lower = await deskBandPersonRatio(stable, 0.62, 0.98)
+    if (lower < 0.04) return true
+    if (!face) return ratio < 1.45
+    return face.h >= 0.16 && feet < 0.03
   }
 
-  const ensureDeskLeadBody = async (src, gender, label) => {
-    let body = src
-    if (typeof compactDeskScene === 'function') {
-      body = await compactDeskScene(src, 1280, 0.86)
-    }
-    if (!(await deskPhotoNeedsBodyExtend(body))) return body
-    if (typeof globalThis.extendOneIdBody !== 'function') return body
-    setFormStatus(`${label} 증명사진으로 반신·전신을 그리는 중…`, false)
-    const ext = await globalThis.extendOneIdBody(body, gender, 1, 1)
-    if (!ext?.display) return body
-    if (await deskPhotoNeedsBodyExtend(ext.display)) return body
+  const ensureDeskLeadBody = async (src, gender, label, force, idPhoto) => {
+    if (!src) return src
+    if (!force && !(await deskPhotoNeedsBodyExtend(src))) return src
+    if (typeof globalThis.extendOneIdBody !== 'function') return src
+    setFormStatus(`${label} 사진을 서서 전신으로 잇는 중…`, false)
+    const faceSrc = idPhoto || src
+    const body =
+      typeof compactDeskScene === 'function' ? await compactDeskScene(src, 1920, 0.92) : src
+    const ext = await globalThis.extendOneIdBody(body, gender, 1, 1, { faceSrc })
+    if (ext?.auth || !ext?.display) return src
     return ext.display
   }
 
@@ -11177,6 +13014,8 @@ function initAdultDesk() {
       if (img.src !== imageUrl) img.src = imageUrl
     }
     stage?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    const id = deskIdPhoto(currentDeskWork(), 'woman') || deskIdPhoto(currentDeskWork(), 'man')
+    if (id) shortsFaceIdStill = id
   }
 
   const stabilizeDeskStill = async (imageUrl) => {
@@ -11191,27 +13030,58 @@ function initAdultDesk() {
     }
   }
 
-  const runDeskKontextStep = async (images, description, deskStep, title, doneText) => {
+  const runDeskKontextStep = async (images, description, deskStep, title, doneText, opts) => {
     if (typeof globalThis.postTaleSceneJob !== 'function') {
       setFormStatus('장면 엔진을 불러오지 못했습니다.', true)
       return
     }
     const work = currentDeskWork()
+    const cast = deskLockedCast(work)
     let sourcePeople = images.length >= 2 ? 2 : 1
-    if (
-      sourcePeople === 1 &&
-      images[0] &&
-      work?.woman &&
-      work?.man &&
-      typeof countDeskSceneFaces === 'function'
-    ) {
-      const n = await countDeskSceneFaces(images[0])
-      if (n >= 2) sourcePeople = 2
+    const deskTwo = Boolean(document.getElementById('desk-two-people')?.checked)
+    if (deskTwo || (work?.woman && work?.man) || cast.couple) sourcePeople = 2
+    if (sourcePeople === 1 && images[0] && typeof countDeskSceneFaces === 'function') {
+      const n = await countDeskSceneFaces(images[0], 8000)
+      if (n >= 2) {
+        sourcePeople = 2
+        setTwoPeopleChecked(true)
+        updateCurrentDeskWork({
+          peopleCount: 2,
+          sourceKind: work?.man ? 'pair' : 'scene',
+          ...(work?.verifiedSourceCast === 'mw' || (work?.woman && work?.man)
+            ? {}
+            : { sourceCast: '', verifiedSourceCast: '' }),
+        })
+      }
     }
     const adultStill =
       state.look === 'nude' ||
       state.look === 'silk' ||
-      /나체|누드|nude|naked|전라|슬립|slip|실크|노브라|란제리|lingerie/i.test(String(description || ''))
+      /나체|누드|nude|naked|전라|슬립|slip|실크|노브라|란제리|lingerie|옷벗|벗기|가슴|breast|보지|주무르/i.test(
+        String(description || ''),
+      )
+    let aspectRatio = '9:16'
+    try {
+      const dim = images[0] && typeof deskImageSize === 'function' ? await deskImageSize(images[0]) : null
+      if (dim?.w && dim?.h) {
+        if (dim.w > dim.h * 1.08) aspectRatio = '16:9'
+        else if (Math.abs(dim.w - dim.h) / Math.max(dim.w, 1) < 0.08) aspectRatio = '1:1'
+        else aspectRatio = '9:16'
+      }
+    } catch (_) {
+      /* 원본 비율을 못 읽으면 세로 유지 */
+    }
+    const liveCast = deskLockedCast(currentDeskWork())
+    if (sourcePeople >= 2 && liveCast.sourceCast !== 'mw') {
+      setFormStatus('남녀 두 사람 구성을 확인하지 못해 편집을 중단했습니다.', true)
+      return
+    }
+    const gender0 = liveCast.genders[0]
+    const gender1 = liveCast.genders[1]
+    if (sourcePeople >= 2 && (gender0 !== 'female' || gender1 !== 'male')) {
+      setFormStatus('남녀 두 사람 구성을 확인하지 못해 편집을 중단했습니다.', true)
+      return
+    }
     setFormStatus(`${title} 그리는 중…`, false)
     const job = await globalThis.postTaleSceneJob(
       {
@@ -11221,10 +13091,13 @@ function initAdultDesk() {
         description,
         photoreal: true,
         refKind: 'body',
-        aspectRatio: sourcePeople >= 2 ? '16:9' : '9:16',
-        gender0: 'female',
+        aspectRatio,
+        gender0,
+        gender1,
         sourcePeople,
+        sourceCast: liveCast.sourceCast || undefined,
         adultStill,
+        forceReplicate: Boolean(opts?.forceReplicate),
       },
       title,
       160,
@@ -11240,22 +13113,41 @@ function initAdultDesk() {
       return
     }
     if (typeof isNearlyBlackImage === 'function' && (await isNearlyBlackImage(stable))) {
-      setFormStatus('엔진이 빈 장을 냈습니다. 같은 버튼을 다시 누르세요.', true)
+      const sitLiePlace =
+        deskStep === 'place' && /앉아|앉히|앉힌|앉혀|눕|누워|포옹|안기게|서로 안/i.test(String(description || ''))
+      if (!opts?.forceReplicate && ((adultStill && (deskStep === 'cut' || deskStep === 'look')) || sitLiePlace)) {
+        setFormStatus('검열 빈 장이라 같은 사람으로 한 번만 다시 그립니다…', false)
+        return runDeskKontextStep(images, description, deskStep, title, doneText, { forceReplicate: true })
+      }
+      setFormStatus(
+        deskStep === 'cut'
+          ? '엔진이 빈 장을 냈습니다. 다음 컷만 다시 누르세요. 몸 잇기는 누르지 마세요.'
+          : deskStep === 'look'
+            ? '엔진이 빈 장을 냈습니다. 가운데는 여 칸 그대로입니다. 옷 녹이기만 다시 누르세요.'
+            : '엔진이 빈 장을 냈습니다. 이어서 다시 보내지 않습니다. 증명사진이면 1 몸 잇기만 누르세요.',
+        true,
+      )
       return
     }
     let shown = stable
     if (typeof applyDeskWorkFaces === 'function' && deskCastPhotos().length) {
       setFormStatus('제공한 얼굴을 붙이는 중…', false)
       try {
-        const stamped = await applyDeskWorkFaces(stable, {
-          skipFaceCount: true,
-          preferPaste: adultStill,
+        let stamped = await applyDeskWorkFaces(stable, {
+          skipFaceCount: deskCastPhotos().length >= 2,
+          skipPasteFallback: true,
+          preferPaste: false,
+          engineOrder: ['insight'],
+          hardLimitSec: 28,
         })
-        if (stamped?.url && !stamped.skipped && ((stamped.locked || 0) > 0 || stamped.url !== stable)) {
+        if (stamped?.url && !stamped.skipped && (stamped.locked || 0) > 0) {
           shown = stamped.url
+        } else if (deskStep === 'look') {
+          shown = stable
         }
       } catch (err) {
         console.warn('desk still face stamp failed', err)
+        if (deskStep === 'look') shown = stable
       }
     }
     showDeskStepResult(shown, title, description)
@@ -11278,11 +13170,16 @@ function initAdultDesk() {
       return
     }
     setFormStatus(doneText, false)
+    void syncDeskGates()
   }
 
   const setDeskStillBusy = (busy) => {
     document.querySelectorAll('[data-desk-step]').forEach((btn) => {
       btn.disabled = busy
+    })
+    document.querySelectorAll('#desk-still-packs [data-desk-pick], #desk-video-packs [data-desk-pick]').forEach((el) => {
+      el.style.pointerEvents = busy ? 'none' : ''
+      if (busy) el.disabled = true
     })
     const deskRun = document.getElementById('desk-run')
     if (generateButton) generateButton.disabled = busy
@@ -11291,9 +13188,24 @@ function initAdultDesk() {
     if (nextCut && typeof getAppArea === 'function' && getAppArea() === 'admin') {
       nextCut.disabled = busy
     }
+    if (!busy) void syncDeskGates()
   }
 
   const deskSceneBase = () => currentResult?.imageUrl || currentDeskWork()?.scene || ''
+
+  const deskLooksStandingFull = async (dataUrl) => {
+    if (!dataUrl) return false
+    const stable =
+      typeof globalThis.ensureStableDataUrl === 'function'
+        ? await globalThis.ensureStableDataUrl(dataUrl)
+        : dataUrl
+    const face =
+      typeof globalThis.estimateFaceBoxFromImage === 'function'
+        ? await globalThis.estimateFaceBoxFromImage(stable)
+        : null
+    const feet = await deskBandPersonRatio(stable, 0.82, 0.99)
+    return Boolean(face && face.y < 0.22 && face.h < 0.16 && feet >= 0.04)
+  }
 
   const runDeskStepBody = async () => {
     const work = currentDeskWork()
@@ -11305,64 +13217,121 @@ function initAdultDesk() {
     let last = ''
     let did = 0
     let failed = false
-    if (work.woman && !work.womanFace) patch.womanFace = work.woman
-    if (work.man && !work.manFace) patch.manFace = work.man
+    let coupleScene = false
     if (work.woman) {
-      const before = work.woman
-      const needed = await deskPhotoNeedsBodyExtend(before)
-      const next = await ensureDeskLeadBody(work.woman, 'female', '여')
-      const stillBust = next ? await deskPhotoNeedsBodyExtend(next) : true
-      if (needed && next && !stillBust) {
-        patch.woman = next
+      const id = deskIdPhoto(work, 'woman')
+      const faces =
+        id && typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(id, 8000) : 0
+      if (faces >= 2) {
+        if (id && !/^data:image\/png/i.test(id)) patch.womanFace = id
+        patch.woman = id
+        patch.womanFull = true
+        patch.peopleCount = 2
+        patch.sourceKind = 'scene'
+        if (work.verifiedSourceCast === 'mw') {
+          Object.assign(patch, deskMwPatch())
+        } else {
+          patch.sourceCast = ''
+          patch.verifiedSourceCast = ''
+        }
         did += 1
-        last = next
+        last = id
+        coupleScene = true
+        setTwoPeopleChecked(true)
       } else {
-        last = next || before
-        if (needed && stillBust) failed = true
+        if (id && !/^data:image\/png/i.test(id)) patch.womanFace = id
+        const next = await ensureDeskLeadBody(id, 'female', '여', true, id)
+        if (next && next !== id) {
+          patch.woman = next
+          patch.womanFull = true
+          did += 1
+          last = next
+        } else {
+          last = work.woman
+          failed = true
+        }
       }
     }
     if (work.man) {
-      const before = work.man
-      const needed = await deskPhotoNeedsBodyExtend(before)
-      const next = await ensureDeskLeadBody(work.man, 'male', '남')
-      const stillBust = next ? await deskPhotoNeedsBodyExtend(next) : true
-      if (needed && next && !stillBust) {
+      const id = deskIdPhoto(work, 'man')
+      if (id && !/^data:image\/png/i.test(id)) patch.manFace = id
+      const next = await ensureDeskLeadBody(id, 'male', '남', true, id)
+      if (next && next !== id) {
         patch.man = next
+        patch.manFull = true
         did += 1
         last = next
       } else {
-        last = next || last
-        if (needed && stillBust) failed = true
+        last = last || work.man
+        failed = true
       }
     }
-    if (Object.keys(patch).length) updateCurrentDeskWork(patch)
+    if (Object.keys(patch).length) {
+      if (work.verifiedSourceCast === 'mw') Object.assign(patch, deskMwPatch(patch))
+      if (work.peopleCount && !patch.peopleCount) patch.peopleCount = work.peopleCount
+      if (work.sourceKind && !patch.sourceKind) patch.sourceKind = work.sourceKind
+      updateCurrentDeskWork(patch)
+    }
     syncWorkUi()
     if (failed && !did) {
-      setFormStatus('전신이 안 붙었습니다. 1 몸 잇기를 다시 누르세요.', true)
+      setFormStatus('전신이 안 붙었습니다. 옷·자세는 보내지 않았습니다. 1 몸 잇기만 다시 누르세요.', true)
+      return
+    }
+    if (failed && did) {
+      setFormStatus('한쪽만 이었고 한쪽은 실패했습니다. 실패한 칸만 1 몸 잇기를 다시 누르세요.', true)
+      if (last) showDeskStepResult(last, '몸 잇기', '같은 얼굴로 이은 전신')
+      return
+    }
+    const couple = Boolean(work.woman && work.man)
+    if (coupleScene && !work.man) {
+      showDeskStepResult(last, '두 사람 장면', compileLookOnly(true))
+      setFormStatus('여 칸이 남녀 한 장입니다. 몸을 따로 잇지 않습니다. 이 장으로 여자 옷만 고르세요.', false)
       return
     }
     if (!did) {
       if (last) showDeskStepResult(last, '이미 전신', compileStill())
-      setFormStatus('이미 반신·전신입니다. 다음 걸음(한 장면 또는 옷 녹이기)으로 가세요.', false)
+      setFormStatus(
+        couple ? '이미 반신·전신입니다. 다음 걸음은 한 장면입니다.' : '이미 반신·전신입니다. 이 몸으로 옷을 고르세요.',
+        false,
+      )
       return
     }
-    let shown = last
-    if (typeof applyDeskWorkFaces === 'function' && deskCastPhotos().length) {
-      setFormStatus('제공한 얼굴을 붙이는 중…', false)
-      try {
-        const stamped = await applyDeskWorkFaces(last, { skipFaceCount: true, preferPaste: true })
-        if (stamped?.url && !stamped.skipped && (stamped.locked || 0) > 0) shown = stamped.url
-      } catch (err) {
-        console.warn('desk body face stamp failed', err)
-      }
-    }
-    showDeskStepResult(shown, '몸 잇기', '같은 얼굴로 이은 전신')
+    showDeskStepResult(last, '몸 잇기', '같은 얼굴로 이은 전신')
     setFormStatus(
-      work.woman && work.man
-        ? '몸을 이었습니다. 다음 걸음은 한 장면입니다.'
-        : '몸을 이었습니다. 다음 걸음은 옷 녹이기입니다.',
+      couple
+        ? '몸을 이었습니다. 여·남 칸 원본은 그대로입니다. 다음 걸음은 한 장면입니다.'
+        : '몸을 이었습니다. 여 칸 원본은 그대로입니다. 이 몸으로 옷을 고르세요.',
       false,
     )
+  }
+
+  const ensureDeskCoupleScene = async () => {
+    const work = currentDeskWork()
+    if (!work?.woman || !work?.man) return ''
+    const womanNeed = await deskPhotoNeedsBodyExtend(work.woman)
+    const manNeed = await deskPhotoNeedsBodyExtend(work.man)
+    if (womanNeed || manNeed) {
+      setFormStatus('먼저 1 몸 잇기를 누르세요. 한 장면은 몸을 이은 뒤에만 보냅니다.', true)
+      return ''
+    }
+    if (sizeField && !sizeField.dataset.userPicked) sizeField.value = 'landscape'
+    setFormStatus('배경을 지우고 전신 키를 맞춰 한 장에 붙이는 중…', false)
+    const composed =
+      typeof composeDeskCoupleStill === 'function'
+        ? await composeDeskCoupleStill(work.woman, work.man)
+        : ''
+    if (!composed) {
+      setFormStatus('한 장에 붙이지 못했습니다. PNG 조립으로 다시 넣어 보세요.', true)
+      return ''
+    }
+    if (typeof updateCurrentDeskWork === 'function') {
+      updateCurrentDeskWork({ assembledPair: true })
+    }
+    showDeskStepResult(composed, '한 장면', '같은 두 사람. 배경 지우고 전신 키를 맞춰 붙임.')
+    setTwoPeopleChecked(true)
+    void syncDeskGates()
+    setFormStatus('한 장에 붙였습니다. 얼굴은 그대로입니다. 옷·장소는 이 장으로 고르세요.', false)
+    return deskSceneBase()
   }
 
   const runDeskStepTogether = async () => {
@@ -11371,81 +13340,121 @@ function initAdultDesk() {
       setFormStatus('한 장면은 여 칸과 남 칸에 사진이 둘 다 있어야 합니다.', true)
       return
     }
-    const woman = await ensureDeskLeadBody(work.woman, 'female', '여')
-    const man = await ensureDeskLeadBody(work.man, 'male', '남')
-    if (woman !== work.woman || man !== work.man) {
-      updateCurrentDeskWork({
-        woman: woman !== work.woman ? woman : work.woman,
-        man: man !== work.man ? man : work.man,
-      })
-      syncWorkUi()
-    }
-    if (sizeField && !sizeField.dataset.userPicked) sizeField.value = 'landscape'
-    await runDeskKontextStep(
-      [woman, man],
-      '두 주연이 함께 있는 한 장면. 각자 옷은 유지.',
-      'together',
-      '한 장면',
-      '두 사람이 한 장에 있습니다. 다음 걸음은 옷 녹이기입니다.',
-    )
+    await ensureDeskCoupleScene()
   }
 
   const runDeskStepLook = async () => {
     const work = currentDeskWork()
-    if (work?.woman && !work.womanFace) updateCurrentDeskWork({ womanFace: work.woman })
-    if (work?.man && !work.manFace) updateCurrentDeskWork({ manFace: work.man })
-    const scene = deskSceneBase()
-    const description = compileLookOnly()
-    if (descriptionField) descriptionField.value = description
-    const images = []
-    if (scene) {
-      images.push(
-        typeof compactDeskScene === 'function' ? await compactDeskScene(scene, 1280, 0.86) : scene,
-      )
-    } else if (work?.woman || work?.man) {
-      const lead = work.woman || work.man
-      images.push(await ensureDeskLeadBody(lead, work.woman ? 'female' : 'male', work.woman ? '여' : '남'))
-    } else {
-      setFormStatus('여 칸이나 지금 장이 있어야 옷을 녹입니다.', true)
+    let lead = deskSceneBase() || work?.woman || work?.man || ''
+    const faces =
+      lead && typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(lead, 8000) : 0
+    const couple = Boolean(work?.woman && work?.man) || faces >= 2
+    if (faces >= 2) {
+      updateCurrentDeskWork({
+        peopleCount: 2,
+        sourceKind: work?.man ? 'pair' : 'scene',
+        ...(work?.verifiedSourceCast === 'mw' || (work?.woman && work?.man)
+          ? {}
+          : { sourceCast: '', verifiedSourceCast: '' }),
+      })
+    }
+    if (couple && deskLockedCast(currentDeskWork()).sourceCast !== 'mw') {
+      setFormStatus('남녀 두 사람 구성을 확인하지 못해 편집을 중단했습니다.', true)
       return
     }
+    if (couple) setTwoPeopleChecked(true)
+    const description = compileLookOnly(couple)
+    if (descriptionField) descriptionField.value = description
+    if (work?.woman && work?.man && !work?.assembledPair) {
+      const together = await ensureDeskCoupleScene()
+      if (together) lead = together
+    }
+    if (!lead) {
+      setFormStatus(
+        couple
+          ? '여 칸이나 가운데 장이 있어야 옷을 녹입니다.'
+          : '여 칸에 사진을 넣으세요. 그 사진 위에만 옷을 녹입니다.',
+        true,
+      )
+      return
+    }
+    const images = [
+      typeof compactDeskScene === 'function' ? await compactDeskScene(lead, 1920, 0.92) : lead,
+    ]
     await runDeskKontextStep(
       images,
       description,
       'look',
       '옷 녹이기',
-      '옷을 녹였습니다. 다음 걸음은 장소·자세입니다.',
+      '옷을 녹였습니다. 다음 걸음은 장소입니다.',
     )
   }
 
   const runDeskStepPlace = async () => {
-    const scene = deskSceneBase()
+    const work = currentDeskWork()
+    let scene = deskSceneBase()
+    if (work?.woman && work?.man) {
+      const womanNeed = await deskPhotoNeedsBodyExtend(work.woman)
+      const manNeed = await deskPhotoNeedsBodyExtend(work.man)
+      if (womanNeed || manNeed) {
+        setFormStatus('먼저 1 몸 잇기를 누르세요. 장소는 몸을 이은 뒤에만 보냅니다.', true)
+        return
+      }
+      if (!work.assembledPair || !scene) {
+        scene = await ensureDeskCoupleScene()
+        if (!scene) return
+      }
+    }
     if (!scene) {
-      setFormStatus('먼저 몸 잇기·한 장면·옷 녹이기 중 하나로 장을 만드세요.', true)
+      const lead = work?.woman || work?.man
+      if (!lead) {
+        setFormStatus('여 칸에 증명사진을 넣으세요. 몸을 이은 뒤 그 몸으로 자세를 잡습니다.', true)
+        return
+      }
+      if (await deskPhotoNeedsBodyExtend(lead)) {
+        setFormStatus('먼저 1 몸 잇기를 누르세요. 자세는 몸을 이은 뒤에만 보냅니다.', true)
+        return
+      }
+      scene = lead
+    } else if (!work?.assembledPair && (await deskPhotoNeedsBodyExtend(scene))) {
+      setFormStatus('먼저 1 몸 잇기를 누르세요. 증명사진으로는 장소를 보내지 않습니다.', true)
       return
     }
     const description = compilePlaceOnly()
     if (descriptionField) descriptionField.value = description
     const compact =
-      typeof compactDeskScene === 'function' ? await compactDeskScene(scene, 1280, 0.86) : scene
+      typeof compactDeskScene === 'function' ? await compactDeskScene(scene, 1920, 0.92) : scene
     await runDeskKontextStep(
       [compact],
       description,
       'place',
-      '장소·자세',
-      '장소와 자세를 바꿨습니다. 움직이려면 움직이기를 누르세요.',
+      state.pose.includes('sit') || state.pose.includes('lie') || state.pose.includes('hug')
+        ? '앉아·눕기·포옹'
+        : '장소',
+      state.pose.includes('sit') || state.pose.includes('lie') || state.pose.includes('hug')
+        ? '자세를 바꿨습니다. 얼굴은 다시 붙입니다.'
+        : '장소를 바꿨습니다. 움직이려면 움직이기를 누르세요.',
     )
   }
 
-  const compileNextCut = () => {
+  const compileNextCut = (coupleInScene = false) => {
     if (state.job === 'video') {
-      const item = pickMotions()[0]
-      if (!item) return ''
-      const couple = deskHasTwoLeads()
-      const motion = couple && item.motionCouple ? item.motionCouple : item.motion
-      return `다음 컷 정지 화보. ${motion} 올린 사람과 같은 얼굴·몸. 같은 장소.`
+      const pickedRaw = pickMotions()
+      if (!pickedRaw.length) return ''
+      const poseOnly = pickedRaw.filter((item) => item.id !== 'undress')
+      const picked = poseOnly.length ? poseOnly : pickedRaw
+      const couple =
+        coupleInScene ||
+        deskHasTwoLeads() ||
+        Boolean(document.getElementById('desk-two-people')?.checked)
+      const motion = picked
+        .map((item) => (couple && item.motionCouple ? item.motionCouple : item.motion))
+        .join(' ')
+      return couple
+        ? `다음 컷 정지 화보. ${motion} 올린 두 사람과 같은 얼굴·몸. 같은 장소. 원본 구도 유지. 클로즈업 금지.`
+        : `다음 컷 정지 화보. ${motion} 올린 사람과 같은 얼굴·몸. 같은 장소. 원본 구도 유지. 클로즈업 금지.`
     }
-    return [compileLookOnly(), compilePlaceOnly(), '다음 컷 정지 화보. 같은 사람.']
+    return [compilePlaceOnly(), '같은 사람. 같은 옷. 원본 구도 유지. 클로즈업 금지.']
       .filter(Boolean)
       .join(' ')
   }
@@ -11464,8 +13473,14 @@ function initAdultDesk() {
       setFormStatus('먼저 지금 장이 있어야 다음 컷을 그립니다.', true)
       return
     }
-    const coupleIds = new Set(['kiss', 'hug', 'come', 'zipper'])
+    const coupleIds = new Set(['kiss', 'hug', 'come', 'zipper', 'undress', 'hands', 'breast'])
+    let coupleInScene = deskHasTwoLeads() || Boolean(document.getElementById('desk-two-people')?.checked)
     if (state.job === 'video') {
+      const earlyFaces = await countDeskSceneFaces(currentResult.imageUrl, 8000)
+      if (earlyFaces >= 2) {
+        setTwoPeopleBoxes(true)
+        coupleInScene = true
+      }
       dropSoloCoupleMoves()
       const item = pickMotions()[0]
       if (!item) {
@@ -11473,7 +13488,7 @@ function initAdultDesk() {
         return
       }
     }
-    const description = compileNextCut()
+    const description = compileNextCut(coupleInScene)
     if (!description) {
       setFormStatus('다음 컷에 쓸 동작이나 장소가 없습니다.', true)
       return
@@ -11483,7 +13498,7 @@ function initAdultDesk() {
       if (state.job === 'video') {
         const item = pickMotions()[0]
         if (item && coupleIds.has(item.id)) {
-          setFormStatus('남 칸 사람을 장면에 붙이는 중…', false)
+          setFormStatus('두 사람이 장면에 있는지 확인하는 중…', false)
           const ready = await ensureDeskCoupleInScene()
           if (!ready.ok) {
             setFormStatus(ready.message || '두 사람이 장면에 없습니다.', true)
@@ -11494,7 +13509,7 @@ function initAdultDesk() {
       if (descriptionField) descriptionField.value = description
       const scene = deskSceneBase()
       const compact =
-        typeof compactDeskScene === 'function' ? await compactDeskScene(scene, 1280, 0.86) : scene
+        typeof compactDeskScene === 'function' ? await compactDeskScene(scene, 1920, 0.92) : scene
       const item = state.job === 'video' ? pickMotions()[0] : null
       await runDeskKontextStep(
         [compact],
@@ -11512,7 +13527,48 @@ function initAdultDesk() {
     }
   }
 
+  async function runDeskStillCard(key) {
+    if (deskStillRunning) {
+      setFormStatus('지금 그리는 중이니 끝날 때까지 기다리세요.', true)
+      return
+    }
+    const work = currentDeskWork()
+    const scene = deskSceneBase()
+    const lead = work?.woman || work?.man
+    if (!scene && !lead) {
+      setFormStatus('여 칸에 사진을 넣으세요.', true)
+      return
+    }
+    if (scene && (await deskPhotoNeedsBodyExtend(scene))) {
+      setFormStatus('먼저 1 몸 잇기를 누르세요. 옷·자세는 몸을 이은 뒤에만 보냅니다.', true)
+      return
+    }
+    if (!scene) {
+      if (await deskPhotoNeedsBodyExtend(lead)) {
+        setFormStatus('먼저 1 몸 잇기를 누르세요. 옷·자세는 몸을 이은 뒤에만 보냅니다.', true)
+        return
+      }
+    }
+    if (key === 'look') return runDeskStep('look')
+    if (work?.woman && work?.man) {
+      let faces = 0
+      if (scene && typeof countDeskSceneFaces === 'function') {
+        faces = await countDeskSceneFaces(scene, 8000)
+      }
+      if (!scene || faces < 2) {
+        setFormStatus('두 사람이면 먼저 2 한 장면을 누르세요.', true)
+        return
+      }
+    }
+    return runDeskStep('place')
+  }
+
   const runDeskStep = async (step) => {
+    if (deskStillRunning) {
+      setFormStatus('지금 그리는 중이니 끝날 때까지 기다리세요.', true)
+      return
+    }
+    deskStillRunning = true
     setDeskStillBusy(true)
     try {
       if (step === 'body') await runDeskStepBody()
@@ -11522,6 +13578,7 @@ function initAdultDesk() {
     } catch (err) {
       setFormStatus(`걸음 실패: ${err instanceof Error ? err.message : String(err)}`, true)
     } finally {
+      deskStillRunning = false
       setDeskStillBusy(false)
     }
   }
@@ -11543,6 +13600,246 @@ function initAdultDesk() {
     void runDeskNextCut()
   })
 
+  const initDeskAssemble = () => {
+    const panel = document.getElementById('desk-assemble')
+    const canvas = document.getElementById('desk-assemble-canvas')
+    const input = document.getElementById('desk-assemble-input')
+    const sizeBtn = document.getElementById('desk-assemble-size')
+    if (!panel || !canvas) return
+    const ctx = canvas.getContext('2d')
+    const layers = []
+    let selected = -1
+    let landscape = false
+    let drag = null
+    const dims = () => (landscape ? [1920, 1248] : [1248, 1920])
+    const paint = () => {
+      const [cw, ch] = dims()
+      if (canvas.width !== cw || canvas.height !== ch) {
+        canvas.width = cw
+        canvas.height = ch
+      }
+      paintDeskStudio(ctx, cw, ch)
+      layers.forEach((layer, i) => {
+        ctx.drawImage(layer.img, layer.x, layer.y, layer.w, layer.h)
+        if (i === selected) {
+          ctx.strokeStyle = '#e8b4ff'
+          ctx.lineWidth = 3
+          ctx.strokeRect(layer.x, layer.y, layer.w, layer.h)
+        }
+      })
+    }
+    const addFromUrl = async (url) => {
+      if (!url) {
+        setFormStatus('넣을 사진이 없습니다.', true)
+        return
+      }
+      if (layers.length >= 3) {
+        setFormStatus('세 장까지입니다. 하나를 빼고 넣으세요.', true)
+        return
+      }
+      const img = await deskIsolatePerson(url)
+      const [cw, ch] = dims()
+      const { w: iw, h: ih } = deskSourceSize(img)
+      const first = layers[0]
+      let scale = first
+        ? first.h / Math.max(ih, 1)
+        : deskFitBodyScale(img, cw, ch, 1)
+      scale = Math.min(scale, (ch * 0.88) / Math.max(ih, 1), (cw * 0.46) / Math.max(iw, 1))
+      const w = Math.round(iw * scale)
+      const h = Math.round(ih * scale)
+      const slots = [0.28, 0.72, 0.5]
+      layers.push({
+        img,
+        x: Math.round(cw * (slots[layers.length] || 0.5) - w / 2),
+        y: Math.round(ch * 0.93 - h),
+        w,
+        h,
+      })
+      selected = layers.length - 1
+      paint()
+    }
+    const localPoint = (event) => {
+      const box = canvas.getBoundingClientRect()
+      return {
+        x: ((event.clientX - box.left) * canvas.width) / Math.max(box.width, 1),
+        y: ((event.clientY - box.top) * canvas.height) / Math.max(box.height, 1),
+      }
+    }
+    const hit = (x, y) => {
+      for (let i = layers.length - 1; i >= 0; i -= 1) {
+        const layer = layers[i]
+        if (x >= layer.x && x <= layer.x + layer.w && y >= layer.y && y <= layer.y + layer.h) return i
+      }
+      return -1
+    }
+    const scaleSelected = (factor) => {
+      if (selected < 0) return
+      const layer = layers[selected]
+      const nw = Math.max(40, layer.w * factor)
+      const nh = Math.max(40, layer.h * factor)
+      layer.x += (layer.w - nw) / 2
+      layer.y += (layer.h - nh) / 2
+      layer.w = nw
+      layer.h = nh
+      paint()
+    }
+    const open = async () => {
+      panel.hidden = false
+      const empty = document.getElementById('adult-desk-stage-empty')
+      if (empty) empty.hidden = true
+      const result = document.getElementById('result-section')
+      if (result) result.hidden = true
+      paint()
+      const work = currentDeskWork()
+      if (!layers.length) {
+        if (work?.woman) await addFromUrl(work.woman)
+        if (work?.man) await addFromUrl(work.man)
+      }
+      setFormStatus('배경을 지운 뒤 전신 키를 맞춰 붙입니다. 위치는 끌어 옮기세요.', false)
+    }
+    const close = () => {
+      panel.hidden = true
+      const result = document.getElementById('result-section')
+      if (result && currentResult?.imageUrl) result.hidden = false
+      syncDeskStageEmpty()
+    }
+    document.getElementById('desk-assemble-open')?.addEventListener('click', () => {
+      void open()
+    })
+    document.getElementById('desk-assemble-close')?.addEventListener('click', close)
+    sizeBtn?.addEventListener('click', () => {
+      landscape = !landscape
+      sizeBtn.textContent = landscape ? '가로' : '세로'
+      paint()
+    })
+    document.getElementById('desk-assemble-smaller')?.addEventListener('click', () => scaleSelected(0.9))
+    document.getElementById('desk-assemble-bigger')?.addEventListener('click', () => scaleSelected(1.1))
+    document.getElementById('desk-assemble-add')?.addEventListener('click', () => input?.click())
+    const addFromFile = async (file) => {
+      if (!isImageFileLike(file)) {
+        setFormStatus('이미지 파일만 넣을 수 있습니다.', true)
+        return
+      }
+      const url =
+        typeof prepareImageDataUrl === 'function' ? await prepareImageDataUrl(file, 2200) : URL.createObjectURL(file)
+      await addFromUrl(url)
+    }
+    window.__deskAssembleAddFile = addFromFile
+    panel.addEventListener('dragover', (event) => {
+      event.preventDefault()
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
+      panel.classList.add('is-drag')
+    })
+    panel.addEventListener('dragleave', (event) => {
+      if (panel.contains(event.relatedTarget)) return
+      panel.classList.remove('is-drag')
+    })
+    panel.addEventListener('drop', (event) => {
+      event.preventDefault()
+      event.stopPropagation()
+      panel.classList.remove('is-drag')
+      const files = pickImageFilesFromDataTransfer(event.dataTransfer)
+      files.forEach((file) => void addFromFile(file))
+    })
+    panel.addEventListener('paste', (event) => {
+      const files = pickImageFilesFromDataTransfer(event.clipboardData)
+      if (!files.length) return
+      event.preventDefault()
+      event.stopPropagation()
+      files.forEach((file) => void addFromFile(file))
+    })
+    input?.addEventListener('change', async () => {
+      const files = [...(input.files || [])].slice(0, 3 - layers.length)
+      input.value = ''
+      for (const file of files) {
+        if (!isImageFileLike(file)) continue
+        const url =
+          typeof prepareImageDataUrl === 'function' ? await prepareImageDataUrl(file, 2200) : URL.createObjectURL(file)
+        await addFromUrl(url)
+      }
+    })
+    document.getElementById('desk-assemble-cast-w')?.addEventListener('click', () => {
+      void addFromUrl(currentDeskWork()?.woman)
+    })
+    document.getElementById('desk-assemble-cast-m')?.addEventListener('click', () => {
+      void addFromUrl(currentDeskWork()?.man)
+    })
+    document.getElementById('desk-assemble-now')?.addEventListener('click', () => {
+      void addFromUrl(currentResult?.imageUrl)
+    })
+    document.getElementById('desk-assemble-drop')?.addEventListener('click', () => {
+      if (selected < 0) return
+      layers.splice(selected, 1)
+      selected = layers.length - 1
+      paint()
+    })
+    document.getElementById('desk-assemble-apply')?.addEventListener('click', () => {
+      if (!layers.length) {
+        setFormStatus('먼저 PNG를 넣으세요.', true)
+        return
+      }
+      const [cw, ch] = dims()
+      const out = document.createElement('canvas')
+      out.width = cw
+      out.height = ch
+      const octx = out.getContext('2d')
+      octx.imageSmoothingEnabled = true
+      octx.imageSmoothingQuality = 'high'
+      paintDeskStudio(octx, cw, ch)
+      layers.forEach((layer) => octx.drawImage(layer.img, layer.x, layer.y, layer.w, layer.h))
+      let url = ''
+      try {
+        url = out.toDataURL('image/jpeg', 0.95)
+      } catch {
+        setFormStatus('이 장은 붙일 수 없습니다. PNG를 다시 넣으세요.', true)
+        return
+      }
+      const pair = layers.length >= 2
+      if (sizeField && !sizeField.dataset.userPicked) sizeField.value = landscape ? 'landscape' : 'story'
+      if (typeof updateCurrentDeskWork === 'function') {
+        updateCurrentDeskWork({ assembledPair: pair })
+      }
+      close()
+      showDeskStepResult(url, 'PNG 조립', '수동 조립. 같은 사람.')
+      if (pair) setTwoPeopleChecked(true)
+      void syncDeskGates()
+      setFormStatus('한 장으로 붙였습니다. 옷·장소는 이 장으로 고르세요.', false)
+    })
+    canvas.addEventListener('pointerdown', (event) => {
+      const p = localPoint(event)
+      selected = hit(p.x, p.y)
+      if (selected < 0) {
+        paint()
+        return
+      }
+      const layer = layers[selected]
+      drag = { i: selected, dx: p.x - layer.x, dy: p.y - layer.y }
+      canvas.setPointerCapture(event.pointerId)
+      paint()
+    })
+    canvas.addEventListener('pointermove', (event) => {
+      if (!drag) return
+      const p = localPoint(event)
+      const layer = layers[drag.i]
+      if (!layer) return
+      layer.x = p.x - drag.dx
+      layer.y = p.y - drag.dy
+      paint()
+    })
+    canvas.addEventListener('pointerup', () => {
+      drag = null
+    })
+    canvas.addEventListener(
+      'wheel',
+      (event) => {
+        event.preventDefault()
+        scaleSelected(event.deltaY < 0 ? 1.06 : 0.94)
+      },
+      { passive: false },
+    )
+  }
+  initDeskAssemble()
+
   window.syncDeskWorkUi = syncWorkUi
   window.syncDeskNextCutButton = syncDeskNextCutButton
   window.deskPhotoNeedsBodyExtend = deskPhotoNeedsBodyExtend
@@ -11555,3 +13852,4 @@ function initAdultDesk() {
 bootAuth()
 renderGallery()
 initAdultDesk()
+void hydrateStorymagStores()
