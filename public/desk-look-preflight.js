@@ -38,17 +38,27 @@ var DeskLookLib = (() => {
     ...CLOTHES_UPPER_LABELS,
     ...CLOTHES_LOWER_LABELS
   ];
+  var VTON_IDENTITY_PROTECT_LABELS = [
+    "Background",
+    "Hat",
+    "Hair",
+    "Sunglasses",
+    "Face",
+    "Left-shoe",
+    "Right-shoe",
+    "Left-leg",
+    "Right-leg",
+    "Left-arm",
+    "Right-arm",
+    "Bag"
+  ];
   var VTON_MODEL_BODY_LABELS = [
     "Upper-clothes",
     "Skirt",
     "Pants",
     "Dress",
     "Belt",
-    "Scarf",
-    "Left-leg",
-    "Right-leg",
-    "Left-arm",
-    "Right-arm"
+    "Scarf"
   ];
   var MASK_MIN_WHITE = 1500;
   function isClothesEditLabel(label) {
@@ -174,8 +184,8 @@ var DeskLookLib = (() => {
   ]);
   var VTON_CLOTHES_BLEED_PX = 12;
   var VTON_FACE_CLOTHES_CLEAR_PX = 22;
-  var VTON_FACE_KEEP_FRAC = 0.62;
   var VTON_SHOE_PANTS_CLEAR_PX = 12;
+  var VTON_SLEEVE_CLEAR_PX = 12;
   var VTON_ISLAND_MIN = 240;
   var VTON_CLOTHES_COLOR_DIST = 36;
   var VTON_DENIM_COLOR_DIST = 40;
@@ -271,7 +281,7 @@ var DeskLookLib = (() => {
     }
     return filled;
   }
-  function dropSmallProtectIslands(mask, width, height, minArea) {
+  function dropSmallProtectIslands(mask, labels, width, height, minArea) {
     const n = width * height;
     const seen = new Uint8Array(n);
     let dropped = 0;
@@ -310,6 +320,8 @@ var DeskLookLib = (() => {
       }
       if (cells.length >= minArea) continue;
       for (const p of cells) {
+        const lab = labels?.[p] || "";
+        if (VTON_IDENTITY_PROTECT_LABELS.includes(lab)) continue;
         mask[p] = 255;
         dropped += 1;
       }
@@ -357,6 +369,7 @@ var DeskLookLib = (() => {
       releasedNeck: 0,
       releasedCuff: 0,
       releasedClothesColor: 0,
+      releasedSleeve: 0,
       releasedIslands: 0,
       releasedGaps: 0,
       ok: false,
@@ -367,26 +380,20 @@ var DeskLookLib = (() => {
     const jacket = srcRgba && srcRgba.length === n * 4 ? labeledMedianRgb(srcRgba, labels, "Upper-clothes") : { r: 0, g: 0, b: 0, n: 0 };
     const denim = srcRgba && srcRgba.length === n * 4 ? labeledMedianRgb(srcRgba, labels, "Pants") : { r: 0, g: 0, b: 0, n: 0 };
     let pantsY1 = -1;
-    let faceY0 = height;
-    let faceY1 = -1;
     for (let p = 0; p < n; p++) {
       const lab = labels[p] || "";
       const y = p / width | 0;
       if (lab === "Pants" || lab === "Skirt") {
         if (y > pantsY1) pantsY1 = y;
       }
-      if (lab === "Face") {
-        if (y < faceY0) faceY0 = y;
-        if (y > faceY1) faceY1 = y;
-      }
     }
-    const faceNeckCut = faceY1 >= 0 ? faceY0 + Math.floor((faceY1 - faceY0 + 1) * VTON_FACE_KEEP_FRAC) : height;
     const mask = new Uint8Array(n);
     let whiteBody = 0;
     let handProtect = 0;
     let releasedNeck = 0;
     let releasedCuff = 0;
     let releasedClothesColor = 0;
+    let releasedSleeve = 0;
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const p = y * width + x;
@@ -408,8 +415,7 @@ var DeskLookLib = (() => {
         const jacketLike = jacket.n > 0 && srcRgba ? rgbDist(srcRgba, p, jacket) <= VTON_CLOTHES_COLOR_DIST : false;
         const denimLike = denim.n > 0 && srcRgba ? rgbDist(srcRgba, p, denim) <= VTON_DENIM_COLOR_DIST : false;
         if (lab === "Face" || lab === "Hair" || lab === "Hat") {
-          const neckBand = lab === "Face" && y >= faceNeckCut;
-          if (neckBand || nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_FACE_CLOTHES_CLEAR_PX)) {
+          if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_FACE_CLOTHES_CLEAR_PX)) {
             mask[p] = 255;
             releasedNeck += 1;
             continue;
@@ -438,6 +444,13 @@ var DeskLookLib = (() => {
           handProtect += 1;
           continue;
         }
+        if (ARM_LABELS.has(lab) && srcRgba && !isSkinLike(srcRgba, p)) {
+          if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_SLEEVE_CLEAR_PX)) {
+            mask[p] = 255;
+            releasedSleeve += 1;
+            continue;
+          }
+        }
       }
     }
     const releasedGaps = fillBetweenBodyGaps(mask, labels, width, height, woman, man);
@@ -450,7 +463,7 @@ var DeskLookLib = (() => {
       woman,
       man
     );
-    const releasedIslands = dropSmallProtectIslands(mask, width, height, VTON_ISLAND_MIN);
+    const releasedIslands = dropSmallProtectIslands(mask, labels, width, height, VTON_ISLAND_MIN);
     let white = 0;
     for (let i = 0; i < n; i++) if (mask[i] >= 128) white += 1;
     const ok = white >= MASK_MIN_WHITE;
@@ -463,6 +476,7 @@ var DeskLookLib = (() => {
       releasedNeck,
       releasedCuff,
       releasedClothesColor,
+      releasedSleeve,
       releasedIslands,
       releasedGaps,
       ok,

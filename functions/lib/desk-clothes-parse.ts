@@ -46,7 +46,7 @@ export const CLOTHES_PROTECT_LABELS: readonly ClothesParseLabel[] = [
   'Bag',
 ]
 
-/** VTON: 원본 의상이 아니라 정체성·배경만 지킨다. */
+/** VTON: 얼굴·몸·배경은 잠그고 의상 라벨만 연다. */
 export const VTON_IDENTITY_PROTECT_LABELS: readonly ClothesParseLabel[] = [
   'Background',
   'Hat',
@@ -55,6 +55,10 @@ export const VTON_IDENTITY_PROTECT_LABELS: readonly ClothesParseLabel[] = [
   'Face',
   'Left-shoe',
   'Right-shoe',
+  'Left-leg',
+  'Right-leg',
+  'Left-arm',
+  'Right-arm',
   'Bag',
 ]
 
@@ -65,10 +69,6 @@ export const VTON_MODEL_BODY_LABELS: readonly ClothesParseLabel[] = [
   'Dress',
   'Belt',
   'Scarf',
-  'Left-leg',
-  'Right-leg',
-  'Left-arm',
-  'Right-arm',
 ]
 
 /** 199px 상반신 조각은 편집 불가. 억지로 키우지 않고 호출 전 중단. */
@@ -237,15 +237,15 @@ const BODY_SPAN_LABELS = new Set([
 ])
 const VTON_CLOTHES_BLEED_PX = 12
 const VTON_FACE_CLOTHES_CLEAR_PX = 22
-const VTON_FACE_KEEP_FRAC = 0.62
 const VTON_SHOE_PANTS_CLEAR_PX = 12
+const VTON_SLEEVE_CLEAR_PX = 12
 const VTON_ISLAND_MIN = 240
 const VTON_CLOTHES_COLOR_DIST = 36
 const VTON_DENIM_COLOR_DIST = 40
 const CLOTHES_NEAR_LABELS = new Set(['Upper-clothes', 'Dress', 'Belt', 'Scarf', 'Skirt', 'Pants'])
 const PANTS_NEAR_LABELS = new Set(['Pants', 'Skirt'])
 
-function armHandProtect(labels: string[], width: number, height: number): Uint8Array {
+export function armHandProtect(labels: string[], width: number, height: number): Uint8Array {
   const n = width * height
   const hands = new Uint8Array(n)
   for (const name of ARM_LABELS) {
@@ -361,7 +361,13 @@ function fillBetweenBodyGaps(
   return filled
 }
 
-function dropSmallProtectIslands(mask: Uint8Array, width: number, height: number, minArea: number): number {
+function dropSmallProtectIslands(
+  mask: Uint8Array,
+  labels: string[],
+  width: number,
+  height: number,
+  minArea: number,
+): number {
   const n = width * height
   const seen = new Uint8Array(n)
   let dropped = 0
@@ -400,6 +406,8 @@ function dropSmallProtectIslands(mask: Uint8Array, width: number, height: number
     }
     if (cells.length >= minArea) continue
     for (const p of cells) {
+      const lab = labels?.[p] || ''
+      if ((VTON_IDENTITY_PROTECT_LABELS as readonly string[]).includes(lab)) continue
       mask[p] = 255
       dropped += 1
     }
@@ -446,7 +454,7 @@ function bleedEditIntoBackground(
 }
 
 /**
- * VTON 합성. 흰=모델(의상+새로 드러난 몸), 검정=원본(얼굴·머리·배경·손·신발).
+ * VTON 합성. 흰=의상, 검정=원본 얼굴·몸·배경·손·신발.
  * 일반 inpaint 의상 마스크와 섞지 않는다.
  */
 export function assembleVtonIdentityMask(options: {
@@ -465,6 +473,7 @@ export function assembleVtonIdentityMask(options: {
   releasedNeck: number
   releasedCuff: number
   releasedClothesColor: number
+  releasedSleeve: number
   releasedIslands: number
   releasedGaps: number
   ok: boolean
@@ -481,6 +490,7 @@ export function assembleVtonIdentityMask(options: {
     releasedNeck: 0,
     releasedCuff: 0,
     releasedClothesColor: 0,
+    releasedSleeve: 0,
     releasedIslands: 0,
     releasedGaps: 0,
     ok: false,
@@ -491,26 +501,20 @@ export function assembleVtonIdentityMask(options: {
   const jacket = srcRgba && srcRgba.length === n * 4 ? labeledMedianRgb(srcRgba, labels, 'Upper-clothes') : { r: 0, g: 0, b: 0, n: 0 }
   const denim = srcRgba && srcRgba.length === n * 4 ? labeledMedianRgb(srcRgba, labels, 'Pants') : { r: 0, g: 0, b: 0, n: 0 }
   let pantsY1 = -1
-  let faceY0 = height
-  let faceY1 = -1
   for (let p = 0; p < n; p++) {
     const lab = labels[p] || ''
     const y = (p / width) | 0
     if (lab === 'Pants' || lab === 'Skirt') {
       if (y > pantsY1) pantsY1 = y
     }
-    if (lab === 'Face') {
-      if (y < faceY0) faceY0 = y
-      if (y > faceY1) faceY1 = y
-    }
   }
-  const faceNeckCut = faceY1 >= 0 ? faceY0 + Math.floor((faceY1 - faceY0 + 1) * VTON_FACE_KEEP_FRAC) : height
   const mask = new Uint8Array(n)
   let whiteBody = 0
   let handProtect = 0
   let releasedNeck = 0
   let releasedCuff = 0
   let releasedClothesColor = 0
+  let releasedSleeve = 0
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
       const p = y * width + x
@@ -532,11 +536,7 @@ export function assembleVtonIdentityMask(options: {
       const jacketLike = jacket.n > 0 && srcRgba ? rgbDist(srcRgba, p, jacket) <= VTON_CLOTHES_COLOR_DIST : false
       const denimLike = denim.n > 0 && srcRgba ? rgbDist(srcRgba, p, denim) <= VTON_DENIM_COLOR_DIST : false
       if (lab === 'Face' || lab === 'Hair' || lab === 'Hat') {
-        const neckBand = lab === 'Face' && y >= faceNeckCut
-        if (
-          neckBand ||
-          nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_FACE_CLOTHES_CLEAR_PX)
-        ) {
+        if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_FACE_CLOTHES_CLEAR_PX)) {
           mask[p] = 255
           releasedNeck += 1
           continue
@@ -565,6 +565,13 @@ export function assembleVtonIdentityMask(options: {
         handProtect += 1
         continue
       }
+      if (ARM_LABELS.has(lab) && srcRgba && !isSkinLike(srcRgba, p)) {
+        if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_SLEEVE_CLEAR_PX)) {
+          mask[p] = 255
+          releasedSleeve += 1
+          continue
+        }
+      }
     }
   }
   const releasedGaps = fillBetweenBodyGaps(mask, labels, width, height, woman, man)
@@ -577,7 +584,7 @@ export function assembleVtonIdentityMask(options: {
     woman,
     man,
   )
-  const releasedIslands = dropSmallProtectIslands(mask, width, height, VTON_ISLAND_MIN)
+  const releasedIslands = dropSmallProtectIslands(mask, labels, width, height, VTON_ISLAND_MIN)
   let white = 0
   for (let i = 0; i < n; i++) if (mask[i]! >= 128) white += 1
   const ok = white >= MASK_MIN_WHITE
@@ -590,6 +597,7 @@ export function assembleVtonIdentityMask(options: {
     releasedNeck,
     releasedCuff,
     releasedClothesColor,
+    releasedSleeve,
     releasedIslands,
     releasedGaps,
     ok,
