@@ -5,16 +5,19 @@ import {
   polishKoreanPromptText,
   wantsOtbeotgim,
   wantsNudeOrUndress,
+  wantsSlipOrSilkLook,
   deskStillUsesAdultReplicate,
   wantsDeskUncensoredStill,
   wantsDeskPoseChange,
   COUPLE_MAN_SHIRT_ONLY,
 } from '../lib/content-policy'
-import { buildDeskStillPrompt, deskStillNegativePrompt } from '../lib/desk-still-prompt'
+import { buildDeskStillPrompt, deskStillNegativePrompt, parseDeskIntent } from '../lib/desk-still-prompt'
+import { verifyLookInpaintPayload } from '../lib/desk-look-server-verify'
 import {
   submitFalInpaint,
   submitFalKontextEdit,
   submitFalKontextMultiImage,
+  submitFalLeffaVirtualTryon,
   submitFalTextToImage,
   uploadDataUrlToFal,
   type FalImageSize,
@@ -69,6 +72,19 @@ function genderWord(g?: string): string {
   if (v === 'female') return 'woman'
   if (v === 'non-binary') return 'non-binary adult'
   return ''
+}
+
+async function loadHiddenSlipGarment(request: Request): Promise<string> {
+  const res = await fetch(new URL('/desk-look-garment-slip.png', request.url))
+  if (!res.ok) throw new Error('look_garment_missing')
+  const bytes = new Uint8Array(await res.arrayBuffer())
+  let bin = ''
+  const step = 4096
+  for (let i = 0; i < bytes.length; i += step) {
+    const slice = bytes.subarray(i, Math.min(bytes.length, i + step))
+    bin += String.fromCharCode(...slice)
+  }
+  return `data:image/png;base64,${btoa(bin)}`
 }
 
 function parseDataUrlForClaude(dataUrl: string): ClaudeImageInput | null {
@@ -338,6 +354,9 @@ function poseDrawPrompt(options: {
 function poseDrawReplicateSize(aspectRatio?: string) {
   if (aspectRatio === '16:9') return resolveReplicateImageSize('landscape')
   if (aspectRatio === '1:1') return resolveReplicateImageSize('square')
+  if (aspectRatio === '3:4' || aspectRatio === '2:3' || aspectRatio === 'portrait') {
+    return resolveReplicateImageSize('portrait')
+  }
   return resolveReplicateImageSize('story')
 }
 
@@ -452,6 +471,20 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       sourceCast?: 'ww' | 'mw'
       adultStill?: boolean
       forceReplicate?: boolean
+      lookConfirm?: boolean
+      clothesMask?: string
+      deskCastLayout?: { woman?: unknown; man?: unknown }
+      deskLookVerify?: {
+        ok?: boolean
+        reason?: string
+        maskSha256?: string
+        maskWhite?: number
+        segformerSha256?: string
+        recSha256?: string
+      }
+      deskLook?: string
+      deskAction?: string
+      deskCouple?: boolean
       expand?: {
         top?: number
         bottom?: number
@@ -769,18 +802,113 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (composeMode === 'desk-still') {
       try {
         const step = String(body.deskStep || '')
-        const couple =
-          body.sourceCast === 'mw' ||
-          body.sourceCast === 'ww' ||
-          images.length >= 2 ||
-          Number(body.sourcePeople) >= 2 ||
-          /두\s*주연이 함께|두 사람이 한 장|올린 두 사람|남자는 상의만|남자 옷은 유지|같은 두 사람/i.test(
-            descriptionKo,
+        const coupleFromClient = typeof body.deskCouple === 'boolean' ? body.deskCouple : undefined
+        const coupleFallback =
+          body.sourceCast === 'mw' || images.length >= 2 || Number(body.sourcePeople) >= 2
+        const couple = coupleFromClient !== undefined ? coupleFromClient : coupleFallback
+        const intent = parseDeskIntent(descriptionKo, couple, step, {
+          look: typeof body.deskLook === 'string' ? body.deskLook : undefined,
+          action: typeof body.deskAction === 'string' ? body.deskAction : undefined,
+          couple,
+        })
+        const prompt = buildDeskStillPrompt(descriptionKo, couple, step, {
+          look: intent.look,
+          action: intent.action,
+          couple: intent.couple,
+        })
+        const poseCut = step === 'cut' && (intent.action === 'kiss' || intent.action === 'hug' || intent.action === 'breast')
+        const nudeStill = intent.look === 'nude'
+        const slipStill = intent.look === 'silk'
+        if (step === 'look' && env.FAL_KEY?.trim()) {
+          const clientMask =
+            typeof body.clothesMask === 'string' && body.clothesMask.startsWith('data:image/')
+              ? body.clothesMask
+              : ''
+          const lookGate = await verifyLookInpaintPayload({
+            source: images[0],
+            clothesMask: clientMask,
+            deskCastLayout: body.deskCastLayout,
+            deskLookVerify: body.deskLookVerify,
+          })
+          if (!lookGate.ok) {
+            return jsonResponse(
+              {
+                ok: false,
+                error: lookGate.error,
+                message: '의상 마스크·CAST 검증이 맞지 않아 보내지 않습니다.',
+              },
+              lookGate.status,
+            )
+          }
+          const clothesReplace = intent.look === 'silk'
+          try {
+            const submitted = clothesReplace
+              ? await submitFalLeffaVirtualTryon({
+                  falKey: env.FAL_KEY,
+                  humanUrl: images[0],
+                  garmentUrl: await loadHiddenSlipGarment(request),
+                  garmentType: 'dresses',
+                })
+              : await submitFalInpaint({
+                  falKey: env.FAL_KEY,
+                  imageUrl: images[0],
+                  maskUrl: clientMask,
+                  prompt: `${prompt} Local edit ONLY the white-masked clothes of the CAST woman slot. Unmasked face, neck, skin, hands, man, and background stay exact source pixels. Same body, same crop. FORBIDDEN new person, catalog model, white studio, oval face sticker, assume right person is woman.`,
+                  negativePrompt: deskStillNegativePrompt({
+                    couple,
+                    nudeStill,
+                    descriptionKo,
+                  }),
+                  strength: nudeStill || slipStill ? 0.66 : 0.56,
+                })
+            const engine = clothesReplace ? 'fal-look-leffa' : 'fal-look-inpaint'
+            if ('imageUrl' in submitted && submitted.imageUrl) {
+              return jsonResponse(
+                {
+                  ok: true,
+                  imageUrl: submitted.imageUrl,
+                  composeMode: 'desk-still',
+                  engine,
+                  prompt,
+                },
+                200,
+              )
+            }
+            return jsonResponse(
+              {
+                ok: true,
+                pending: true,
+                statusUrl: submitted.statusUrl,
+                responseUrl: submitted.responseUrl,
+                composeMode: 'desk-still',
+                engine,
+                prompt,
+              },
+              200,
+            )
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'unknown_error'
+            return jsonResponse(
+              {
+                ok: false,
+                error: clothesReplace ? 'look_leffa_failed' : 'look_inpaint_failed',
+                message: '옷을 녹이지 못했습니다. 가운데는 원본입니다. 얼굴을 붙이지 않습니다.',
+                detail: message,
+              },
+              502,
+            )
+          }
+        }
+        if (step === 'look') {
+          return jsonResponse(
+            {
+              ok: false,
+              error: 'look_inpaint_required',
+              message: '옷 녹이기는 국소 편집만 합니다. 전신 재생성은 보내지 않습니다.',
+            },
+            500,
           )
-        const prompt = buildDeskStillPrompt(descriptionKo, couple, step)
-        const poseCut =
-          step === 'cut' && /키스|입맞춤|kiss|포옹|hug|가슴|breast/i.test(descriptionKo)
-        const nudeStill = !poseCut && wantsNudeOrUndress(descriptionKo)
+        }
         const useAdultReplicate = deskStillUsesAdultReplicate(
           step,
           descriptionKo,
@@ -809,15 +937,16 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             }),
             width: dims.width,
             height: dims.height,
-            strength: nudeStill
+            strength: nudeStill || slipStill
               ? couple
-                ? 0.32
-                : 0.42
+                ? 0.26
+                : 0.24
               : wantsDeskPoseChange(descriptionKo)
                 ? 0.4
                 : wantsDeskUncensoredStill(descriptionKo)
                   ? 0.38
                   : 0.34,
+            minStrength: nudeStill || slipStill ? 0.16 : 0.35,
             guidanceScale: 1.35,
             disableSafetyChecker: true,
           })

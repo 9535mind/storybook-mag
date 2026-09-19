@@ -73,6 +73,7 @@ type FalQueueStatusResponse = {
 }
 
 type FalImageResultResponse = {
+  image?: { url?: string }
   images?: Array<{ url?: string }>
   detail?: string | Array<{ msg?: string }>
   error?: string
@@ -99,6 +100,10 @@ function extractErrorMessage(payload: {
     return payload.detail.map((item) => item.msg).filter(Boolean).join('; ')
   }
   return 'fal_generation_failed'
+}
+
+function firstFalImageUrl(payload: { image?: { url?: string }; images?: Array<{ url?: string }> }): string {
+  return payload.image?.url?.trim() || payload.images?.[0]?.url?.trim() || ''
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -565,6 +570,7 @@ export async function submitFalKontextEdit(options: {
   tier?: 'pro' | 'max'
   guidanceScale?: number
   outputFormat?: 'png' | 'jpeg'
+  aspectRatio?: string
 }): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
   let imageUrl = options.imageUrl
   if (imageUrl.startsWith('data:')) {
@@ -584,6 +590,7 @@ export async function submitFalKontextEdit(options: {
       enable_safety_checker: false,
       guidance_scale:
         typeof options.guidanceScale === 'number' ? options.guidanceScale : 5.5,
+      ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
     },
   })
 }
@@ -710,11 +717,44 @@ async function submitFalQueueJob(options: {
   if (submitPayload.status_url && submitPayload.response_url) {
     return { statusUrl: submitPayload.status_url, responseUrl: submitPayload.response_url }
   }
-  const imageUrl = submitPayload.images?.[0]?.url?.trim()
+  const imageUrl = firstFalImageUrl(submitPayload)
   if (!imageUrl) {
     throw new Error(extractErrorMessage(submitPayload) || 'missing_image_url')
   }
   return { imageUrl }
+}
+
+export async function submitFalLeffaVirtualTryon(options: {
+  falKey: string
+  humanUrl: string
+  garmentUrl: string
+  garmentType?: 'upper_body' | 'lower_body' | 'dresses'
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  let humanUrl = options.humanUrl
+  let garmentUrl = options.garmentUrl
+  if (humanUrl.startsWith('data:')) {
+    const ext = humanUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    humanUrl = await uploadDataUrlToFal(options.falKey, humanUrl, `leffa-human-${Date.now()}.${ext}`, {
+      maxBytes: 8_000_000,
+    })
+  }
+  if (garmentUrl.startsWith('data:')) {
+    const ext = garmentUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    garmentUrl = await uploadDataUrlToFal(options.falKey, garmentUrl, `leffa-garment-${Date.now()}.${ext}`, {
+      maxBytes: 8_000_000,
+    })
+  }
+  return submitFalQueueJob({
+    falKey: options.falKey,
+    falModel: 'fal-ai/leffa/virtual-tryon',
+    body: {
+      human_image_url: humanUrl,
+      garment_image_url: garmentUrl,
+      garment_type: options.garmentType || 'dresses',
+      output_format: 'png',
+      enable_safety_checker: false,
+    },
+  })
 }
 
 /** 증명사진→전신: 제출만 하고 폴링은 tale-scene-status. */
@@ -1037,7 +1077,7 @@ export async function checkFalKontextMultiImage(options: {
     return { status: 'failed', error: extractErrorMessage(resultPayload), falStatus: 'COMPLETED' }
   }
   const policyMsg = extractErrorMessage(resultPayload)
-  const imageUrl = resultPayload.images?.[0]?.url?.trim()
+  const imageUrl = firstFalImageUrl(resultPayload)
   if (!imageUrl) {
     if (/content.?policy|flagged|nsfw|safety/i.test(policyMsg)) {
       return { status: 'failed', error: policyMsg, falStatus: 'COMPLETED' }

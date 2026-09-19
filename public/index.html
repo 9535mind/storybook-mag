@@ -3,9 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag</title>
-  <link rel="stylesheet" href="/style.css?v=20260915concept-paste" />
+  <link rel="stylesheet" href="/style.css?v=20260916go" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -213,26 +215,29 @@
           </div>
 
           <div id="desk-still-packs">
-            <p class="adult-desk__kicker">LOOK</p>
+            <p id="desk-fresh-flag" class="desk-fresh-flag">새 화면 · CAST 화소 옷만 · gate</p>
+            <button type="button" class="desk-run" data-desk-step="look" id="desk-look-run" hidden>옷 녹이기</button>
+            <p class="adult-desk__kicker" id="desk-look-kicker">옷</p>
             <div id="desk-looks" class="desk-cards"></div>
-            <p class="adult-desk__kicker">PLACE</p>
+            <p class="adult-desk__kicker">방·자세</p>
             <div id="desk-places" class="desk-cards"></div>
-            <p class="adult-desk__kicker">POSE</p>
             <div id="desk-poses" class="desk-cards"></div>
-            <p id="desk-still-hint" class="adult-desk__fine">CAST → 1 몸 잇기 → 2 한 장면(오려 붙임) → 3 옷만 → 4 방만. 얼굴은 다시 그리지 않습니다.</p>
+            <button type="button" class="desk-run desk-run--step" data-desk-step="place" id="desk-place-run" hidden>장소·자세</button>
+            <p id="desk-still-hint" class="adult-desk__fine">옷을 고르면 바로 녹입니다. 방·자세를 고르면 바로 바꿉니다.</p>
           </div>
 
           <div id="desk-video-packs" hidden>
-            <p class="adult-desk__kicker">LOOK</p>
+            <p class="adult-desk__kicker">옷</p>
             <div id="desk-looks-move" class="desk-cards"></div>
-            <p class="adult-desk__kicker">MOVE</p>
+            <button type="button" id="desk-run" class="desk-run">벗기 찍기</button>
+            <p class="adult-desk__fine">나체를 누르면 여 칸 사진으로 바로 벗깁니다.</p>
+            <p class="adult-desk__kicker">동작</p>
             <div id="desk-moves" class="desk-cards"></div>
-            <p class="adult-desk__fine">옷 녹이기 = 위에서 고른 옷으로 녹입니다. 한 번 = 한 편. 벗기·가슴·손은 같이 됩니다.</p>
             <label class="desk-two" for="desk-two-people">
               <input type="checkbox" id="desk-two-people" />
               사진에 두 사람
             </label>
-            <p class="adult-desk__kicker">LENGTH</p>
+            <p class="adult-desk__kicker">길이</p>
             <div class="desk-job" role="group" aria-label="길이">
               <button type="button" class="desk-job__btn" data-desk-len="5">5초</button>
               <button type="button" class="desk-job__btn" data-desk-len="10">10초</button>
@@ -243,11 +248,8 @@
           <div id="desk-still-steps" class="desk-steps">
             <button type="button" class="desk-run desk-run--step" data-desk-step="body">1 몸 잇기</button>
             <button type="button" class="desk-run desk-run--step" data-desk-step="together">2 한 장면</button>
-            <button type="button" class="desk-run desk-run--step" data-desk-step="look">3 옷 녹이기</button>
-            <button type="button" class="desk-run desk-run--step" data-desk-step="place">4 장소·자세</button>
           </div>
           <button type="button" id="desk-assemble-open" class="desk-scene-upload">PNG 조립</button>
-          <button type="button" id="desk-run" class="desk-run">움직이기</button>
           <p id="desk-status" class="form__status" hidden></p>
           <button type="button" id="desk-advanced-toggle" class="desk-advanced">도구 더 보기</button>
         </aside>
@@ -1819,7 +1821,12 @@
   <script src="/tale-layout.js?v=20260720d"></script>
   <script src="/observe.js?v=20260722b"></script>
   <script src="/poly-lasso.js?v=20260831erase2"></script>
-  <script src="/app.js?v=20260916verify"></script>
+  <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
+  <script src="/desk-look-models.js?v=20260917vis"></script>
+  <script src="/desk-look-preflight.js?v=20260919look"></script>
+  <script src="/desk-look-onnx.js?v=20260917vis"></script>
+  <script src="/desk-look-runtime.js?v=20260917vis"></script>
+  <script src="/app.js?v=20260919look"></script>
   <script src="/desk-pipeline.js?v=20260914pixel-pipe2"></script>
 </body>
 </html>

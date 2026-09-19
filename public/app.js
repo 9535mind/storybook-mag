@@ -1,4 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
+window.__DESK_BUILD = '20260919look'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -4363,6 +4364,8 @@ async function captureVideoEndFrame(videoUrl) {
     const data = await response.json().catch(() => ({}))
     if (data?.ok && typeof data.dataUrl === 'string' && data.dataUrl.startsWith('data:video/')) {
       source = data.dataUrl
+    } else if (response.status === 401) {
+      throw new Error('video_auth')
     }
   } catch (err) {
     console.warn('media-bytes proxy for end-frame capture failed, trying direct URL', err)
@@ -4374,7 +4377,7 @@ async function captureVideoEndFrame(videoUrl) {
   if (source === videoUrl) video.crossOrigin = 'anonymous'
   video.src = source
   await new Promise((resolve, reject) => {
-    const t = window.setTimeout(() => reject(new Error('video_meta_timeout')), 20000)
+    const t = window.setTimeout(() => reject(new Error('video_meta_timeout')), 60000)
     video.onloadedmetadata = () => {
       window.clearTimeout(t)
       resolve()
@@ -6709,8 +6712,6 @@ galleryMigrateButtons.forEach((btn) => {
 
 async function bootAuth() {
   setAuthTab('login')
-  // 예전 PIN 입장 잔여값 제거
-  sessionStorage.removeItem(LEGACY_PIN_STORAGE_KEY)
 
   const token = getSessionToken()
   const pin = getStoredAdminPin()
@@ -10179,7 +10180,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return { auth: true }
     }
     if (!data.ok) {
-      setStatus(data.message || `실패: ${data.error || response.status}`, true)
+      const msg = data.message || `실패: ${data.error || response.status}`
+      if (typeof setFormStatus === 'function') setFormStatus(msg, true)
+      else setStatus(msg, true)
       return null
     }
     if (data.imageUrl) return { imageUrl: data.imageUrl }
@@ -11186,6 +11189,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   globalThis.estimateFaceBoxFromImage = estimateFaceBoxFromImage
   globalThis.cropHeadFromBox = cropHeadFromBox
   globalThis.ensureStableDataUrl = ensureStableDataUrl
+  globalThis.cropTargetSide = cropTargetSide
+  globalThis.pasteSideOntoFull = pasteSideOntoFull
 })()
 
 
@@ -11363,14 +11368,40 @@ function deskMwPatch(extra) {
   }
 }
 
+function deskTwoPeopleChecked() {
+  return Boolean(document.getElementById('desk-two-people')?.checked)
+}
+
+/** 여 칸 커플 장면·두 사람 체크는 제품이 여남이다. 얼굴 수 실패로 혼자 녹이지 않는다. */
+function deskLockMwWomanScene(work, extra) {
+  const w = work || currentDeskWork() || {}
+  if (!w.woman) return w
+  if (w.verifiedSourceCast === 'mw' || (w.woman && w.man)) {
+    if (w.woman && w.man && w.verifiedSourceCast !== 'mw') {
+      return updateCurrentDeskWork(deskMwPatch({ sourceKind: 'pair', ...(extra || {}) }))
+    }
+    return w
+  }
+  return updateCurrentDeskWork(
+    deskMwPatch({
+      sourceKind: w.man ? 'pair' : 'scene',
+      womanFull: w.womanFull || Boolean(extra?.womanFull),
+      ...(extra || {}),
+    }),
+  )
+}
+
 /** 여 칸 이름과 사진 속 인원·성별을 섞지 않는다. 여여는 통과시키지 않는다. */
 function deskLockedCast(work) {
   const w = work || currentDeskWork() || {}
   const bothSlots = Boolean(w.woman && w.man)
   const stored = Number(w.peopleCount) || 0
-  const peopleCount = Math.max(stored, bothSlots ? 2 : w.woman || w.man ? 1 : 0)
   const verifiedSourceCast = bothSlots || w.verifiedSourceCast === 'mw' ? 'mw' : ''
-  const sourceCast = peopleCount >= 2 ? verifiedSourceCast : ''
+  const peopleCount = Math.max(
+    stored,
+    bothSlots ? 2 : verifiedSourceCast === 'mw' ? 2 : w.woman || w.man ? 1 : 0,
+  )
+  const sourceCast = verifiedSourceCast === 'mw' ? 'mw' : ''
   const unverified = peopleCount >= 2 && !sourceCast
   const sourceKind =
     w.sourceKind === 'scene' || w.sourceKind === 'portrait' || w.sourceKind === 'pair'
@@ -11431,6 +11462,102 @@ function deskCastPhotos() {
   return deskFaceRefs(currentDeskWork()).map((ref) => ({ dataUrl: ref.dataUrl, gender: ref.gender }))
 }
 
+/** 여 칸 커플 원본에서 왼쪽·오른쪽 얼굴을 잘라 고정한다. CAST 칸을 머리 크롭으로 덮지 않는다. */
+async function deskScenePairFacePhotos(work) {
+  const w = work || currentDeskWork() || {}
+  const scene = w.womanLock || deskIdPhoto(w, 'woman') || w.woman || ''
+  if (!scene || typeof globalThis.detectSceneFaceBoxes !== 'function') return []
+  try {
+    const stable =
+      typeof globalThis.ensureStableDataUrl === 'function'
+        ? await globalThis.ensureStableDataUrl(scene)
+        : scene
+    const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, {
+      guessIfMissing: false,
+      mergeIou: 0.45,
+    })
+    if (!Array.isArray(boxes) || boxes.length < 2) return []
+    const sorted = boxes.slice().sort((a, b) => a.x - b.x)
+    const left = await globalThis.cropHeadFromBox(stable, sorted[0])
+    const right = await globalThis.cropHeadFromBox(stable, sorted[sorted.length - 1])
+    if (!left?.dataUrl || !right?.dataUrl) return []
+    return [
+      { dataUrl: left.dataUrl, gender: 'male' },
+      { dataUrl: right.dataUrl, gender: 'female' },
+    ]
+  } catch (err) {
+    console.warn('desk scene pair faces failed', err)
+    return []
+  }
+}
+
+/** 여 칸 커플: 오른쪽 사람만 잘라 유료 엔진에 보낸다. 왼쪽 남자 화소는 안 보낸다. */
+async function cropDeskRightPerson(imageSrc) {
+  if (!imageSrc || typeof globalThis.detectSceneFaceBoxes !== 'function') return null
+  const stable =
+    typeof globalThis.ensureStableDataUrl === 'function'
+      ? await globalThis.ensureStableDataUrl(imageSrc)
+      : imageSrc
+  const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, {
+    guessIfMissing: false,
+    mergeIou: 0.82,
+  })
+  const list = Array.isArray(boxes) ? boxes.filter((b) => b && b.w >= 0.04 && b.h >= 0.05) : []
+  if (list.length < 1) return null
+  const sorted = list.slice().sort((a, b) => a.x - b.x)
+  const right = sorted[sorted.length - 1]
+  const img = await loadDeskImage(stable)
+  const w = img.naturalWidth || 1
+  const h = img.naturalHeight || 1
+  const faceW = Math.max(8, right.w * w)
+  const left = sorted[0]
+  const leftCx = (left.x + left.w / 2) * w
+  const rightCx = (right.x + right.w / 2) * w
+  const mid = sorted.length >= 2 ? Math.round((leftCx + rightCx) / 2) : Math.round(w * 0.48)
+  let sx = Math.max(mid, Math.round(right.x * w - faceW * 0.22))
+  if (sorted.length === 1) {
+    const cx = right.x + right.w / 2
+    if (cx < 0.58) return null
+    sx = Math.max(Math.round(w * 0.46), Math.round(right.x * w - faceW * 0.2))
+  }
+  sx = Math.max(sx, Math.round(w * 0.38))
+  const sw = Math.max(32, w - sx)
+  if (sw > w * 0.64 || sx < w * 0.32) return null
+  const canvas = document.createElement('canvas')
+  canvas.width = sw
+  canvas.height = h
+  canvas.getContext('2d').drawImage(img, sx, 0, sw, h, 0, 0, sw, h)
+  return { dataUrl: canvas.toDataURL('image/jpeg', 0.92), sx, sy: 0, sw, sh: h, fullW: w, fullH: h }
+}
+
+async function pasteDeskRectOntoFull(fullSrc, pieceSrc, rect) {
+  const base = await loadDeskImage(fullSrc)
+  const piece = await loadDeskImage(pieceSrc)
+  const w = base.naturalWidth || rect.fullW
+  const h = base.naturalHeight || rect.fullH
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  ctx.drawImage(base, 0, 0, w, h)
+  const layer = document.createElement('canvas')
+  layer.width = w
+  layer.height = h
+  const lx = layer.getContext('2d')
+  lx.drawImage(piece, rect.sx, rect.sy, rect.sw, rect.sh)
+  const feather = Math.max(16, Math.round(rect.sw * 0.08))
+  const fade = lx.createLinearGradient(rect.sx, 0, rect.sx + feather, 0)
+  fade.addColorStop(0, 'rgba(0,0,0,0)')
+  fade.addColorStop(1, 'rgba(0,0,0,1)')
+  lx.globalCompositeOperation = 'destination-in'
+  lx.fillStyle = '#000'
+  lx.fillRect(rect.sx + feather, 0, Math.max(1, w - rect.sx - feather), h)
+  lx.fillStyle = fade
+  lx.fillRect(rect.sx, 0, feather, h)
+  ctx.drawImage(layer, 0, 0)
+  return canvas.toDataURL('image/jpeg', 0.92)
+}
+
 function updateCurrentDeskWork(patch) {
   const store = readDeskWorks()
   const idx = store.works.findIndex((work) => work.id === store.currentId)
@@ -11484,20 +11611,23 @@ async function captureDeskLeadsFromScene(imageUrl) {
   const right = sorted[1] ? await globalThis.cropHeadFromBox(stable, sorted[1]) : null
   if (!right) {
     const work = currentDeskWork()
-    if (!work?.woman) {
-      updateCurrentDeskWork({ woman: left.dataUrl, womanFace: left.dataUrl, womanFull: false })
-    }
+    updateCurrentDeskWork({
+      woman: work?.woman || stable,
+      womanFace: left.dataUrl,
+    })
     return { count: 1 }
   }
   updateCurrentDeskWork(
     deskMwPatch({
-      woman: left.dataUrl,
-      man: right.dataUrl,
-      womanFace: left.dataUrl,
-      manFace: right.dataUrl,
-      womanFull: false,
+      woman: stable,
+      womanLock: stable,
+      womanFace: right.dataUrl,
+      manFace: left.dataUrl,
+      womanFull: true,
+      man: '',
       manFull: false,
-      sourceKind: 'pair',
+      assembledPair: false,
+      sourceKind: 'scene',
     }),
   )
   setTwoPeopleChecked(true)
@@ -11768,13 +11898,18 @@ async function composeDeskSoloStill(src) {
 
 async function composeDeskCoupleStill(leftSrc, rightSrc) {
   if (globalThis.DeskPipeline?.composePlate) {
-    return globalThis.DeskPipeline.composePlate(
+    const dataUrl = await globalThis.DeskPipeline.composePlate(
       [
-        { src: leftSrc, heightFactor: 0.89 },
-        { src: rightSrc, heightFactor: 1 },
+        { src: leftSrc, heightFactor: 0.89, slot: 'woman' },
+        { src: rightSrc, heightFactor: 1, slot: 'man' },
       ],
       deskComposeKind(),
     )
+    const places = globalThis.DeskPipeline.lastPlacements || []
+    if (places.length >= 2) {
+      saveDeskCastLayout(places[0], places[1], places[0].cw, places[0].ch)
+    }
+    return dataUrl
   }
   const [leftCut, rightCut] = await Promise.all([deskIsolatePerson(leftSrc), deskIsolatePerson(rightSrc)])
   const [cw, ch] = deskComposeSize()
@@ -11791,14 +11926,309 @@ async function composeDeskCoupleStill(leftSrc, rightSrc) {
     const scale = deskFitBodyScale(cut, cw, ch, heightFactor)
     const dw = Math.round(w * scale)
     const dh = Math.round(h * scale)
-    ctx.drawImage(cut, Math.round(cx - dw / 2), ground - dh, dw, dh)
+    const x = Math.round(cx - dw / 2)
+    const y = ground - dh
+    ctx.drawImage(cut, x, y, dw, dh)
+    return { x, y, w: dw, h: dh, cw, ch }
   }
-  draw(leftCut, cw * 0.34, 0.89)
-  draw(rightCut, cw * 0.66, 1)
+  const womanPlace = draw(leftCut, cw * 0.34, 0.89)
+  const manPlace = draw(rightCut, cw * 0.66, 1)
+  saveDeskCastLayout(womanPlace, manPlace, cw, ch)
   return canvas.toDataURL('image/jpeg', 0.95)
 }
 
-async function countDeskSceneFaces(imageUrl, waitMs = 4000) {
+function newDeskCastId(role) {
+  return `cast-${role}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+async function captureDeskCastLock(role, dataUrl) {
+  const id = newDeskCastId(role)
+  const faces = await deskStillFaceBoxes(dataUrl)
+  if (!faces || !faces.length) {
+    return { id, ok: false, reason: 'undetected', face: null, person: null, pose: null, embed: null, dim: 0 }
+  }
+  const face = faces.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0]
+  const runtime = globalThis.DeskLookRuntime
+  if (!runtime || typeof runtime.embedCast !== 'function') {
+    return { id, ok: false, reason: 'undetected', face, person: null, pose: null, embed: null, dim: 0 }
+  }
+  const emb = await runtime.embedCast(dataUrl, { ...face, slot: role })
+  if (!emb?.ok || emb.dim !== 512 || !emb.vec) {
+    return { id, ok: false, reason: 'undetected', face, person: null, pose: null, embed: null, dim: 0 }
+  }
+  const person = {
+    x: Math.max(0, face.x - face.w * 0.35),
+    y: Math.max(0, face.y - face.h * 0.7),
+    w: Math.min(1 - Math.max(0, face.x - face.w * 0.35), face.w * 2.2),
+    h: Math.min(1 - Math.max(0, face.y - face.h * 0.7), 1),
+  }
+  return {
+    id,
+    ok: true,
+    reason: '',
+    face,
+    person,
+    pose: { cx: face.x + face.w / 2, cy: face.y + face.h / 2 },
+    embed: emb.vec,
+    dim: emb.dim,
+    embedEngine: 'insightface-buffalo_l',
+  }
+}
+
+function deskFaceInSlot(faces, box) {
+  if (!box || !faces?.length) return null
+  return faces.find((f) => pointInNorm(box, f.x + f.w / 2, f.y + f.h / 2)) || null
+}
+
+function saveDeskCastLayout(womanRect, manRect, cw, ch) {
+  const work = typeof currentDeskWork === 'function' ? currentDeskWork() : null
+  const norm = (r, slot, castId) =>
+    r
+      ? {
+          slot,
+          castId: castId || '',
+          x: r.x / cw,
+          y: r.y / ch,
+          w: r.w / cw,
+          h: r.h / ch,
+        }
+      : null
+  const layout = {
+    sceneW: cw,
+    sceneH: ch,
+    woman: norm(womanRect, 'woman', work?.womanCastId || work?.womanCastLock?.id),
+    man: norm(manRect, 'man', work?.manCastId || work?.manCastLock?.id),
+  }
+  if (typeof updateCurrentDeskWork === 'function') updateCurrentDeskWork({ castLayout: layout })
+  return layout
+}
+
+function deskSoloWomanLayout() {
+  const work = typeof currentDeskWork === 'function' ? currentDeskWork() : null
+  return {
+    sceneW: 1,
+    sceneH: 1,
+    woman: { slot: 'woman', castId: work?.womanCastId || work?.womanCastLock?.id || '', x: 0, y: 0, w: 1, h: 1 },
+    man: null,
+  }
+}
+
+function deskLayoutLinked(layout, needCouple) {
+  if (!layout?.woman || layout.woman.w < 0.04 || layout.woman.h < 0.04) return false
+  if (needCouple && (!layout.man || layout.man.w < 0.04 || layout.man.h < 0.04)) return false
+  return true
+}
+
+function pointInNorm(box, x, y) {
+  if (!box) return false
+  return x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h
+}
+
+async function buildWomanClothesMaskDataUrl(sceneUrl, layout) {
+  if (!sceneUrl || !layout?.woman) return { ok: false, reason: 'no_layout' }
+  const img = await loadDeskImage(sceneUrl)
+  const w = img.naturalWidth || 1
+  const h = img.naturalHeight || 1
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  ctx.drawImage(img, 0, 0)
+  const pix = ctx.getImageData(0, 0, w, h)
+  const d = pix.data
+  const faces = await deskStillFaceBoxes(sceneUrl)
+  if (!faces || !faces.length) return { ok: false, reason: 'undetected' }
+  const womanFaces = faces.filter((f) => pointInNorm(layout.woman, f.x + f.w / 2, f.y + f.h / 2))
+  if (womanFaces.length !== 1) return { ok: false, reason: 'woman_face_unlink' }
+  if (layout.man) {
+    const manFaces = faces.filter((f) => pointInNorm(layout.man, f.x + f.w / 2, f.y + f.h / 2))
+    if (manFaces.length !== 1) return { ok: false, reason: 'man_face_unlink' }
+  } else if (faces.length !== 1) {
+    return { ok: false, reason: 'cast_people' }
+  }
+  const face = womanFaces[0]
+  const fx0 = Math.round((face.x + face.w * 0.25) * w)
+  const fy0 = Math.round((face.y + face.h * 0.28) * h)
+  const fx1 = Math.round((face.x + face.w * 0.75) * w)
+  const fy1 = Math.round((face.y + face.h * 0.72) * h)
+  let sr = 0
+  let sg = 0
+  let sb = 0
+  let sn = 0
+  for (let y = fy0; y < fy1; y += 2) {
+    for (let x = fx0; x < fx1; x += 2) {
+      const i = (y * w + x) * 4
+      sr += d[i]
+      sg += d[i + 1]
+      sb += d[i + 2]
+      sn += 1
+    }
+  }
+  if (!sn) return { ok: false, reason: 'no_skin_sample' }
+  sr /= sn
+  sg /= sn
+  sb /= sn
+  const hairTop = face.y - face.h * 0.55
+  const neckBot = face.y + face.h * 1.28
+  const facePadX = face.w * 0.22
+  const mask = ctx.createImageData(w, h)
+  const m = mask.data
+  let white = 0
+  let womanPx = 0
+  let invade = 0
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const i = (y * w + x) * 4
+      const nx = x / w
+      const ny = y / h
+      const inWoman = pointInNorm(layout.woman, nx, ny)
+      const inMan = layout.man ? pointInNorm(layout.man, nx, ny) : false
+      if (inWoman) womanPx += 1
+      const dr = d[i] - sr
+      const dg = d[i + 1] - sg
+      const db = d[i + 2] - sb
+      const skin = dr * dr + dg * dg + db * db < 42 * 42 && d[i] > d[i + 2] - 8
+      let keep = true
+      if (!inWoman || inMan) keep = true
+      else {
+        const inHead =
+          ny >= hairTop &&
+          ny <= neckBot &&
+          nx >= face.x - facePadX &&
+          nx <= face.x + face.w + facePadX
+        keep = inHead || skin || d[i + 3] < 20
+      }
+      if (keep) {
+        m[i] = 0
+        m[i + 1] = 0
+        m[i + 2] = 0
+        m[i + 3] = 255
+      } else {
+        m[i] = 255
+        m[i + 1] = 255
+        m[i + 2] = 255
+        m[i + 3] = 255
+        white += 1
+        if (skin || (dr * dr + dg * dg + db * db < 38 * 38 && d[i] > d[i + 2] - 8)) invade += 1
+      }
+    }
+  }
+  const ratio = white / Math.max(womanPx, 1)
+  if (white < 80 || ratio < 0.04 || ratio > 0.48) {
+    return { ok: false, reason: 'mask_not_clothes', white, ratio, womanPx }
+  }
+  if (invade / Math.max(white, 1) > 0.02) {
+    return { ok: false, reason: 'mask_invade', white, invade, ratio }
+  }
+  ctx.putImageData(mask, 0, 0)
+  const out = document.createElement('canvas')
+  out.width = Math.min(768, w)
+  out.height = Math.min(1024, h)
+  const octx = out.getContext('2d')
+  octx.filter = 'blur(4px)'
+  octx.drawImage(canvas, 0, 0, out.width, out.height)
+  octx.filter = 'none'
+  return {
+    ok: true,
+    dataUrl: out.toDataURL('image/png'),
+    white,
+    ratio,
+    invade,
+    fullDataUrl: canvas.toDataURL('image/png'),
+  }
+}
+
+async function compositeDeskClothesResult(srcUrl, genUrl, maskUrl, featherPx) {
+  if (!srcUrl || !genUrl || !maskUrl) return { ok: false, reason: 'protect', protectIdentical: false }
+  try {
+    const srcImg = await loadDeskImage(srcUrl)
+    const genImg = await loadDeskImage(genUrl)
+    const maskImg = await loadDeskImage(maskUrl)
+    const w = srcImg.naturalWidth || 1
+    const h = srcImg.naturalHeight || 1
+    const grab = (img) => {
+      const c = document.createElement('canvas')
+      c.width = w
+      c.height = h
+      c.getContext('2d').drawImage(img, 0, 0, w, h)
+      return c.getContext('2d').getImageData(0, 0, w, h)
+    }
+    const src = grab(srcImg)
+    const gen = grab(genImg)
+    const mask = grab(maskImg)
+    const r = Number.isFinite(featherPx) ? Math.min(8, Math.max(3, Math.round(featherPx))) : 5
+    const n = w * h
+    const md = mask.data
+    const out = ctxImage(w, h)
+    const s = src.data
+    const g = gen.data
+    const o = out.data
+    let protectN = 0
+    let protectMax = 0
+    for (let p = 0; p < n; p += 1) {
+      const i = p * 4
+      const x = p % w
+      const y = (p - x) / w
+      let t = 0
+      if (md[i] >= 128) {
+        let dBlack = r
+        const x0 = Math.max(0, x - r)
+        const x1 = Math.min(w - 1, x + r)
+        const y0 = Math.max(0, y - r)
+        const y1 = Math.min(h - 1, y + r)
+        for (let yy = y0; yy <= y1; yy += 1) {
+          for (let xx = x0; xx <= x1; xx += 1) {
+            if (md[(yy * w + xx) * 4] >= 128) continue
+            const d = Math.hypot(xx - x, yy - y)
+            if (d < dBlack) dBlack = d
+          }
+        }
+        t = dBlack >= r ? 1 : dBlack / r
+      }
+      if (t <= 0) {
+        o[i] = s[i]
+        o[i + 1] = s[i + 1]
+        o[i + 2] = s[i + 2]
+        o[i + 3] = s[i + 3]
+        protectN += 1
+        const mad = (Math.abs(o[i] - s[i]) + Math.abs(o[i + 1] - s[i + 1]) + Math.abs(o[i + 2] - s[i + 2])) / 3
+        if (mad > protectMax) protectMax = mad
+      } else if (t >= 1) {
+        o[i] = g[i]
+        o[i + 1] = g[i + 1]
+        o[i + 2] = g[i + 2]
+        o[i + 3] = 255
+      } else {
+        o[i] = Math.round(s[i] * (1 - t) + g[i] * t)
+        o[i + 1] = Math.round(s[i + 1] * (1 - t) + g[i + 1] * t)
+        o[i + 2] = Math.round(s[i + 2] * (1 - t) + g[i + 2] * t)
+        o[i + 3] = 255
+      }
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    canvas.getContext('2d').putImageData(out, 0, 0)
+    return {
+      ok: true,
+      dataUrl: canvas.toDataURL('image/png'),
+      protectIdentical: protectN > 0 && protectMax === 0,
+      protectN,
+      protectMax,
+    }
+  } catch {
+    return { ok: false, reason: 'protect', protectIdentical: false }
+  }
+}
+
+function ctxImage(w, h) {
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  return c.getContext('2d').createImageData(w, h)
+}
+
+async function countDeskSceneFaces(imageUrl, waitMs = 4000, opts) {
   if (!imageUrl || typeof globalThis.detectSceneFaceBoxes !== 'function') return 0
   const work = Promise.resolve()
     .then(async () => {
@@ -11807,16 +12237,321 @@ async function countDeskSceneFaces(imageUrl, waitMs = 4000) {
           ? await globalThis.ensureStableDataUrl(imageUrl)
           : imageUrl
       const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, {
-        guessIfMissing: false,
-        mergeIou: 0.82,
+        guessIfMissing: Boolean(opts?.guessIfMissing),
+        mergeIou: typeof opts?.mergeIou === 'number' ? opts.mergeIou : 0.55,
       })
-      return Array.isArray(boxes) ? boxes.length : 0
+      const list = Array.isArray(boxes) ? boxes.filter((b) => b && b.w >= 0.07 && b.h >= 0.08) : []
+      return list.length
     })
     .catch(() => 0)
+  if (opts?.noTimeout) return work
+  let settled = false
   const timed = new Promise((resolve) => {
-    window.setTimeout(() => resolve(0), Math.max(500, waitMs))
+    window.setTimeout(() => {
+      if (!settled) resolve(-1)
+    }, Math.max(500, waitMs))
   })
-  return Promise.race([work, timed])
+  const n = await Promise.race([
+    work.then((v) => {
+      settled = true
+      return v
+    }),
+    timed,
+  ])
+  return n
+}
+
+async function deskStillFaceBoxes(imageUrl) {
+  if (!imageUrl || typeof globalThis.detectSceneFaceBoxes !== 'function') return null
+  try {
+    const stable =
+      typeof globalThis.ensureStableDataUrl === 'function'
+        ? await globalThis.ensureStableDataUrl(imageUrl)
+        : imageUrl
+    const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, {
+      guessIfMissing: false,
+      mergeIou: 0.55,
+    })
+    return (Array.isArray(boxes) ? boxes : []).filter((b) => b && b.w >= 0.07 && b.h >= 0.08)
+  } catch {
+    return null
+  }
+}
+
+async function deskFaceHist(imageUrl, box) {
+  if (!imageUrl || !box) return null
+  try {
+    const img = await loadDeskImage(imageUrl)
+    const w = img.naturalWidth || 1
+    const h = img.naturalHeight || 1
+    const sx = Math.max(0, Math.round(box.x * w))
+    const sy = Math.max(0, Math.round(box.y * h))
+    const sw = Math.max(8, Math.round(box.w * w))
+    const sh = Math.max(8, Math.round(box.h * h))
+    const canvas = document.createElement('canvas')
+    canvas.width = 32
+    canvas.height = 32
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 32, 32)
+    const data = ctx.getImageData(0, 0, 32, 32).data
+    const hist = new Array(16).fill(0)
+    let r = 0
+    let g = 0
+    let b = 0
+    const n = 32 * 32
+    for (let i = 0; i < data.length; i += 4) {
+      r += data[i]
+      g += data[i + 1]
+      b += data[i + 2]
+      const y = Math.round((0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) / 16)
+      hist[Math.max(0, Math.min(15, y))] += 1
+    }
+    return { hist, r: r / n, g: g / n, b: b / n }
+  } catch {
+    return null
+  }
+}
+
+function deskHistCorr(a, b) {
+  if (!a?.hist || !b?.hist) return 0
+  let dot = 0
+  let na = 0
+  let nb = 0
+  for (let i = 0; i < 16; i += 1) {
+    dot += a.hist[i] * b.hist[i]
+    na += a.hist[i] * a.hist[i]
+    nb += b.hist[i] * b.hist[i]
+  }
+  const hist = na && nb ? dot / Math.sqrt(na * nb) : 0
+  const color =
+    1 -
+    Math.min(
+      1,
+      (Math.abs(a.r - b.r) + Math.abs(a.g - b.g) + Math.abs(a.b - b.b)) / (3 * 80),
+    )
+  return hist * 0.65 + color * 0.35
+}
+
+async function deskFaceDescriptor(imageUrl, box) {
+  if (!imageUrl || !box) return null
+  try {
+    const img = await loadDeskImage(imageUrl)
+    const w = img.naturalWidth || 1
+    const h = img.naturalHeight || 1
+    const canvas = document.createElement('canvas')
+    canvas.width = 32
+    canvas.height = 32
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(
+      img,
+      Math.max(0, box.x * w),
+      Math.max(0, box.y * h),
+      Math.max(8, box.w * w),
+      Math.max(8, box.h * h),
+      0,
+      0,
+      32,
+      32,
+    )
+    const data = ctx.getImageData(0, 0, 32, 32).data
+    const vec = []
+    let sum = 0
+    for (let i = 0; i < data.length; i += 4) {
+      const y = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+      vec.push(y)
+      sum += y
+    }
+    const mean = sum / vec.length
+    return vec.map((v) => v - mean)
+  } catch {
+    return null
+  }
+}
+
+function deskVecCos(a, b) {
+  if (!a || !b || a.length !== b.length) return 0
+  let dot = 0
+  let na = 0
+  let nb = 0
+  for (let i = 0; i < a.length; i += 1) {
+    dot += a[i] * b[i]
+    na += a[i] * a[i]
+    nb += b[i] * b[i]
+  }
+  return na && nb ? dot / Math.sqrt(na * nb) : 0
+}
+
+async function deskProtectPixelDiff(sourceUrl, resultUrl, maskUrl) {
+  if (!maskUrl) return { ok: true, reason: 'protect', skipped: true, mad: 0 }
+  if (!sourceUrl || !resultUrl) return { ok: false, reason: 'protect', mad: 1 }
+  try {
+    const src = await loadDeskImage(sourceUrl)
+    const out = await loadDeskImage(resultUrl)
+    const mask = await loadDeskImage(maskUrl)
+    const w = 96
+    const h = 128
+    const grab = (img) => {
+      const c = document.createElement('canvas')
+      c.width = w
+      c.height = h
+      c.getContext('2d').drawImage(img, 0, 0, w, h)
+      return c.getContext('2d').getImageData(0, 0, w, h).data
+    }
+    const a = grab(src)
+    const b = grab(out)
+    const m = grab(mask)
+    let sum = 0
+    let n = 0
+    let hot = 0
+    for (let i = 0; i < m.length; i += 4) {
+      if (m[i] >= 128) continue
+      const mad = (Math.abs(a[i] - b[i]) + Math.abs(a[i + 1] - b[i + 1]) + Math.abs(a[i + 2] - b[i + 2])) / 3
+      sum += mad
+      n += 1
+      if (mad > 0) hot += 1
+    }
+    if (!n) return { ok: false, reason: 'protect', mad: 1 }
+    const mean = sum / n
+    return { ok: mean === 0 && hot === 0, reason: 'protect', mad: mean, hot: hot / n }
+  } catch {
+    return { ok: false, reason: 'protect', mad: 1 }
+  }
+}
+
+async function deskLookVisualPasses(sourceUrl, resultUrl, maskUrl) {
+  if (!maskUrl) return { ok: true, reason: '', skipped: true }
+  const visualFn = globalThis.DeskLookLib?.gateLookVisual
+  if (typeof visualFn !== 'function') return { ok: false, reason: 'clothes_goal' }
+  try {
+    const src = await loadDeskImage(sourceUrl)
+    const out = await loadDeskImage(resultUrl)
+    const maskImg = await loadDeskImage(maskUrl)
+    const w = 192
+    const h = 256
+    const grab = (img, gray) => {
+      const c = document.createElement('canvas')
+      c.width = w
+      c.height = h
+      c.getContext('2d').drawImage(img, 0, 0, w, h)
+      const data = c.getContext('2d').getImageData(0, 0, w, h).data
+      if (!gray) return new Uint8Array(data)
+      const m = new Uint8Array(w * h)
+      for (let p = 0, i = 0; p < m.length; p++, i += 4) m[p] = data[i] >= 128 ? 255 : 0
+      return m
+    }
+    return visualFn({
+      src: grab(src, false),
+      out: grab(out, false),
+      mask: grab(maskImg, true),
+      width: w,
+      height: h,
+    })
+  } catch {
+    return { ok: false, reason: 'clothes_goal' }
+  }
+}
+
+async function deskStillPasses(sourceUrl, resultUrl, expectPeople, maskUrl, layout) {
+  const expect = expectPeople >= 2 ? 2 : 1
+  const outBoxes = await deskStillFaceBoxes(resultUrl)
+  if (!outBoxes || !outBoxes.length) return { ok: false, reason: 'undetected' }
+  if (outBoxes.length !== expect) {
+    return {
+      ok: false,
+      reason: outBoxes.length > expect ? 'extra' : expect >= 2 ? 'mw-ww' : 'faces',
+    }
+  }
+  const srcBoxes = await deskStillFaceBoxes(sourceUrl)
+  if (!srcBoxes || !srcBoxes.length) return { ok: false, reason: 'undetected' }
+  if (srcBoxes.length !== expect) return { ok: false, reason: 'cast_people' }
+  const work = typeof currentDeskWork === 'function' ? currentDeskWork() : null
+  const slots = layout || work?.castLayout
+  const pairs = []
+  if (expect >= 2) {
+    if (!deskLayoutLinked(slots, true)) return { ok: false, reason: 'cast_people' }
+    const srcW = deskFaceInSlot(srcBoxes, slots.woman)
+    const outW = deskFaceInSlot(outBoxes, slots.woman)
+    const srcM = deskFaceInSlot(srcBoxes, slots.man)
+    const outM = deskFaceInSlot(outBoxes, slots.man)
+    if (!srcW || !outW || !srcM || !outM) return { ok: false, reason: 'undetected' }
+    pairs.push([srcW, outW, work?.womanCastLock?.embed], [srcM, outM, work?.manCastLock?.embed])
+  } else {
+    const srcMain = deskFaceInSlot(srcBoxes, slots?.woman) || srcBoxes.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0]
+    const outMain = deskFaceInSlot(outBoxes, slots?.woman) || outBoxes.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0]
+    if (!srcMain || !outMain) return { ok: false, reason: 'undetected' }
+    pairs.push([srcMain, outMain, work?.womanCastLock?.embed || work?.manCastLock?.embed])
+  }
+  for (const [srcBox, outBox, castEmbed] of pairs) {
+    const dx = srcBox.x + srcBox.w / 2 - (outBox.x + outBox.w / 2)
+    const dy = srcBox.y + srcBox.h / 2 - (outBox.y + outBox.h / 2)
+    if (Math.hypot(dx, dy) > 0.18) return { ok: false, reason: 'pose' }
+    const scale = (outBox.w * outBox.h) / Math.max(0.0001, srcBox.w * srcBox.h)
+    if (scale > 1.85 || scale < 0.45) return { ok: false, reason: 'pose' }
+    const runtime = globalThis.DeskLookRuntime
+    if (!runtime || typeof runtime.embedCast !== 'function') return { ok: false, reason: 'undetected' }
+    const left = await runtime.embedCast(sourceUrl, srcBox)
+    const right = await runtime.embedCast(resultUrl, outBox)
+    if (!left?.ok || !right?.ok || left.dim !== 512 || right.dim !== 512) return { ok: false, reason: 'undetected' }
+    if (deskVecCos(left.vec, right.vec) < 0.35) return { ok: false, reason: 'embed' }
+    if (Array.isArray(castEmbed) && castEmbed.length === 512 && deskVecCos(castEmbed, right.vec) < 0.35) {
+      return { ok: false, reason: 'embed' }
+    }
+  }
+  const protect = await deskProtectPixelDiff(sourceUrl, resultUrl, maskUrl)
+  if (!protect.ok) return { ok: false, reason: 'protect' }
+  const visual = await deskLookVisualPasses(sourceUrl, resultUrl, maskUrl)
+  if (!visual.ok) {
+    if (visual.reason === 'silhouette') return { ok: false, reason: 'silhouette' }
+    if (visual.reason === 'mask_seam') return { ok: false, reason: 'mask_seam' }
+    return { ok: false, reason: 'clothes_goal' }
+  }
+  return { ok: true }
+}
+
+async function resolveDeskFrame(opts = {}) {
+  const work = typeof currentDeskWork === 'function' ? currentDeskWork() : null
+  const woman = work?.womanLock || work?.woman || ''
+  const man = work?.man || ''
+  const scene =
+    (typeof currentResult !== 'undefined' ? currentResult.imageUrl : '') || work?.scene || ''
+  const fromScene = opts.from === 'scene' || (opts.from !== 'cast' && Boolean(scene))
+  let image = fromScene ? scene || woman || man : woman || man || scene
+  if (!image) return { ok: false, image: '', couple: false, people: 0, message: '여 칸이나 남 칸에 사진을 넣으세요.' }
+  const count =
+    typeof countDeskSceneFaces === 'function'
+      ? await countDeskSceneFaces(image, 12000, { mergeIou: 0.82, noTimeout: true })
+      : 0
+  let faces = count < 0 ? 0 : count
+  const needCouple = opts.needCouple === true
+  if (faces < 2 && woman && !man) {
+    const n =
+      typeof countDeskSceneFaces === 'function'
+        ? await countDeskSceneFaces(woman, 12000, { mergeIou: 0.82, noTimeout: true })
+        : 0
+    if (n >= 2) {
+      image = woman
+      faces = n
+    }
+  }
+  if ((needCouple || (woman && man)) && faces < 2 && woman && man && typeof composeDeskCoupleStill === 'function') {
+    const composed = await composeDeskCoupleStill(woman, man)
+    if (composed) {
+      if (typeof applyDeskScenePixels === 'function') applyDeskScenePixels(composed, '두 사람 시작')
+      image = composed
+      faces = 2
+    }
+  }
+  const couple = faces >= 2
+  if (needCouple && !couple) {
+    return {
+      ok: false,
+      image,
+      couple: false,
+      people: 1,
+      message: '키스·포옹은 한 장에 두 사람이 있어야 합니다. 여와 남을 넣거나 허그 한 장을 여 칸에 넣으세요.',
+    }
+  }
+  return { ok: true, image, couple, people: couple ? 2 : 1 }
 }
 
 function applyDeskScenePixels(dataUrl, title) {
@@ -11847,12 +12582,14 @@ async function ensureDeskCoupleInScene() {
   if (work?.woman && work?.man) {
     const left = faces <= 1 ? scene : work.woman
     const composed = await composeDeskCoupleStill(left, work.man)
+    if (!composed) {
+      return { ok: false, message: '두 사람을 한 장에 붙이지 못했습니다. 2 한 장면을 먼저 누르세요.' }
+    }
     applyDeskScenePixels(composed, '두 사람 시작')
     setTwoPeopleChecked(true)
     return { ok: true, composed: true }
   }
-  setTwoPeopleChecked(true)
-  return { ok: true }
+  return { ok: false, message: '키스·포옹은 한 장에 두 사람이 있어야 합니다. 여와 남을 넣거나 허그 한 장을 여 칸에 넣으세요.' }
 }
 
 function syncDeskStageEmpty() {
@@ -11890,7 +12627,7 @@ function placeAdultDeskNodes() {
 
 function initAdultDesk() {
   const looks = [
-    { id: 'silk', label: '슬립', text: '슬립 한 겹' },
+    { id: 'silk', label: '슬립', text: '슬립 한 겹 노브라' },
     { id: 'black', label: '검은 드레스', text: '검은 드레스' },
     { id: 'dress', label: '원피스', text: '원피스' },
     { id: 'shirt', label: '셔츠', text: '흰 셔츠' },
@@ -11925,12 +12662,14 @@ function initAdultDesk() {
       id: 'kiss',
       label: '키스',
       motion: '키스. 두 사람이 서로 적극적으로 입술을 맞대고 키스한다. 옷은 그대로. 같은 두 얼굴. 서양인 교체 금지. 원본 구도 유지.',
+      motionCouple:
+        '키스. 원본 남자가 원본 여자와 입맞춤. 남자는 남자로 유지. 여여 키스 금지. 같은 두 얼굴. 옆모습이면 옆모습 유지. 정면 새 모델 금지. 원본 포옹·구도 유지. 새 사람 금지.',
     },
-    { id: 'hug', label: '포옹', motion: '두 사람이 가볍게 서로 안는다. 옷은 그대로. 같은 두 얼굴. 원본 구도 유지.' },
+    { id: 'hug', label: '포옹', motion: '두 사람이 가볍게 서로 안는다. 옷은 그대로. 같은 두 얼굴. 옆모습이면 옆모습 유지. 정면 새 모델 금지. 원본 구도 유지.' },
     { id: 'come', label: '다가가기', motion: '그가 그녀에게 한 걸음 다가간다. 옷은 그대로.' },
-    { id: 'turn', label: '고개', motion: '고개를 천천히 돌린다. 옷은 그대로.' },
+    { id: 'turn', label: '고개', motion: '고개를 아주 조금. 같은 얼굴. 옆모습이면 옆모습 유지. 정면 새 모델 금지. 옷은 그대로.' },
     { id: 'walk', label: '걷기', motion: '천천히 몇 걸음 걷는다. 옷은 그대로.' },
-    { id: 'look', label: '돌아보기', motion: '어깨 너머로 돌아본다. 옷은 그대로.' },
+    { id: 'look', label: '돌아보기', motion: '고개만 살짝. 카메라 정면으로 돌리지 말 것. 같은 얼굴. 새 모델 금지. 옷은 그대로.' },
     { id: 'smile', label: '미소', motion: '살짝 미소 짓는다. 옷은 그대로.' },
     {
       id: 'undress',
@@ -11953,7 +12692,7 @@ function initAdultDesk() {
         '혼자. 왼손은 가슴을, 오른손은 보지를 만진다. 지금 옷 유지. 끝까지 그 손. 옷 다시 입히기 금지. 원본 구도 유지. 새 사람 금지.',
       motionCouple: '남자가 한 손은 여자의 가슴을, 한 손은 보지를 동시에 만진다. 같은 두 사람. 새 사람 금지.',
     },
-    { id: 'zipper', label: '지퍼', motion: '여자가 남자 바지 지퍼를 내린다. 바지는 유지.' },
+    { id: 'zipper', label: '지퍼', motion: '여자가 남자 바지 지퍼만 내린다. 바지는 유지. 여자 배·피부·가랑이에 지퍼를 그리지 말 것.', motionCouple: '남자 바지 지퍼만 내린다. 여자는 지금 몸 그대로. 여자 몸에 지퍼 금지. 자지 금지. 같은 두 얼굴.' },
     {
       id: 'melt',
       label: '옷 녹이기',
@@ -12003,6 +12742,87 @@ function initAdultDesk() {
   const pickText = (list, id) => list.find((x) => x.id === id)?.text || ''
   const pickMotions = () =>
     state.move.map((id) => moves.find((item) => item.id === id)).filter(Boolean)
+
+  const ensureDeskNudeMove = () => {
+    if (state.look !== 'nude') return
+    if (state.move.some((id) => id === 'undress' || id === 'melt')) return
+    state.move = ['undress', ...state.move]
+    fill('desk-moves', moves, 'move')
+  }
+
+  const deskLookKind = () => (state.look === 'nude' ? 'nude' : state.look === 'silk' ? 'silk' : 'clothes')
+
+  const compileDeskMove = (couple, picked) => {
+    const ids = new Set(picked.map((one) => one.id))
+    const nude = state.look === 'nude' || ids.has('undress') || (ids.has('melt') && state.look === 'nude')
+    const alreadyNude =
+      currentDeskWork()?.lookApplied === 'nude' ||
+      /이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude|옷을 녹여 나체/i.test(currentResult.prompt || '')
+    const finish = (text) => {
+      let out = String(text || '').replace(/\s{2,}/g, ' ').trim()
+      if (nude) out = out.replace(/옷은 그대로\.?\s*/g, '')
+      if (couple && !/남자는 남자로/.test(out)) out = `${out} 남자는 남자로. 여여 금지.`
+      return out.replace(/\s{2,}/g, ' ').trim()
+    }
+    if (ids.has('zipper')) {
+      return finish(
+        couple
+          ? alreadyNude || nude
+            ? '남자 바지 지퍼만 손으로 내린다. 여자는 나체 유지. 여자 배·피부·가랑이에 지퍼·솔기 금지. 두 머리 유지. 배만 확대 금지. 자지 금지. 같은 두 얼굴. 원본 구도 유지.'
+            : '여자가 남자 바지 지퍼만 내린다. 남자 바지는 유지. 여자 몸에 지퍼를 그리지 말 것. 두 머리 유지. 배만 확대 금지. 같은 두 얼굴.'
+          : '혼자 장에는 지퍼를 그리지 말 것. 원본 구도 유지.',
+      )
+    }
+    if (couple && ids.has('kiss') && nude) {
+      return finish(
+        alreadyNude
+          ? '원본 남자가 원본 여자와 입맞춤. 남자는 남자로(짧은 머리, 납작한 가슴). 여자는 완전 나체. 브라·팬티 없음. 여여 키스 금지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.'
+          : '원본 남자가 원본 여자와 입맞춤. 남자는 남자로(짧은 머리, 납작한 가슴). 여자 옷만 녹여 나체. 브라·팬티 없음. 남자 옷은 유지. 여여 키스 금지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.',
+      )
+    }
+    if (couple && ids.has('kiss')) {
+      return finish(
+        '키스. 원본 남자가 원본 여자와 입맞춤. 남자는 남자로 유지. 여여 키스 금지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.',
+      )
+    }
+    if (couple && ids.has('hug') && nude) {
+      return finish(
+        alreadyNude
+          ? '원본 남자가 원본 여자를 안는다. 남자는 남자로. 여자는 나체 유지. 브라·팬티 없음. 여여 금지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.'
+          : '원본 남자가 원본 여자를 안는다. 여자 옷만 녹여 나체. 남자 옷은 유지. 남자는 남자로. 여여 금지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.',
+      )
+    }
+    if (!couple && ids.has('undress') && (ids.has('breast') || ids.has('hands'))) {
+      return finish(
+        ids.has('hands')
+          ? '옷벗김 후 왼손은 가슴을, 오른손은 보지를 만진다. 혼자. 원본 구도 유지. 새 사람 금지.'
+          : '옷벗김 후 자신의 가슴을 양손으로 주무른다. 혼자. 원본 구도 유지. 새 사람 금지.',
+      )
+    }
+    if (couple && nude) {
+      return finish(
+        alreadyNude
+          ? '이미 나체 유지. 여자 나체, 남자 옷은 유지. 남자는 남자로. 여여 금지. 같은 두 얼굴.'
+          : '옷벗김. 여자만 나체. 남자 옷은 유지. 남자는 남자로. 여여 금지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.',
+      )
+    }
+    if (ids.has('melt')) return finish(meltMotionForLook(couple))
+    if (nude && !couple && state.len <= 5 && picked.length === 1 && ids.has('undress')) {
+      return finish(currentResult.isShortsEndFrame ? '옷벗김. 혼자. 다음 겹만.' : '옷벗김. 혼자. 한 겹만.')
+    }
+    if (nude && !couple) return finish('옷벗김. 혼자. 원본 구도 유지. 클로즈업 금지.')
+    return finish(
+      picked.map((one) => (couple && one.motionCouple ? one.motionCouple : one.motion)).join(' '),
+    )
+  }
+
+  const deskActionFromPicked = (picked) => {
+    const ids = new Set((picked || []).map((one) => one.id))
+    if (ids.has('kiss')) return 'kiss'
+    if (ids.has('hug') || ids.has('come')) return 'hug'
+    if (ids.has('breast') || ids.has('hands')) return 'breast'
+    return 'none'
+  }
 
   const meltMotionForLook = (couple) => {
     const look = looks.find((item) => item.id === state.look) || looks[0]
@@ -12060,23 +12880,29 @@ function initAdultDesk() {
 
   const compileLookOnly = (coupleInScene = false) => {
     const look = pickText(looks, state.look)
-    const work = currentDeskWork()
     const nude = state.look === 'nude'
-    const couple = coupleInScene || deskLockedCast(work).couple
+    const couple = coupleInScene === true
     if (couple) {
-      return nude
-        ? '원본을 그 자리에서만 고친다. 사람 수·얼굴·포옹·카메라·배경 유지. 사람 추가·교체·복제·성별 바꾸기 금지. 여자만 옷을 녹여 나체. 남자는 보존. 여여·흰 스튜디오 금지.'
-        : `원본을 그 자리에서만 고친다. 사람 수·얼굴·포옹·카메라·배경 유지. 사람 추가·교체·복제·성별 바꾸기 금지. 여자만 옷을 ${look}으로 녹인다. 남자는 보존. 여여·흰 스튜디오 금지.`
+      if (nude) {
+        return '원본을 그 자리에서만 고친다. 여 칸에서 온 사람만 옷을 녹여 나체. 남 칸에서 온 사람은 그대로. 위치 추측 금지. 여여·성별 바꾸기·새 얼굴 금지.'
+      }
+      if (state.look === 'silk') {
+        return '원본을 그 자리에서만 고친다. 여 칸에서 온 사람만 얇은 실크 슬립. 남 칸에서 온 사람은 그대로. 위치 추측 금지. 여여 금지.'
+      }
+      return `원본을 그 자리에서만 고친다. 여 칸에서 온 사람만 옷을 ${look}으로 녹인다. 남 칸에서 온 사람은 그대로. 위치 추측 금지. 여여·성별 바꾸기·새 얼굴 금지.`
     }
-    return nude
-      ? '이 사진 같은 사람. 옷을 녹여 나체가 된다. 얼굴·몸·자세·구도 유지. 새 사람·화보 모델 금지.'
-      : `이 사진 같은 사람. 옷만 ${look}으로 녹인다. 얼굴·몸·자세·구도 유지. 새 사람·화보 모델 금지.`
+    if (nude) {
+      return '원본을 그 자리에서만 고친다. 얼굴·머리·몸매·자세·방 유지. 옷을 녹여 나체. 팬티 없음. 새 사람·흰 스튜디오·마른 화보 모델 금지.'
+    }
+    if (state.look === 'silk') {
+      return '원본을 그 자리에서만 고친다. 얼굴·머리·몸매·자세·방 유지. 옷만 얇은 실크 슬립 한 장 노브라로 녹인다. 팬티 따로 없음. 새 사람·흰 스튜디오·화보 모델 금지.'
+    }
+    return `원본을 그 자리에서만 고친다. 얼굴·머리·몸·자세·구도 유지. 옷만 ${look}으로 녹인다. 새 사람·흰 스튜디오·화보 모델 금지.`
   }
 
-  const compilePlaceOnly = () => {
+  const compilePlaceOnly = (coupleInScene = false) => {
     const place = pickText(places, state.place)
-    const work = currentDeskWork()
-    const couple = deskLockedCast(work).couple
+    const couple = coupleInScene === true
     const stand = state.pose.includes('stand')
     const sit = state.pose.includes('sit')
     const lie = state.pose.includes('lie')
@@ -12115,20 +12941,16 @@ function initAdultDesk() {
   }
 
   const setDeskStepOn = (step, on) => {
-    const btn = document.querySelector(`[data-desk-step="${step}"]`)
-    if (!btn) return
-    btn.disabled = !on
-    btn.setAttribute('aria-disabled', on ? 'false' : 'true')
+    document.querySelectorAll(`[data-desk-step="${step}"]`).forEach((btn) => {
+      btn.disabled = !on
+      btn.setAttribute('aria-disabled', on ? 'false' : 'true')
+    })
   }
 
   const setDeskCardsOn = (rootId, on) => {
     const root = document.getElementById(rootId)
     if (!root) return
     root.classList.toggle('is-off', !on)
-    root.querySelectorAll('[data-desk-pick]').forEach((el) => {
-      el.disabled = !on
-      el.setAttribute('aria-disabled', on ? 'false' : 'true')
-    })
   }
 
   let deskGateSeq = 0
@@ -12160,12 +12982,12 @@ function initAdultDesk() {
     }
     const canBody = hasCast
     const canTogether = bothReady
-    const canOutfit = hasCast
-    const canMove = oneReady || coupleScene || (hasCast && !needBody && Boolean(scene) && !bothReady)
+    const canOutfit = hasCast || Boolean(scene)
+    const canMove = hasCast || Boolean(scene)
     if (deskStillRunning) return
     setDeskStepOn('body', canBody)
     setDeskStepOn('together', canTogether)
-    setDeskStepOn('look', canOutfit)
+    setDeskStepOn('look', true)
     setDeskStepOn('place', canOutfit)
     const togetherBtn = document.querySelector('[data-desk-step="together"]')
     if (togetherBtn) togetherBtn.hidden = !hasWoman || !hasMan
@@ -12189,10 +13011,10 @@ function initAdultDesk() {
     if (run && state.job === 'video') run.disabled = !canMove
     const hint = document.getElementById('desk-still-hint')
     if (hint) {
-      if (!hasCast) hint.textContent = '여 칸이나 남 칸에 사진을 넣으세요. 그다음 1 몸 잇기만 됩니다.'
-      else if (needBody) hint.textContent = '일반 사진은 바로 3 옷 녹이기. 증명·상반신만 1 몸 잇기를 먼저 하면 전신으로 녹입니다.'
-      else if (bothReady && !coupleScene) hint.textContent = '2 한 장면은 오려서 키를 맞춥니다. 얼굴을 다시 그리지 않습니다.'
-      else hint.textContent = '3은 옷만, 4는 방만. 얼굴은 붙인 픽셀을 유지합니다.'
+      if (!canOutfit) hint.textContent = '여 칸에 사진을 넣거나 장면 사진을 올리세요. 옷을 고르면 바로 녹입니다.'
+      else if (needBody) hint.textContent = '증명·상반신은 옷을 고르면 같은 사람으로 몸을 이은 뒤 녹입니다.'
+      else if (bothReady && !coupleScene) hint.textContent = '두 사람이면 여+남을 한 장으로 붙인 뒤 여자 옷만 녹입니다.'
+      else hint.textContent = '옷을 고르면 바로 녹입니다. 방·자세를 고르면 바로 바꿉니다.'
     }
   }
 
@@ -12220,9 +13042,16 @@ function initAdultDesk() {
         const labels = state.move
           .map((id) => moves.find((item) => item.id === id)?.label)
           .filter(Boolean)
-        run.textContent = labels.length ? `움직이기 · ${labels.join('·')}` : '움직이기'
+        run.textContent =
+          state.look === 'nude'
+            ? '벗기 찍기'
+            : labels.length
+              ? `움직이기 · ${labels.join('·')}`
+              : '움직이기'
       }
     }
+    const lookKicker = document.getElementById('desk-look-kicker')
+    if (lookKicker) lookKicker.textContent = `옷 · ${window.__DESK_BUILD || ''}`
     void syncDeskGates()
   }
 
@@ -12273,6 +13102,7 @@ function initAdultDesk() {
     const jobBtn = event.target.closest('[data-desk-job]')
     if (jobBtn) {
       state.job = jobBtn.getAttribute('data-desk-job') === 'video' ? 'video' : 'still'
+      if (state.job === 'video') ensureDeskNudeMove()
       syncJobUi()
       return
     }
@@ -12333,13 +13163,25 @@ function initAdultDesk() {
           key,
         )
         if (key === 'look') fill('desk-looks-move', looks, 'look')
+        if (key === 'look' && id === 'nude') ensureDeskNudeMove()
         syncJobUi()
         if (state.job === 'still' && (key === 'look' || key === 'place' || key === 'pose')) {
-          if (document.getElementById('desk-still-packs')?.classList.contains('is-off')) {
+          const workNow = currentDeskWork()
+          const hasCast = Boolean(workNow?.woman || workNow?.man || deskSceneBase())
+          if (!hasCast) {
             setFormStatus('여 칸이나 남 칸에 사진을 넣은 뒤 옷을 고르세요.', true)
             return
           }
           void runDeskStillCard(key)
+          return
+        }
+        if (state.job === 'video' && key === 'look' && id === 'nude') {
+          void runDeskMoveQueue()
+          return
+        }
+        if (state.job === 'video' && key === 'move' && id === 'undress' && state.move.includes('undress')) {
+          void runDeskMoveQueue()
+          return
         }
       }
     }
@@ -12368,43 +13210,50 @@ function initAdultDesk() {
         [role]: dataUrl,
         [`${role}Face`]: dataUrl,
         [`${role}Full`]: false,
+        [`${role}CastId`]: '',
+        [`${role}CastLock`]: null,
         pair: role === 'man' ? 'mw' : currentDeskWork()?.man ? currentDeskWork()?.pair || 'mw' : currentDeskWork()?.pair,
       })
+      const lock = await captureDeskCastLock(role, dataUrl)
+      updateCurrentDeskWork({
+        [`${role}CastId`]: lock.id,
+        [`${role}CastLock`]: lock,
+      })
+      if (!lock.ok) {
+        syncWorkUi()
+        setFormStatus('얼굴을 확인하지 못해 CAST로 잠그지 않습니다. 추측하지 않습니다.', true)
+        return
+      }
       const faces =
-        typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(dataUrl, 8000) : 0
+        typeof countDeskSceneFaces === 'function'
+          ? await countDeskSceneFaces(dataUrl, 12000, { mergeIou: 0.4, noTimeout: true })
+          : 0
       if (faces >= 2) {
-        updateCurrentDeskWork(
-          deskMwPatch({
-            [`${role}Full`]: true,
-            sourceKind: 'scene',
-          }),
-        )
-        setTwoPeopleChecked(true)
-        showResult(dataUrl, '주연 사진', false, {
-          accepted: true,
-          prompt: currentResult.prompt || '',
-          size: sizeField?.value || 'story',
-          genMode: 'fashion',
-          engine: 'cast',
+        updateCurrentDeskWork({
+          [`${role}Full`]: true,
+          sourceKind: 'portrait',
+          castLayout: null,
+          ...(role === 'woman' ? { womanLock: '' } : {}),
         })
-        shortsFaceIdStill = dataUrl
         syncWorkUi()
         setFormStatus(
-          '한 장에 두 사람이 있습니다. 남녀로 보고, 여자 옷만 녹입니다. 남자는 남자로 둡니다.',
-          false,
+          '한 장에 두 사람이면 여·남 칸을 나눠 넣으세요. 오른쪽을 여자로 두지 않습니다. 옷은 녹이지 않습니다.',
+          true,
         )
         return
       }
       const both = Boolean(currentDeskWork()?.woman && currentDeskWork()?.man)
       updateCurrentDeskWork(
         both
-          ? deskMwPatch({ sourceKind: 'pair' })
+          ? deskMwPatch({ sourceKind: 'pair', castLayout: null })
           : {
               peopleCount: 1,
               sourceKind: 'portrait',
               sourceCast: '',
               verifiedSourceCast: '',
               pair: '',
+              womanLock: role === 'woman' ? '' : currentDeskWork()?.womanLock || '',
+              castLayout: role === 'woman' ? deskSoloWomanLayout() : currentDeskWork()?.castLayout || null,
             },
       )
       syncWorkUi()
@@ -12420,19 +13269,38 @@ function initAdultDesk() {
     }
     const uploaded = await loadImageFromFile(file)
     if (!uploaded) return
-    setFormStatus('장면에서 주연 얼굴을 찾는 중…', false)
+    const full =
+      typeof globalThis.ensureStableDataUrl === 'function'
+        ? (await globalThis.ensureStableDataUrl(uploaded)) || uploaded
+        : uploaded
+    updateCurrentDeskWork({
+      woman: full,
+      womanLock: full,
+      womanFull: true,
+    })
+    showResult(full, '장면 사진', false, {
+      accepted: true,
+      prompt: currentResult.prompt || '',
+      size: sizeField?.value || 'story',
+      genMode: 'fashion',
+      engine: 'cast',
+    })
+    syncWorkUi()
+    void syncDeskGates()
+    setFormStatus('여 칸에 넣었습니다. 옷을 고른 뒤 옷 녹이기를 누르세요.', false)
     try {
-      const found = await captureDeskLeadsFromScene(currentResult.imageUrl)
+      const found = await captureDeskLeadsFromScene(full)
       syncWorkUi()
       if (found.count >= 2) {
-        setFormStatus('이 사진의 두 사람을 주연으로 넣었습니다. 왼쪽이 여, 오른쪽이 남입니다. 바뀌었으면 여↔남을 누르세요. 바로 움직여도 됩니다.', false)
+        setFormStatus('이 사진의 두 사람을 주연으로 넣었습니다. 왼쪽이 남, 오른쪽이 여입니다. 옷 고른 뒤 옷 녹이기.', false)
       } else if (found.count === 1) {
-        setFormStatus('한 사람을 주연으로 넣었습니다. 바로 움직여도 됩니다.', false)
-      } else {
-        setFormStatus('장면은 올렸습니다. 얼굴은 못 잘랐습니다. 그래도 이 장면에서 움직일 수 있습니다.', false)
+        setFormStatus('여 칸에 넣었습니다. 옷을 고른 뒤 옷 녹이기를 누르세요.', false)
       }
     } catch (err) {
-      setFormStatus(`장면은 올렸습니다. 주연 추출 실패: ${err instanceof Error ? err.message : String(err)}`, true)
+      setFormStatus(
+        `여 칸에는 넣었습니다. 얼굴 자르기만 실패: ${err instanceof Error ? err.message : String(err)}`,
+        true,
+      )
     }
   }
   window.__deskApplyCastFile = applyDeskCastFile
@@ -12622,7 +13490,7 @@ function initAdultDesk() {
       const found = await captureDeskLeadsFromScene(currentResult.imageUrl)
       syncWorkUi()
       if (found.count >= 2) {
-        setFormStatus('이 사진의 두 사람을 주연으로 넣었습니다. 왼쪽이 여, 오른쪽이 남입니다. 바뀌었으면 여↔남을 누르세요.', false)
+        setFormStatus('이 사진의 두 사람을 주연으로 넣었습니다. 왼쪽이 남, 오른쪽이 여입니다. 바뀌었으면 여↔남을 누르세요.', false)
       } else if (found.count === 1) {
         setFormStatus('한 사람을 주연으로 넣었습니다.', false)
       } else {
@@ -12683,77 +13551,73 @@ function initAdultDesk() {
     return Boolean(currentResult.imageUrl)
   }
 
+  let deskMoveRunning = false
+  const pinDeskMoveCast = () => {
+    const work = currentDeskWork()
+    if (!work) return
+    const scene = currentResult?.imageUrl || work.scene || ''
+    if (scene) {
+      currentResult.imageUrl = scene
+      if (String(scene).startsWith('data:')) currentResult.imageDataUrl = scene
+      return
+    }
+    const lead = work.womanLock || work.woman || work.man
+    if (!lead) return
+    currentResult.imageUrl = lead
+    if (String(lead).startsWith('data:')) currentResult.imageDataUrl = lead
+  }
+
   const runDeskMoveQueue = async () => {
+    console.info('desk shorts', window.__DESK_BUILD || '')
+    if (deskMoveRunning) {
+      setFormStatus('지금 찍는 중입니다.', true)
+      return
+    }
+    ensureDeskNudeMove()
     let picked = pickMotions()
+    if (state.look === 'nude' && !picked.some((one) => one.id === 'undress' || one.id === 'melt')) {
+      const undress = moves.find((item) => item.id === 'undress')
+      if (undress) picked = [undress, ...picked]
+    }
     if (!picked.length) {
-      setFormStatus('동작을 하나 이상 고르세요.', true)
+      setFormStatus('동작을 하나 이상 고르세요. 나체면 벗기가 자동입니다.', true)
       return
     }
     if (!ensureDeskSceneFromCast()) {
       setFormStatus('여 칸이나 남 칸에 사진을 넣거나, 장면 사진을 올리세요.', true)
       return
     }
+    pinDeskMoveCast()
+    deskMoveRunning = true
+    try {
     if (animatePanel) animatePanel.hidden = false
-    const item = picked[0]
-    const rest = []
     const labels = picked.map((one) => one.label).join('·')
     setFormStatus(`${labels} 한 편 찍는 중…`, false)
     const coupleIds = new Set(['kiss', 'hug', 'come', 'zipper'])
-    if (picked.some((one) => coupleIds.has(one.id))) {
-      setFormStatus('지금 장 그대로 찍습니다…', false)
-      const ready = await ensureDeskCoupleInScene()
-      if (!ready.ok) {
-        setFormStatus(ready.message || '지금 장이 없습니다.', true)
-        return
-      }
-      setTwoPeopleBoxes(true)
-    }
-    const sourceFaceCount = await countDeskSceneFaces(currentResult.imageUrl, 8000)
-    const coupleInStill =
-      sourceFaceCount >= 2 ||
-      Boolean(document.getElementById('desk-two-people')?.checked) ||
-      picked.some((one) => coupleIds.has(one.id))
-    if (coupleInStill) setTwoPeopleBoxes(true)
-    const savedPrompt = currentResult.prompt
-    const alreadyNude = /이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude/i.test(savedPrompt || '')
-    const coupleMove = coupleInStill
-    const onlyUndress = picked.length === 1 && picked[0].id === 'undress'
-    let motion = picked
-      .map((one) => {
-        if (one.id === 'melt') return meltMotionForLook(coupleMove)
-        return coupleMove && one.motionCouple ? one.motionCouple : one.motion
-      })
-      .join(' ')
-    if (onlyUndress && state.len <= 5 && !coupleMove) {
-      motion = currentResult.isShortsEndFrame
-        ? '옷벗김. 혼자. 다음 겹만.'
-        : '옷벗김. 혼자. 한 겹만.'
-    } else if (onlyUndress && coupleMove) {
-      motion = alreadyNude
-        ? '이미 나체 유지. 여자 나체, 남자 옷은 유지. 같은 두 얼굴.'
-        : '옷벗김. 여자만 나체. 남자 옷은 유지. 같은 두 얼굴. 원본 구도 유지. 클로즈업 금지.'
-    } else if (!coupleMove && picked.some((one) => one.id === 'undress') && picked.some((one) => one.id === 'breast' || one.id === 'hands')) {
-      motion = picked.some((one) => one.id === 'hands')
-        ? '옷벗김 후 왼손은 가슴을, 오른손은 보지를 만진다. 혼자. 원본 구도 유지. 새 사람 금지.'
-        : '옷벗김 후 자신의 가슴을 양손으로 주무른다. 혼자. 원본 구도 유지. 새 사람 금지.'
-    } else if (alreadyNude && onlyUndress) {
-      motion = '옷벗김. 혼자.'
-    } else if (alreadyNude && !/이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude/i.test(motion)) {
-      motion = `이미 완전 나체 유지(브라·팬티 되살림 금지). ${motion}`
-    }
-    const work = currentDeskWork()
-    const castBody = work?.woman || work?.man || ''
-    const meltOnly = picked.some((one) => one.id === 'melt')
-    if (castBody && !coupleInStill && (currentResult.isShortsEndFrame || meltOnly)) {
-      currentResult.imageUrl = castBody
-      if (String(castBody).startsWith('data:')) currentResult.imageDataUrl = castBody
-    }
-    if (coupleInStill && deskLockedCast(currentDeskWork()).sourceCast !== 'mw') {
-      setFormStatus('남녀 두 사람 구성을 확인하지 못해 쇼츠를 중단했습니다.', true)
-      setAnimateBusy(false)
+    const needCouple = picked.some((one) => coupleIds.has(one.id))
+    const frame = await resolveDeskFrame({ from: 'scene', needCouple })
+    if (!frame.ok) {
+      setFormStatus(frame.message || '지금 장이 없습니다.', true)
       return
     }
+    currentResult.imageUrl = frame.image
+    if (String(frame.image).startsWith('data:')) currentResult.imageDataUrl = frame.image
+    const coupleInStill = frame.couple
+    if (coupleInStill) {
+      setTwoPeopleBoxes(true)
+      ensureDeskWork()
+      const live = currentDeskWork()
+      deskLockMwWomanScene(live, { sourceKind: live?.man ? 'pair' : 'scene' })
+      updateCurrentDeskWork(deskMwPatch({ sourceKind: live?.man ? 'pair' : 'scene' }))
+    }
+    const savedPrompt = currentResult.prompt
+    const alreadyNude =
+      currentDeskWork()?.lookApplied === 'nude' ||
+      /이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude|옷을 녹여 나체/i.test(savedPrompt || '')
+    const rest = []
+    const motion = compileDeskMove(coupleInStill, picked)
     setFormStatus(`${labels} 한 편 찍는 중…`, false)
+    const identityStill = currentResult.imageDataUrl || currentResult.imageUrl
     const prevVideoUrl =
       currentResult.isShortsEndFrame && currentResult.videoUrl ? currentResult.videoUrl : ''
     const clip = await requestAnimate({
@@ -12763,7 +13627,7 @@ function initAdultDesk() {
       keepBusy: Boolean(prevVideoUrl),
       statusPrefix: `[${labels}] `,
         sourcePeople: coupleInStill ? 2 : 1,
-        sourceCast: coupleInStill ? deskLockedCast(currentDeskWork()).sourceCast || undefined : undefined,
+        sourceCast: coupleInStill ? 'mw' : undefined,
     })
     if (!clip.ok || !clip.videoUrl) {
       setAnimateBusy(false)
@@ -12803,6 +13667,30 @@ function initAdultDesk() {
     }
     const undressed =
       alreadyNude || picked.some((one) => one.id === 'undress') || /옷벗김|undress|strip/i.test(motion)
+    if (coupleInStill && identityStill) {
+      currentResult.imageUrl = identityStill
+      if (String(identityStill).startsWith('data:')) currentResult.imageDataUrl = identityStill
+      currentResult.isShortsEndFrame = false
+      const stillImg = document.getElementById('result-image')
+      if (stillImg && stillImg.src !== identityStill) stillImg.src = identityStill
+      const vid = document.getElementById('result-video')
+      if (vid && clip.videoUrl) {
+        vid.src = clip.videoUrl
+        vid.hidden = false
+      }
+      currentResult.videoUrl = clip.videoUrl
+      state.move = rest.map((next) => next.id)
+      fill('desk-moves', moves, 'move')
+      syncJobUi()
+      setFormStatus(
+        rest.length
+          ? `${labels} 한 편은 붙였습니다. 가운데 정지화는 같은 얼굴 그대로입니다. 남은 ${rest.map((next) => next.label).join('·')}는 이 장에서 누르세요.`
+          : `${labels} 한 편은 붙였습니다. 가운데 정지화는 같은 얼굴 그대로입니다.`,
+        false,
+      )
+      setAnimateBusy(false)
+      return
+    }
     let endFrame = null
     try {
       endFrame = await captureVideoEndFrame(clip.videoUrl)
@@ -12895,6 +13783,9 @@ function initAdultDesk() {
       )
     } else if (!prevVideoUrl) {
       setFormStatus(`${labels} 한 편이 끝났습니다.`, false)
+    }
+    } finally {
+      deskMoveRunning = false
     }
   }
 
@@ -13037,51 +13928,57 @@ function initAdultDesk() {
     }
     const work = currentDeskWork()
     const cast = deskLockedCast(work)
-    let sourcePeople = images.length >= 2 ? 2 : 1
-    const deskTwo = Boolean(document.getElementById('desk-two-people')?.checked)
-    if (deskTwo || (work?.woman && work?.man) || cast.couple) sourcePeople = 2
-    if (sourcePeople === 1 && images[0] && typeof countDeskSceneFaces === 'function') {
-      const n = await countDeskSceneFaces(images[0], 8000)
-      if (n >= 2) {
-        sourcePeople = 2
-        setTwoPeopleChecked(true)
-        updateCurrentDeskWork({
-          peopleCount: 2,
-          sourceKind: work?.man ? 'pair' : 'scene',
-          ...(work?.verifiedSourceCast === 'mw' || (work?.woman && work?.man)
-            ? {}
-            : { sourceCast: '', verifiedSourceCast: '' }),
-        })
+    let sourcePeople = 1
+    if (opts?.deskCouple === true) sourcePeople = 2
+    else if (opts?.deskCouple === false) sourcePeople = 1
+    else {
+      sourcePeople = images.length >= 2 ? 2 : 1
+      if (sourcePeople === 1 && images[0] && typeof countDeskSceneFaces === 'function') {
+        const n = await countDeskSceneFaces(images[0], 8000, { mergeIou: 0.45 })
+        if (n >= 2) sourcePeople = 2
       }
     }
+    if (sourcePeople >= 2 && work?.woman) {
+      deskLockMwWomanScene(currentDeskWork(), { sourceKind: work?.man ? 'pair' : 'scene' })
+      setTwoPeopleChecked(true)
+    }
+    const deskLook = typeof opts?.deskLook === 'string' ? opts.deskLook : deskLookKind()
+    const deskAction =
+      typeof opts?.deskAction === 'string'
+        ? opts.deskAction
+        : deskStep === 'place' && state.pose.includes('hug')
+          ? 'hug'
+          : 'none'
     const adultStill =
       state.look === 'nude' ||
       state.look === 'silk' ||
       /나체|누드|nude|naked|전라|슬립|slip|실크|노브라|란제리|lingerie|옷벗|벗기|가슴|breast|보지|주무르/i.test(
         String(description || ''),
       )
-    let aspectRatio = '9:16'
+    let aspectRatio = '3:4'
     try {
       const dim = images[0] && typeof deskImageSize === 'function' ? await deskImageSize(images[0]) : null
       if (dim?.w && dim?.h) {
+        const ratio = dim.h / Math.max(dim.w, 1)
         if (dim.w > dim.h * 1.08) aspectRatio = '16:9'
         else if (Math.abs(dim.w - dim.h) / Math.max(dim.w, 1) < 0.08) aspectRatio = '1:1'
+        else if (ratio < 1.62) aspectRatio = '3:4'
         else aspectRatio = '9:16'
       }
     } catch (_) {
       /* 원본 비율을 못 읽으면 세로 유지 */
     }
+    if (sourcePeople >= 2) {
+      ensureDeskWork()
+      const liveWork = currentDeskWork()
+      deskLockMwWomanScene(liveWork, { sourceKind: liveWork?.man ? 'pair' : 'scene' })
+      updateCurrentDeskWork(deskMwPatch({ sourceKind: liveWork?.man ? 'pair' : 'scene' }))
+      setTwoPeopleChecked(true)
+    }
     const liveCast = deskLockedCast(currentDeskWork())
-    if (sourcePeople >= 2 && liveCast.sourceCast !== 'mw') {
-      setFormStatus('남녀 두 사람 구성을 확인하지 못해 편집을 중단했습니다.', true)
-      return
-    }
-    const gender0 = liveCast.genders[0]
-    const gender1 = liveCast.genders[1]
-    if (sourcePeople >= 2 && (gender0 !== 'female' || gender1 !== 'male')) {
-      setFormStatus('남녀 두 사람 구성을 확인하지 못해 편집을 중단했습니다.', true)
-      return
-    }
+    const gender0 = sourcePeople >= 2 ? 'female' : liveCast.genders[0]
+    const gender1 = sourcePeople >= 2 ? 'male' : liveCast.genders[1]
+    const sourceCast = sourcePeople >= 2 ? 'mw' : liveCast.sourceCast || undefined
     setFormStatus(`${title} 그리는 중…`, false)
     const job = await globalThis.postTaleSceneJob(
       {
@@ -13095,15 +13992,21 @@ function initAdultDesk() {
         gender0,
         gender1,
         sourcePeople,
-        sourceCast: liveCast.sourceCast || undefined,
+        sourceCast,
         adultStill,
         forceReplicate: Boolean(opts?.forceReplicate),
+        clothesMask: typeof opts?.clothesMask === 'string' ? opts.clothesMask : undefined,
+        deskCastLayout: opts?.deskCastLayout || undefined,
+        deskLookVerify: opts?.deskLookVerify || undefined,
+        deskLook,
+        deskCouple: sourcePeople >= 2,
+        deskAction,
       },
       title,
       160,
     )
     if (!job || job.auth || !job.imageUrl) {
-      if (!job?.auth) setFormStatus('이 걸음을 끝내지 못했습니다. 다시 눌러 주세요.', true)
+      if (!job?.auth) setFormStatus('이 걸음을 끝내지 못했습니다. 가운데는 원본입니다. 낯선 결과는 저장하지 않습니다.', true)
       return
     }
     setFormStatus('그린 장을 가운데에 붙이는 중…', false)
@@ -13115,42 +14018,94 @@ function initAdultDesk() {
     if (typeof isNearlyBlackImage === 'function' && (await isNearlyBlackImage(stable))) {
       const sitLiePlace =
         deskStep === 'place' && /앉아|앉히|앉힌|앉혀|눕|누워|포옹|안기게|서로 안/i.test(String(description || ''))
-      if (!opts?.forceReplicate && ((adultStill && (deskStep === 'cut' || deskStep === 'look')) || sitLiePlace)) {
+      if (!opts?.forceReplicate && ((adultStill && deskStep === 'cut') || sitLiePlace)) {
         setFormStatus('검열 빈 장이라 같은 사람으로 한 번만 다시 그립니다…', false)
-        return runDeskKontextStep(images, description, deskStep, title, doneText, { forceReplicate: true })
+        return runDeskKontextStep(images, description, deskStep, title, doneText, {
+          ...opts,
+          forceReplicate: true,
+        })
       }
       setFormStatus(
         deskStep === 'cut'
           ? '엔진이 빈 장을 냈습니다. 다음 컷만 다시 누르세요. 몸 잇기는 누르지 마세요.'
           : deskStep === 'look'
-            ? '엔진이 빈 장을 냈습니다. 가운데는 여 칸 그대로입니다. 옷 녹이기만 다시 누르세요.'
+            ? '엔진이 빈 장을 냈습니다. 가운데는 원본입니다. 옷을 다시 고르세요.'
             : '엔진이 빈 장을 냈습니다. 이어서 다시 보내지 않습니다. 증명사진이면 1 몸 잇기만 누르세요.',
         true,
       )
       return
     }
     let shown = stable
-    if (typeof applyDeskWorkFaces === 'function' && deskCastPhotos().length) {
-      setFormStatus('제공한 얼굴을 붙이는 중…', false)
-      try {
-        let stamped = await applyDeskWorkFaces(stable, {
-          skipFaceCount: deskCastPhotos().length >= 2,
-          skipPasteFallback: true,
-          preferPaste: false,
-          engineOrder: ['insight'],
-          hardLimitSec: 28,
-        })
-        if (stamped?.url && !stamped.skipped && (stamped.locked || 0) > 0) {
-          shown = stamped.url
-        } else if (deskStep === 'look') {
-          shown = stable
+    const expectPeople = sourcePeople >= 2 ? 2 : 1
+    if (deskStep === 'look') {
+      const maskForComp = opts?.clothesMaskFull || opts?.clothesMask
+      if (!maskForComp || typeof compositeDeskClothesResult !== 'function') {
+        setFormStatus('의상 마스크가 없어 결과를 붙이지 않습니다. 가운데는 원본입니다.', true)
+        return
+      }
+      const comp = await compositeDeskClothesResult(
+        images[0],
+        stable,
+        maskForComp,
+        deskLook === 'silk' ? 6 : 5,
+      )
+      if (!comp.ok || !comp.protectIdentical) {
+        if (!opts?._retried) {
+          setFormStatus('보호 영역이 원본과 달라 한 번만 다시 그립니다. 얼굴을 붙이지 않습니다.', false)
+          return runDeskKontextStep(images, description, deskStep, title, doneText, {
+            ...opts,
+            _retried: true,
+          })
         }
-      } catch (err) {
-        console.warn('desk still face stamp failed', err)
-        if (deskStep === 'look') shown = stable
+        setFormStatus('보호 영역 화소가 바뀌어 저장하지 않습니다. 가운데는 원본입니다.', true)
+        return
+      }
+      shown = comp.dataUrl
+    }
+    if (typeof deskStillPasses === 'function' && (deskStep === 'look' || deskStep === 'place')) {
+      const gate = await deskStillPasses(
+        images[0],
+        shown,
+        expectPeople,
+        opts?.clothesMaskFull || opts?.clothesMask,
+        currentDeskWork()?.castLayout,
+      )
+      const lookRetryOk = { protect: 1, undetected: 1, embed: 1, pose: 1, faces: 1, extra: 1, 'mw-ww': 1, cast_people: 1 }
+      if (!gate.ok && !opts?._retried && (deskStep === 'place' || (deskStep === 'look' && lookRetryOk[gate.reason]))) {
+        setFormStatus('얼굴·인원·구도가 원본과 달라 한 번만 다시 그립니다. 얼굴을 붙이지 않습니다.', false)
+        return runDeskKontextStep(images, description, deskStep, title, doneText, {
+          ...opts,
+          _retried: true,
+        })
+      }
+      if (!gate.ok) {
+        setFormStatus(
+          gate.reason === 'mw-ww'
+            ? '남자가 여자로 바뀌거나 한 명만 나와 저장하지 않습니다. 가운데는 원본입니다.'
+            : gate.reason === 'extra'
+              ? '새 사람이 생겨 저장하지 않습니다. 가운데는 원본입니다.'
+              : gate.reason === 'crop' || gate.reason === 'pose'
+                ? '자세·위치가 바뀌어 저장하지 않습니다. 가운데는 원본입니다.'
+                : gate.reason === 'protect'
+                  ? '보호 영역 화소가 바뀌어 저장하지 않습니다. 가운데는 원본입니다.'
+                  : gate.reason === 'embed'
+                    ? '얼굴이 원본과 달라 저장하지 않습니다. 가운데는 원본입니다.'
+                    : gate.reason === 'clothes_goal'
+                      ? '옷이 녹지 않아 저장하지 않습니다. 가운데는 원본입니다.'
+                      : gate.reason === 'silhouette'
+                        ? '몸 실루엣이 바뀌어 저장하지 않습니다. 가운데는 원본입니다.'
+                        : gate.reason === 'mask_seam'
+                          ? '옷 경계가 이어지지 않아 저장하지 않습니다. 가운데는 원본입니다.'
+                          : '얼굴·인원을 확인하지 못해 저장하지 않습니다. 가운데는 원본입니다.',
+          true,
+        )
+        return
       }
     }
     showDeskStepResult(shown, title, description)
+    if (deskStep === 'look') {
+      updateCurrentDeskWork({ lookApplied: deskLook, scene: shown })
+    }
     const img = document.getElementById('result-image')
     const painted = await new Promise((resolve) => {
       if (!img) return resolve(false)
@@ -13174,12 +14129,8 @@ function initAdultDesk() {
   }
 
   const setDeskStillBusy = (busy) => {
-    document.querySelectorAll('[data-desk-step]').forEach((btn) => {
+    document.querySelectorAll('#desk-still-steps [data-desk-step]').forEach((btn) => {
       btn.disabled = busy
-    })
-    document.querySelectorAll('#desk-still-packs [data-desk-pick], #desk-video-packs [data-desk-pick]').forEach((el) => {
-      el.style.pointerEvents = busy ? 'none' : ''
-      if (busy) el.disabled = true
     })
     const deskRun = document.getElementById('desk-run')
     if (generateButton) generateButton.disabled = busy
@@ -13299,8 +14250,8 @@ function initAdultDesk() {
     showDeskStepResult(last, '몸 잇기', '같은 얼굴로 이은 전신')
     setFormStatus(
       couple
-        ? '몸을 이었습니다. 여·남 칸 원본은 그대로입니다. 다음 걸음은 한 장면입니다.'
-        : '몸을 이었습니다. 여 칸 원본은 그대로입니다. 이 몸으로 옷을 고르세요.',
+        ? '몸을 이었습니다. 이는 별도 전신 생성이며 CAST 몸매 유지가 아닙니다. 다음 걸음은 한 장면입니다.'
+        : '몸을 이었습니다. 이는 별도 전신 생성이며 CAST 몸매 유지가 아닙니다. 이 몸으로 옷을 고르세요.',
       false,
     )
   }
@@ -13308,6 +14259,17 @@ function initAdultDesk() {
   const ensureDeskCoupleScene = async () => {
     const work = currentDeskWork()
     if (!work?.woman || !work?.man) return ''
+    const womanFaces =
+      typeof countDeskSceneFaces === 'function'
+        ? await countDeskSceneFaces(work.woman, 8000, { mergeIou: 0.45 })
+        : 0
+    if (womanFaces >= 2) {
+      setFormStatus(
+        '여 칸 한 장에 두 사람이면 남 칸 출처·좌표가 없습니다. 붙이지 않습니다. 오른쪽을 여자로 두지 않습니다.',
+        true,
+      )
+      return ''
+    }
     const womanNeed = await deskPhotoNeedsBodyExtend(work.woman)
     const manNeed = await deskPhotoNeedsBodyExtend(work.man)
     if (womanNeed || manNeed) {
@@ -13343,50 +14305,310 @@ function initAdultDesk() {
     await ensureDeskCoupleScene()
   }
 
-  const runDeskStepLook = async () => {
-    const work = currentDeskWork()
-    let lead = deskSceneBase() || work?.woman || work?.man || ''
-    const faces =
-      lead && typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(lead, 8000) : 0
-    const couple = Boolean(work?.woman && work?.man) || faces >= 2
-    if (faces >= 2) {
-      updateCurrentDeskWork({
-        peopleCount: 2,
-        sourceKind: work?.man ? 'pair' : 'scene',
-        ...(work?.verifiedSourceCast === 'mw' || (work?.woman && work?.man)
-          ? {}
-          : { sourceCast: '', verifiedSourceCast: '' }),
-      })
-    }
-    if (couple && deskLockedCast(currentDeskWork()).sourceCast !== 'mw') {
-      setFormStatus('남녀 두 사람 구성을 확인하지 못해 편집을 중단했습니다.', true)
+  const runDeskWomanCropLook = async (lead, lookDescription) => {
+    if (typeof globalThis.postTaleSceneJob !== 'function') {
+      setFormStatus('장면 엔진을 불러오지 못했습니다.', true)
       return
     }
-    if (couple) setTwoPeopleChecked(true)
-    const description = compileLookOnly(couple)
-    if (descriptionField) descriptionField.value = description
-    if (work?.woman && work?.man && !work?.assembledPair) {
-      const together = await ensureDeskCoupleScene()
-      if (together) lead = together
+    setFormStatus('남자는 그대로 두고 여자 옷만 녹이는 중…', false)
+    const stableLead =
+      typeof compactDeskScene === 'function' ? await compactDeskScene(lead, 1920, 0.92) : lead
+    const crop = await cropDeskRightPerson(stableLead)
+    if (!crop) return
+    const solo = compileLookOnly(false)
+    let aspectRatio = '3:4'
+    if (crop.sw > crop.sh * 1.08) aspectRatio = '16:9'
+    else if (Math.abs(crop.sw - crop.sh) / Math.max(crop.sw, 1) < 0.08) aspectRatio = '1:1'
+    const adultStill =
+      state.look === 'nude' ||
+      state.look === 'silk' ||
+      /나체|누드|nude|naked|전라|슬립|slip|실크/i.test(String(lookDescription || ''))
+    const payload = {
+      composeMode: 'desk-still',
+      deskStep: 'look',
+      images: [crop.dataUrl],
+      description: solo,
+      photoreal: true,
+      refKind: 'body',
+      aspectRatio,
+      gender0: 'female',
+      sourcePeople: 1,
+      adultStill,
+      deskLook: deskLookKind(),
+      deskCouple: false,
+      deskAction: 'none',
     }
-    if (!lead) {
+    const paintOnce = async () => {
+      const job = await globalThis.postTaleSceneJob(payload, '옷 녹이기', 160)
+      if (!job || job.auth || !job.imageUrl) return { auth: Boolean(job?.auth), painted: '' }
+      const painted = await stabilizeDeskStill(job.imageUrl)
+      if (!painted) return { painted: '' }
+      if (typeof isNearlyBlackImage === 'function' && (await isNearlyBlackImage(painted))) {
+        return { painted: '' }
+      }
+      return { painted }
+    }
+    let attempt = await paintOnce()
+    if (attempt.auth) return
+    if (!attempt.painted) {
+      setFormStatus('여자 옷만 보냈는데 결과가 없습니다. 가운데는 원본입니다. 낯선 결과는 저장하지 않습니다.', true)
+      return
+    }
+    let shown = await pasteDeskRectOntoFull(stableLead, attempt.painted, crop)
+    let gate = typeof deskStillPasses === 'function' ? await deskStillPasses(stableLead, shown, 2) : { ok: true }
+    if (!gate.ok) {
+      setFormStatus('얼굴·인원·구도가 원본과 달라 한 번만 다시 그립니다. 얼굴을 붙이지 않습니다.', false)
+      attempt = await paintOnce()
+      if (!attempt.painted) {
+        setFormStatus('다시 그렸는데도 원본과 달라 저장하지 않습니다. 가운데는 원본입니다.', true)
+        return
+      }
+      shown = await pasteDeskRectOntoFull(stableLead, attempt.painted, crop)
+      gate = typeof deskStillPasses === 'function' ? await deskStillPasses(stableLead, shown, 2) : { ok: true }
+    }
+    if (!gate.ok) {
       setFormStatus(
-        couple
-          ? '여 칸이나 가운데 장이 있어야 옷을 녹입니다.'
-          : '여 칸에 사진을 넣으세요. 그 사진 위에만 옷을 녹입니다.',
+        gate.reason === 'mw-ww'
+          ? '남자가 여자로 바뀌어 저장하지 않습니다. 가운데는 원본입니다.'
+          : '얼굴이 원본과 달라 저장하지 않습니다. 가운데는 원본입니다. 얼굴을 붙이지 않습니다.',
         true,
       )
       return
     }
-    const images = [
-      typeof compactDeskScene === 'function' ? await compactDeskScene(lead, 1920, 0.92) : lead,
-    ]
+    showDeskStepResult(shown, '옷 녹이기', lookDescription)
+    updateCurrentDeskWork({ lookApplied: deskLookKind(), scene: shown })
+    setFormStatus('남자는 원본 화소입니다. 여자 옷만 녹였습니다.', false)
+    void syncDeskGates()
+  }
+
+  const runDeskStepLook = async () => {
+    if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
+      if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
+      return
+    }
+    const frame = await resolveDeskFrame({ from: 'cast' })
+    if (!frame.ok || !frame.image) {
+      setFormStatus(frame.message || '여 칸에 사진을 넣으세요. 그 사진 위에만 옷을 녹입니다.', true)
+      return
+    }
+    let splitSrc = frame.image
+    try {
+      if (
+        !String(splitSrc).startsWith('data:') &&
+        typeof globalThis.ensureStableDataUrl === 'function'
+      ) {
+        splitSrc = (await globalThis.ensureStableDataUrl(splitSrc)) || splitSrc
+      }
+      splitSrc =
+        typeof compactDeskScene === 'function' ? await compactDeskScene(splitSrc, 1920, 0.92) : splitSrc
+    } catch (err) {
+      setFormStatus(
+        `이 사진을 엔진에 넣지 못했습니다. 여 칸에 파일을 다시 넣으세요. ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        true,
+      )
+      return
+    }
+    if (!String(splitSrc).startsWith('data:')) {
+      setFormStatus('이 사진은 주소만 있습니다. 여 칸에 사진 파일을 다시 넣으세요.', true)
+      return
+    }
+    const work = currentDeskWork()
+    if (work?.woman && !work.womanCastLock?.ok) {
+      const lock = await captureDeskCastLock('woman', work.woman)
+      updateCurrentDeskWork({ womanCastId: lock.id, womanCastLock: lock })
+      if (!lock.ok) {
+        setFormStatus('여 CAST 얼굴을 확인하지 못해 보내지 않습니다.', true)
+        return
+      }
+    }
+    if (work?.man && !work.manCastLock?.ok) {
+      const lock = await captureDeskCastLock('man', work.man)
+      updateCurrentDeskWork({ manCastId: lock.id, manCastLock: lock })
+      if (!lock.ok) {
+        setFormStatus('남 CAST 얼굴을 확인하지 못해 보내지 않습니다.', true)
+        return
+      }
+    }
+    const needCouple = Boolean(work?.woman && work?.man)
+    let layout = work?.castLayout
+    if (needCouple) {
+      if (!deskLayoutLinked(layout, true)) {
+        setFormStatus(
+          '여·남 칸 배치 좌표가 없습니다. 먼저 2 한 장면으로 붙이세요. 오른쪽을 여자로 두지 않습니다.',
+          true,
+        )
+        return
+      }
+      const scene = deskSceneBase()
+      if (scene) splitSrc = scene
+    } else {
+      const faces = await deskStillFaceBoxes(splitSrc)
+      if (!faces || !faces.length) {
+        setFormStatus('얼굴을 확인하지 못해 보내지 않습니다. 위치를 추측하지 않습니다.', true)
+        return
+      }
+      if (faces.length >= 2) {
+        setFormStatus('여 칸에 두 사람이 있고 남 칸 배치가 없습니다. 녹이지 않습니다.', true)
+        return
+      }
+      layout = deskSoloWomanLayout()
+      updateCurrentDeskWork({ castLayout: layout })
+    }
+    if (await deskPhotoNeedsBodyExtend(splitSrc)) {
+      setFormStatus(
+        '상반신은 보이는 체형만 유지합니다. 전신 확장은 1 몸 잇기이며 CAST 몸매 유지가 아닙니다.',
+        false,
+      )
+    }
+    const description = compileLookOnly(needCouple)
+    if (descriptionField) descriptionField.value = description
+    setFormStatus('여 칸 의상 영역을 확인하는 중…', false)
+    const tagged = []
+    const sceneFaces =
+      typeof deskStillFaceBoxes === 'function' ? await deskStillFaceBoxes(splitSrc) : []
+    if (!sceneFaces || !sceneFaces.length) {
+      setFormStatus('얼굴을 확인하지 못해 보내지 않습니다.', true)
+      return
+    }
+    for (const box of sceneFaces) {
+      const cx = box.x + box.w / 2
+      const cy = box.y + box.h / 2
+      const inW = pointInNorm(layout.woman, cx, cy)
+      const inM = layout.man ? pointInNorm(layout.man, cx, cy) : false
+      let slot = ''
+      if (inW && !inM) slot = 'woman'
+      else if (inM && !inW) slot = 'man'
+      else if (inW && inM) {
+        const dw = Math.hypot(cx - (layout.woman.x + layout.woman.w / 2), cy - (layout.woman.y + layout.woman.h / 2))
+        const dm = Math.hypot(cx - (layout.man.x + layout.man.w / 2), cy - (layout.man.y + layout.man.h / 2))
+        slot = dw <= dm ? 'woman' : 'man'
+      }
+      if (slot) tagged.push({ ...box, slot })
+    }
+    const womanHits = tagged.filter((f) => f.slot === 'woman')
+    const manHits = tagged.filter((f) => f.slot === 'man')
+    if (needCouple) {
+      if (womanHits.length !== 1 || manHits.length !== 1) {
+        setFormStatus('얼굴을 확인하지 못해 보내지 않습니다. CAST에 연결하지 못했습니다.', true)
+        return
+      }
+    } else if (womanHits.length !== 1 || manHits.length) {
+      setFormStatus('얼굴을 확인하지 못해 보내지 않습니다.', true)
+      return
+    }
+    const runtime = globalThis.DeskLookRuntime
+    if (!runtime || typeof runtime.prepare !== 'function') {
+      setFormStatus('의상 파싱을 불러오지 못해 보내지 않습니다. 밝기 추정으로 대체하지 않습니다.', true)
+      return
+    }
+    const prepared = await runtime.prepare(splitSrc, { faces: tagged, layout, needCouple })
+    if (!prepared?.ok) {
+      setFormStatus(
+        prepared?.reason === 'undetected'
+          ? '얼굴을 확인하지 못해 보내지 않습니다.'
+          : '의상 파싱을 확인하지 못해 보내지 않습니다.',
+        true,
+      )
+      return
+    }
+    const preflight = globalThis.DeskLookLib?.runDeskLookPreflight
+    if (typeof preflight !== 'function') {
+      setFormStatus('LOOK 게이트를 불러오지 못해 보내지 않습니다.', true)
+      return
+    }
+    const clothesReplace = deskLookKind() === 'silk'
+    let srcRgba = null
+    if (clothesReplace) {
+      try {
+        const srcImg = await loadDeskImage(splitSrc)
+        const srcCanvas = document.createElement('canvas')
+        srcCanvas.width = prepared.width
+        srcCanvas.height = prepared.height
+        srcCanvas.getContext('2d').drawImage(srcImg, 0, 0, prepared.width, prepared.height)
+        srcRgba = new Uint8Array(
+          srcCanvas.getContext('2d').getImageData(0, 0, prepared.width, prepared.height).data,
+        )
+      } catch (_) {
+        setFormStatus('원본 화소를 읽지 못해 보내지 않습니다.', true)
+        return
+      }
+    }
+    const pre = preflight({
+      labels: prepared.labels,
+      width: prepared.width,
+      height: prepared.height,
+      layout,
+      faces: tagged,
+      embeds: prepared.embeds,
+      embedOk: prepared.embedOk !== false,
+      vton: clothesReplace,
+      srcRgba,
+    })
+    if (!pre.ok) {
+      setFormStatus(
+        pre.reason === 'mask_too_small'
+          ? '의상 영역이 너무 작아 보내지 않습니다. 피부·손을 넓혀 열지 않습니다.'
+          : pre.reason === 'clothes_regions'
+            ? '상의와 하의를 한꺼번에 열지 않습니다. 가운데는 원본입니다.'
+            : pre.reason === 'woman_face_unlink' || pre.reason === 'man_face_unlink'
+            ? 'CAST 출처와 얼굴 좌표가 맞지 않아 보내지 않습니다.'
+            : pre.reason === 'undetected'
+              ? '얼굴을 확인하지 못해 보내지 않습니다.'
+              : pre.reason === 'mask_invade'
+                ? '마스크가 피부·배경을 침범해 보내지 않습니다.'
+                : '의상 마스크를 확인하지 못해 유료 엔진에 보내지 않습니다.',
+        true,
+      )
+      return
+    }
+    const maskCanvas = document.createElement('canvas')
+    maskCanvas.width = pre.mask.length && prepared.width ? prepared.width : 1
+    maskCanvas.height = prepared.height || 1
+    const mctx = maskCanvas.getContext('2d')
+    const imgd = mctx.createImageData(maskCanvas.width, maskCanvas.height)
+    for (let i = 0; i < pre.mask.length; i += 1) {
+      const v = pre.mask[i]
+      imgd.data[i * 4] = v
+      imgd.data[i * 4 + 1] = v
+      imgd.data[i * 4 + 2] = v
+      imgd.data[i * 4 + 3] = 255
+    }
+    mctx.putImageData(imgd, 0, 0)
+    const fullDataUrl = maskCanvas.toDataURL('image/png')
+    let maskSha = ''
+    if (globalThis.crypto?.subtle) {
+      const buf = await globalThis.crypto.subtle.digest('SHA-256', pre.mask)
+      maskSha = Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('')
+    }
+    const modelSha = prepared.segformerSha256 && prepared.recSha256
+      ? { segformerSha256: prepared.segformerSha256, recSha256: prepared.recSha256 }
+      : globalThis.DeskLookOnnx?.loadedSha
+    if (!modelSha?.segformerSha256 || !modelSha?.recSha256) {
+      setFormStatus('의상 모델 SHA를 확인하지 못해 보내지 않습니다.', true)
+      return
+    }
     await runDeskKontextStep(
-      images,
+      [splitSrc],
       description,
       'look',
       '옷 녹이기',
       '옷을 녹였습니다. 다음 걸음은 장소입니다.',
+      {
+        deskLook: deskLookKind(),
+        deskCouple: needCouple,
+        deskAction: 'none',
+        clothesMask: fullDataUrl,
+        clothesMaskFull: fullDataUrl,
+        deskCastLayout: layout,
+        deskLookVerify: {
+          ...pre.verify,
+          maskSha256: maskSha,
+          segformerSha256: modelSha.segformerSha256,
+          recSha256: modelSha.recSha256,
+        },
+      },
     )
   }
 
@@ -13420,10 +14642,19 @@ function initAdultDesk() {
       setFormStatus('먼저 1 몸 잇기를 누르세요. 증명사진으로는 장소를 보내지 않습니다.', true)
       return
     }
-    const description = compilePlaceOnly()
+    if (scene) {
+      currentResult.imageUrl = scene
+      if (String(scene).startsWith('data:')) currentResult.imageDataUrl = scene
+    }
+    const frame = await resolveDeskFrame({ from: 'scene' })
+    if (!frame.ok || !frame.image) {
+      setFormStatus(frame.message || '여 칸에 증명사진을 넣으세요. 몸을 이은 뒤 그 몸으로 자세를 잡습니다.', true)
+      return
+    }
+    const description = compilePlaceOnly(frame.couple)
     if (descriptionField) descriptionField.value = description
     const compact =
-      typeof compactDeskScene === 'function' ? await compactDeskScene(scene, 1920, 0.92) : scene
+      typeof compactDeskScene === 'function' ? await compactDeskScene(frame.image, 1920, 0.92) : frame.image
     await runDeskKontextStep(
       [compact],
       description,
@@ -13434,6 +14665,11 @@ function initAdultDesk() {
       state.pose.includes('sit') || state.pose.includes('lie') || state.pose.includes('hug')
         ? '자세를 바꿨습니다. 얼굴은 다시 붙입니다.'
         : '장소를 바꿨습니다. 움직이려면 움직이기를 누르세요.',
+      {
+        deskLook: deskLookKind(),
+        deskCouple: frame.couple,
+        deskAction: state.pose.includes('hug') ? 'hug' : 'none',
+      },
     )
   }
 
@@ -13443,18 +14679,11 @@ function initAdultDesk() {
       if (!pickedRaw.length) return ''
       const poseOnly = pickedRaw.filter((item) => item.id !== 'undress')
       const picked = poseOnly.length ? poseOnly : pickedRaw
-      const couple =
-        coupleInScene ||
-        deskHasTwoLeads() ||
-        Boolean(document.getElementById('desk-two-people')?.checked)
-      const motion = picked
-        .map((item) => (couple && item.motionCouple ? item.motionCouple : item.motion))
-        .join(' ')
-      return couple
-        ? `다음 컷 정지 화보. ${motion} 올린 두 사람과 같은 얼굴·몸. 같은 장소. 원본 구도 유지. 클로즈업 금지.`
-        : `다음 컷 정지 화보. ${motion} 올린 사람과 같은 얼굴·몸. 같은 장소. 원본 구도 유지. 클로즈업 금지.`
+      const couple = coupleInScene === true
+      const motion = compileDeskMove(couple, picked)
+      return `다음 컷 정지 화보. ${motion}`
     }
-    return [compilePlaceOnly(), '같은 사람. 같은 옷. 원본 구도 유지. 클로즈업 금지.']
+    return [compilePlaceOnly(coupleInScene), '같은 사람. 같은 옷. 원본 구도 유지. 클로즈업 금지.']
       .filter(Boolean)
       .join(' ')
   }
@@ -13473,44 +14702,30 @@ function initAdultDesk() {
       setFormStatus('먼저 지금 장이 있어야 다음 컷을 그립니다.', true)
       return
     }
-    const coupleIds = new Set(['kiss', 'hug', 'come', 'zipper', 'undress', 'hands', 'breast'])
-    let coupleInScene = deskHasTwoLeads() || Boolean(document.getElementById('desk-two-people')?.checked)
-    if (state.job === 'video') {
-      const earlyFaces = await countDeskSceneFaces(currentResult.imageUrl, 8000)
-      if (earlyFaces >= 2) {
-        setTwoPeopleBoxes(true)
-        coupleInScene = true
-      }
-      dropSoloCoupleMoves()
-      const item = pickMotions()[0]
-      if (!item) {
-        setFormStatus('오른쪽에서 동작을 고른 뒤 다음 컷 시작을 누르세요.', true)
-        return
-      }
+    const coupleIds = new Set(['kiss', 'hug', 'come', 'zipper'])
+    const picked = pickMotions()
+    if (state.job === 'video' && !picked.length) {
+      setFormStatus('오른쪽에서 동작을 고른 뒤 다음 컷 시작을 누르세요.', true)
+      return
     }
-    const description = compileNextCut(coupleInScene)
+    const needCouple = state.job === 'video' && picked.some((one) => coupleIds.has(one.id))
+    const frame = await resolveDeskFrame({ from: 'scene', needCouple })
+    if (!frame.ok) {
+      setFormStatus(frame.message || '먼저 지금 장이 있어야 다음 컷을 그립니다.', true)
+      return
+    }
+    if (frame.couple) setTwoPeopleBoxes(true)
+    const description = compileNextCut(frame.couple)
     if (!description) {
       setFormStatus('다음 컷에 쓸 동작이나 장소가 없습니다.', true)
       return
     }
     setDeskStillBusy(true)
     try {
-      if (state.job === 'video') {
-        const item = pickMotions()[0]
-        if (item && coupleIds.has(item.id)) {
-          setFormStatus('두 사람이 장면에 있는지 확인하는 중…', false)
-          const ready = await ensureDeskCoupleInScene()
-          if (!ready.ok) {
-            setFormStatus(ready.message || '두 사람이 장면에 없습니다.', true)
-            return
-          }
-        }
-      }
       if (descriptionField) descriptionField.value = description
-      const scene = deskSceneBase()
       const compact =
-        typeof compactDeskScene === 'function' ? await compactDeskScene(scene, 1920, 0.92) : scene
-      const item = state.job === 'video' ? pickMotions()[0] : null
+        typeof compactDeskScene === 'function' ? await compactDeskScene(frame.image, 1920, 0.92) : frame.image
+      const item = state.job === 'video' ? picked[0] : null
       await runDeskKontextStep(
         [compact],
         description,
@@ -13519,6 +14734,11 @@ function initAdultDesk() {
         item
           ? `${item.label} 다음 컷을 그렸습니다. 이 장으로 움직이려면 움직이기를 누르세요.`
           : '다음 컷을 그렸습니다. 이 장으로 움직이려면 움직이기를 누르세요.',
+        {
+          deskLook: deskLookKind(),
+          deskCouple: frame.couple,
+          deskAction: deskActionFromPicked(picked),
+        },
       )
     } catch (err) {
       setFormStatus(`다음 컷 실패: ${err instanceof Error ? err.message : String(err)}`, true)
@@ -13539,17 +14759,17 @@ function initAdultDesk() {
       setFormStatus('여 칸에 사진을 넣으세요.', true)
       return
     }
+    if (key === 'look') return runDeskStep('look')
     if (scene && (await deskPhotoNeedsBodyExtend(scene))) {
-      setFormStatus('먼저 1 몸 잇기를 누르세요. 옷·자세는 몸을 이은 뒤에만 보냅니다.', true)
+      setFormStatus('먼저 옷을 골라 몸을 잇거나 1 몸 잇기를 누르세요. 방·자세는 전신 장 위에서만 바꿉니다.', true)
       return
     }
     if (!scene) {
       if (await deskPhotoNeedsBodyExtend(lead)) {
-        setFormStatus('먼저 1 몸 잇기를 누르세요. 옷·자세는 몸을 이은 뒤에만 보냅니다.', true)
+        setFormStatus('먼저 옷을 골라 몸을 잇거나 1 몸 잇기를 누르세요. 방·자세는 전신 장 위에서만 바꿉니다.', true)
         return
       }
     }
-    if (key === 'look') return runDeskStep('look')
     if (work?.woman && work?.man) {
       let faces = 0
       if (scene && typeof countDeskSceneFaces === 'function') {
@@ -13582,6 +14802,12 @@ function initAdultDesk() {
       setDeskStillBusy(false)
     }
   }
+
+  document.getElementById('desk-still-packs')?.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-desk-step]')
+    if (!btn || btn.disabled) return
+    void runDeskStep(btn.getAttribute('data-desk-step'))
+  })
 
   document.getElementById('desk-still-steps')?.addEventListener('click', (event) => {
     const btn = event.target.closest('[data-desk-step]')
@@ -13628,7 +14854,7 @@ function initAdultDesk() {
         }
       })
     }
-    const addFromUrl = async (url) => {
+    const addFromUrl = async (url, urlSlot) => {
       if (!url) {
         setFormStatus('넣을 사진이 없습니다.', true)
         return
@@ -13650,6 +14876,7 @@ function initAdultDesk() {
       const slots = [0.28, 0.72, 0.5]
       layers.push({
         img,
+        slot: urlSlot || '',
         x: Math.round(cw * (slots[layers.length] || 0.5) - w / 2),
         y: Math.round(ch * 0.93 - h),
         w,
@@ -13759,10 +14986,10 @@ function initAdultDesk() {
       }
     })
     document.getElementById('desk-assemble-cast-w')?.addEventListener('click', () => {
-      void addFromUrl(currentDeskWork()?.woman)
+      void addFromUrl(currentDeskWork()?.woman, 'woman')
     })
     document.getElementById('desk-assemble-cast-m')?.addEventListener('click', () => {
-      void addFromUrl(currentDeskWork()?.man)
+      void addFromUrl(currentDeskWork()?.man, 'man')
     })
     document.getElementById('desk-assemble-now')?.addEventListener('click', () => {
       void addFromUrl(currentResult?.imageUrl)
@@ -13796,8 +15023,26 @@ function initAdultDesk() {
       }
       const pair = layers.length >= 2
       if (sizeField && !sizeField.dataset.userPicked) sizeField.value = landscape ? 'landscape' : 'story'
+      const womanL = layers.find((layer) => layer.slot === 'woman')
+      const manL = layers.find((layer) => layer.slot === 'man')
       if (typeof updateCurrentDeskWork === 'function') {
-        updateCurrentDeskWork({ assembledPair: pair })
+        const layout =
+          womanL && manL
+            ? {
+                sceneW: cw,
+                sceneH: ch,
+                woman: { slot: 'woman', x: womanL.x / cw, y: womanL.y / ch, w: womanL.w / cw, h: womanL.h / ch },
+                man: { slot: 'man', x: manL.x / cw, y: manL.y / ch, w: manL.w / cw, h: manL.h / ch },
+              }
+            : womanL
+              ? {
+                  sceneW: cw,
+                  sceneH: ch,
+                  woman: { slot: 'woman', x: womanL.x / cw, y: womanL.y / ch, w: womanL.w / cw, h: womanL.h / ch },
+                  man: null,
+                }
+              : null
+        updateCurrentDeskWork({ assembledPair: pair, castLayout: layout })
       }
       close()
       showDeskStepResult(url, 'PNG 조립', '수동 조립. 같은 사람.')
