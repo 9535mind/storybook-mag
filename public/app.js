@@ -12651,12 +12651,6 @@ function placeAdultDeskNodes() {
 function initAdultDesk() {
   const looks = [
     { id: 'silk', label: '슬립', text: '슬립 한 겹 노브라' },
-    { id: 'black', label: '검은 드레스', text: '검은 드레스' },
-    { id: 'dress', label: '원피스', text: '원피스' },
-    { id: 'shirt', label: '셔츠', text: '흰 셔츠' },
-    { id: 'jeans', label: '청바지', text: '흰 티와 청바지' },
-    { id: 'robe', label: '가운', text: '가운' },
-    { id: 'towel', label: '타올', text: '흰 타올' },
     { id: 'nude', label: '나체', text: '나체' },
   ]
   const places = [
