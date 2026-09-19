@@ -12394,8 +12394,10 @@ async function deskProtectPixelDiff(sourceUrl, resultUrl, maskUrl) {
       const c = document.createElement('canvas')
       c.width = w
       c.height = h
-      c.getContext('2d').drawImage(img, 0, 0, w, h)
-      return c.getContext('2d').getImageData(0, 0, w, h).data
+      const ctx = c.getContext('2d')
+      ctx.imageSmoothingEnabled = false
+      ctx.drawImage(img, 0, 0, w, h)
+      return ctx.getImageData(0, 0, w, h).data
     }
     const a = grab(src)
     const b = grab(out)
