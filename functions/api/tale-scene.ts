@@ -853,13 +853,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                   falKey: env.FAL_KEY,
                   imageUrl: images[0],
                   maskUrl: clientMask,
-                  prompt: `${prompt} Local edit ONLY the white-masked clothes of the CAST woman slot. Unmasked face, neck, skin, hands, man, and background stay exact source pixels. Same body, same crop. FORBIDDEN new person, catalog model, white studio, oval face sticker, assume right person is woman.`,
+                  prompt: nudeStill
+                    ? `${prompt} Local edit ONLY the white-masked clothes. Melt that garment to bare adult skin of the SAME CAST body. Unmasked face, neck, hands, limbs, man, and background stay exact source pixels. Same pose, same crop. FORBIDDEN new person, bodysuit, lingerie, catalog model, white studio, oval face sticker.`
+                    : `${prompt} Local edit ONLY the white-masked clothes of the CAST woman slot. Unmasked face, neck, skin, hands, man, and background stay exact source pixels. Same body, same crop. FORBIDDEN new person, catalog model, white studio, oval face sticker, assume right person is woman.`,
                   negativePrompt: deskStillNegativePrompt({
                     couple,
                     nudeStill,
                     descriptionKo,
                   }),
-                  strength: nudeStill || slipStill ? 0.66 : 0.56,
+                  strength: nudeStill ? 0.85 : 0.56,
                 })
             const engine = clothesReplace ? 'fal-look-leffa' : 'fal-look-inpaint'
             if ('imageUrl' in submitted && submitted.imageUrl) {
