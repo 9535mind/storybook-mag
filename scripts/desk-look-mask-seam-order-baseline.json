@@ -1,0 +1,15 @@
+{
+  "clothesGoal": "false_positive",
+  "clothesChanged": true,
+  "reasonOrder": [
+    "clothes_goal",
+    "mask_seam",
+    "silhouette"
+  ],
+  "clothesGoalHidesSeam": true,
+  "clientReason": "mask_seam",
+  "seamFired": true,
+  "armResidue": true,
+  "thresholdChanged": false,
+  "ok": true
+}

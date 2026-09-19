@@ -509,6 +509,13 @@ var DeskLookLib = (() => {
   var CLOTHING_EXPLODE_RATIO = 1.22;
   var SEAM_LUM_REL_MAX = 1.05;
   var SEAM_TEX_MIN = 0.42;
+  var SEAM_BAND_PX = 3;
+  var SEAM_REMNANT_DARK = 78;
+  var SEAM_REMNANT_CLOTHES_MAX = 120;
+  var SEAM_REMNANT_CONTRAST = 28;
+  var SEAM_REMNANT_MIN_RUN = 28;
+  var SEAM_REMNANT_MIN_ELONG = 3.2;
+  var VISUAL_REASON_ORDER = ["clothes_goal", "mask_seam", "silhouette"];
   function lum(rgba, i) {
     return (rgba[i] * 3 + rgba[i + 1] * 4 + rgba[i + 2] * 1) / 8;
   }
@@ -770,8 +777,132 @@ var DeskLookLib = (() => {
       outTexWhite,
       lumRel,
       texRatio,
+      remnantN: 0,
+      remnantMaxRun: 0,
+      remnantElong: 0,
+      remnantOk: true,
       ok: !torn && !mashed
     };
+  }
+  function medianLum(src, pick) {
+    const vals = [];
+    for (let p = 0; p < pick.length; p++) {
+      if (pick[p] < 128) continue;
+      vals.push(lum(src, p * 4));
+    }
+    if (!vals.length) return 255;
+    vals.sort((a, b) => a - b);
+    return vals[vals.length >> 1];
+  }
+  function regionBoundaryRemnant(src, out, region, width, height) {
+    const empty = { n: 0, maxRun: 0, elong: 0, ok: true };
+    const box = whiteBBox(region, width, height);
+    if (!box) return empty;
+    const clothesRef = medianLum(src, region);
+    if (clothesRef > SEAM_REMNANT_CLOTHES_MAX) return empty;
+    const r = SEAM_BAND_PX;
+    const handCut = box.y0 + Math.floor((box.y1 - box.y0 + 1) * 0.78);
+    const hits = new Uint8Array(width * height);
+    let n = 0;
+    for (let y = Math.max(0, box.y0 - r); y <= Math.min(height - 1, Math.min(box.y1 + r, handCut)); y++) {
+      for (let x = Math.max(0, box.x0 - r); x <= Math.min(width - 1, box.x1 + r); x++) {
+        const p = y * width + x;
+        const hereEdit = region[p] >= 128;
+        let onBound = false;
+        let bright = 0;
+        let brightN = 0;
+        const x0 = Math.max(0, x - r);
+        const x1 = Math.min(width - 1, x + r);
+        const y0 = Math.max(0, y - r);
+        const y1 = Math.min(height - 1, y + r);
+        for (let yy = y0; yy <= y1; yy++) {
+          for (let xx = x0; xx <= x1; xx++) {
+            if (Math.hypot(xx - x, yy - y) > r + 0.25) continue;
+            const q = yy * width + xx;
+            if (region[q] >= 128 !== hereEdit) onBound = true;
+            if (region[q] < 128) continue;
+            const ql = lum(out, q * 4);
+            if (ql >= SEAM_REMNANT_DARK + 18) {
+              bright += ql;
+              brightN += 1;
+            }
+          }
+        }
+        if (!onBound) continue;
+        const outL = lum(out, p * 4);
+        const srcL = lum(src, p * 4);
+        const near = brightN ? bright / brightN : 255;
+        if (outL > SEAM_REMNANT_DARK) continue;
+        if (srcL > 110) continue;
+        if (Math.abs(outL - srcL) > 40) continue;
+        if (outL > clothesRef + 24) continue;
+        if (near - outL < SEAM_REMNANT_CONTRAST) continue;
+        hits[p] = 255;
+        n += 1;
+      }
+    }
+    if (n < SEAM_REMNANT_MIN_RUN) return { n, maxRun: 0, elong: 0, ok: true };
+    const seen = new Uint8Array(width * height);
+    let maxRun = 0;
+    let bestElong = 0;
+    const qx = new Int32Array(n + 8);
+    const qy = new Int32Array(n + 8);
+    for (let start = 0; start < hits.length; start++) {
+      if (hits[start] < 128 || seen[start]) continue;
+      let head = 0;
+      let tail = 0;
+      qx[0] = start % width;
+      qy[0] = start / width | 0;
+      tail = 1;
+      seen[start] = 1;
+      let area = 0;
+      let minX = width;
+      let maxX = 0;
+      let minY = height;
+      let maxY = 0;
+      while (head < tail) {
+        const x = qx[head];
+        const y = qy[head];
+        head += 1;
+        area += 1;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        for (const [dx, dy] of [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+          [1, 1],
+          [1, -1],
+          [-1, 1],
+          [-1, -1]
+        ]) {
+          const xx = x + dx;
+          const yy = y + dy;
+          if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+          const q = yy * width + xx;
+          if (seen[q] || hits[q] < 128) continue;
+          seen[q] = 1;
+          qx[tail] = xx;
+          qy[tail] = yy;
+          tail += 1;
+        }
+      }
+      const bw = maxX - minX + 1;
+      const bh = maxY - minY + 1;
+      const run = Math.max(bw, bh);
+      const elong = run / Math.max(1, Math.min(bw, bh));
+      if (run > maxRun) {
+        maxRun = run;
+        bestElong = elong;
+      }
+      if (area >= SEAM_REMNANT_MIN_RUN && run >= SEAM_REMNANT_MIN_RUN && elong >= SEAM_REMNANT_MIN_ELONG) {
+        return { n, maxRun: run, elong, ok: false };
+      }
+    }
+    return { n, maxRun, elong: bestElong, ok: true };
   }
   function changeOk(stats) {
     if (stats.n < MASK_MIN_WHITE) return true;
@@ -782,11 +913,17 @@ var DeskLookLib = (() => {
     const present = stats.n >= MASK_MIN_WHITE;
     const sil = regionSilhouette(src, out, region, width, height, bodyRef);
     const seam = regionSeam(src, out, region, width, height);
+    const remnant = regionBoundaryRemnant(src, out, region, width, height);
+    seam.remnantN = remnant.n;
+    seam.remnantMaxRun = remnant.maxRun;
+    seam.remnantElong = remnant.elong;
+    seam.remnantOk = remnant.ok;
+    seam.ok = seam.ok && remnant.ok;
     const changed = changeOk(stats);
     const failReasons = [];
     if (present && !changed) failReasons.push("clothes_goal");
-    if (present && !sil.ok) failReasons.push("silhouette");
     if (present && !seam.ok) failReasons.push("mask_seam");
+    if (present && !sil.ok) failReasons.push("silhouette");
     return {
       name,
       present,
@@ -814,7 +951,22 @@ var DeskLookLib = (() => {
     }
     const upperBox = whiteBBox(split.upper, width, height);
     if (shoulder < 8 && upperBox) {
-      shoulder = protectPersonSpan(src, mask, width, height, upperBox.y0, upperBox.y0 + Math.max(4, Math.floor((upperBox.y1 - upperBox.y0) * 0.35)), bg);
+      const y0 = upperBox.y0;
+      const y1 = upperBox.y0 + Math.max(4, Math.floor((upperBox.y1 - upperBox.y0) * 0.35));
+      const pad = Math.max(2, Math.round(width * 0.04));
+      const x0 = Math.max(0, upperBox.x0 - pad);
+      const x1 = Math.min(width - 1, upperBox.x1 + pad);
+      const spans = [];
+      for (let y = y0; y <= y1; y++) {
+        const w = rowSpan(src, width, y, x0, x1, bg);
+        if (w > 0) spans.push(w);
+      }
+      if (spans.length) {
+        spans.sort((a, b) => a - b);
+        shoulder = spans[Math.floor(spans.length / 2)];
+      } else {
+        shoulder = protectPersonSpan(src, mask, width, height, y0, y1, bg);
+      }
     }
     if (hip < 8) hip = shoulder > 8 ? shoulder * 0.78 : 0;
     if (shoulder < 8 && hip >= 8) shoulder = hip / 0.78;
@@ -834,6 +986,7 @@ var DeskLookLib = (() => {
       }
     }
     if (all.n < 8 && !failReasons.includes("clothes_goal")) failReasons.push("clothes_goal");
+    failReasons.sort((a, b) => VISUAL_REASON_ORDER.indexOf(a) - VISUAL_REASON_ORDER.indexOf(b));
     const together = upper.present && lower.present;
     return {
       ok: failReasons.length === 0,

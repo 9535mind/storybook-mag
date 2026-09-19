@@ -1,0 +1,15 @@
+{
+  "clothesChanged": true,
+  "armReason": "mask_seam",
+  "remnantHit": true,
+  "v2Ok": true,
+  "v2Reason": "",
+  "v2RemnantPass": true,
+  "reasonOrder": [
+    "clothes_goal",
+    "mask_seam",
+    "silhouette"
+  ],
+  "thresholdChanged": false,
+  "ok": true
+}
