@@ -12457,12 +12457,23 @@ function deskProtectSkipsFaceBox(protect) {
   return Boolean(protect && protect.ok && protect.skipped !== true)
 }
 
-async function deskStillPasses(sourceUrl, resultUrl, expectPeople, maskUrl, layout) {
+async function deskStillPasses(sourceUrl, resultUrl, expectPeople, maskUrl, layout, gateOpts) {
   const expect = expectPeople >= 2 ? 2 : 1
-  const protect = maskUrl
-    ? await deskProtectPixelDiff(sourceUrl, resultUrl, maskUrl)
-    : { ok: true, skipped: true }
+  const protect = gateOpts?.protectIdentical
+    ? { ok: true, skipped: false }
+    : maskUrl
+      ? await deskProtectPixelDiff(sourceUrl, resultUrl, maskUrl)
+      : { ok: true, skipped: true }
   const protectLocked = deskProtectSkipsFaceBox(protect)
+  if (protectLocked) {
+    const visual = await deskLookVisualPasses(sourceUrl, resultUrl, maskUrl)
+    if (!visual.ok) {
+      if (visual.reason === 'silhouette') return { ok: false, reason: 'silhouette' }
+      if (visual.reason === 'mask_seam') return { ok: false, reason: 'mask_seam' }
+      return { ok: false, reason: 'clothes_goal' }
+    }
+    return { ok: true }
+  }
   const outBoxes = await deskStillFaceBoxes(resultUrl)
   if (!outBoxes || !outBoxes.length) return { ok: false, reason: 'undetected' }
   if (outBoxes.length !== expect) {
@@ -14048,6 +14059,7 @@ function initAdultDesk() {
       return
     }
     let shown = stable
+    let protectIdentical = false
     const expectPeople = sourcePeople >= 2 ? 2 : 1
     if (deskStep === 'look') {
       const maskForComp = opts?.clothesMaskFull || opts?.clothesMask
@@ -14073,6 +14085,7 @@ function initAdultDesk() {
         return
       }
       shown = comp.dataUrl
+      protectIdentical = true
     }
     if (typeof deskStillPasses === 'function' && (deskStep === 'look' || deskStep === 'place')) {
       const gate = await deskStillPasses(
@@ -14081,8 +14094,9 @@ function initAdultDesk() {
         expectPeople,
         opts?.clothesMaskFull || opts?.clothesMask,
         currentDeskWork()?.castLayout,
+        { protectIdentical },
       )
-      const lookRetryOk = { protect: 1, undetected: 1, embed: 1, pose: 1, faces: 1, extra: 1, 'mw-ww': 1, cast_people: 1 }
+      const lookRetryOk = { protect: 1, undetected: 1, embed: 1, faces: 1, extra: 1, 'mw-ww': 1, cast_people: 1 }
       if (!gate.ok && !opts?._retried && (deskStep === 'place' || (deskStep === 'look' && lookRetryOk[gate.reason]))) {
         setFormStatus('얼굴·인원·구도가 원본과 달라 한 번만 다시 그립니다. 얼굴을 붙이지 않습니다.', false)
         return runDeskKontextStep(images, description, deskStep, title, doneText, {

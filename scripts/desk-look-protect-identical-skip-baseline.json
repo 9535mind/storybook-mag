@@ -1,0 +1,10 @@
+{
+  "criterion": "03-composite-v2.png",
+  "v2identical": true,
+  "v2route": "save",
+  "v2claude": 0,
+  "v2leffaRetryOnPose": 0,
+  "face1pxidentical": false,
+  "face1pxroute": "existing",
+  "ok": true
+}
