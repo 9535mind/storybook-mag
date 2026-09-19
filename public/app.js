@@ -12453,8 +12453,16 @@ async function deskLookVisualPasses(sourceUrl, resultUrl, maskUrl) {
   }
 }
 
+function deskProtectSkipsFaceBox(protect) {
+  return Boolean(protect && protect.ok && protect.skipped !== true)
+}
+
 async function deskStillPasses(sourceUrl, resultUrl, expectPeople, maskUrl, layout) {
   const expect = expectPeople >= 2 ? 2 : 1
+  const protect = maskUrl
+    ? await deskProtectPixelDiff(sourceUrl, resultUrl, maskUrl)
+    : { ok: true, skipped: true }
+  const protectLocked = deskProtectSkipsFaceBox(protect)
   const outBoxes = await deskStillFaceBoxes(resultUrl)
   if (!outBoxes || !outBoxes.length) return { ok: false, reason: 'undetected' }
   if (outBoxes.length !== expect) {
@@ -12484,23 +12492,25 @@ async function deskStillPasses(sourceUrl, resultUrl, expectPeople, maskUrl, layo
     pairs.push([srcMain, outMain, work?.womanCastLock?.embed || work?.manCastLock?.embed])
   }
   for (const [srcBox, outBox, castEmbed] of pairs) {
-    const dx = srcBox.x + srcBox.w / 2 - (outBox.x + outBox.w / 2)
-    const dy = srcBox.y + srcBox.h / 2 - (outBox.y + outBox.h / 2)
-    if (Math.hypot(dx, dy) > 0.18) return { ok: false, reason: 'pose' }
-    const scale = (outBox.w * outBox.h) / Math.max(0.0001, srcBox.w * srcBox.h)
-    if (scale > 1.85 || scale < 0.45) return { ok: false, reason: 'pose' }
+    if (!protectLocked) {
+      const dx = srcBox.x + srcBox.w / 2 - (outBox.x + outBox.w / 2)
+      const dy = srcBox.y + srcBox.h / 2 - (outBox.y + outBox.h / 2)
+      if (Math.hypot(dx, dy) > 0.18) return { ok: false, reason: 'pose' }
+      const scale = (outBox.w * outBox.h) / Math.max(0.0001, srcBox.w * srcBox.h)
+      if (scale > 1.85 || scale < 0.45) return { ok: false, reason: 'pose' }
+    }
     const runtime = globalThis.DeskLookRuntime
     if (!runtime || typeof runtime.embedCast !== 'function') return { ok: false, reason: 'undetected' }
+    const embedBox = protectLocked ? srcBox : outBox
     const left = await runtime.embedCast(sourceUrl, srcBox)
-    const right = await runtime.embedCast(resultUrl, outBox)
+    const right = await runtime.embedCast(resultUrl, embedBox)
     if (!left?.ok || !right?.ok || left.dim !== 512 || right.dim !== 512) return { ok: false, reason: 'undetected' }
     if (deskVecCos(left.vec, right.vec) < 0.35) return { ok: false, reason: 'embed' }
     if (Array.isArray(castEmbed) && castEmbed.length === 512 && deskVecCos(castEmbed, right.vec) < 0.35) {
       return { ok: false, reason: 'embed' }
     }
   }
-  const protect = await deskProtectPixelDiff(sourceUrl, resultUrl, maskUrl)
-  if (!protect.ok) return { ok: false, reason: 'protect' }
+  if (maskUrl && !protect.ok) return { ok: false, reason: 'protect' }
   const visual = await deskLookVisualPasses(sourceUrl, resultUrl, maskUrl)
   if (!visual.ok) {
     if (visual.reason === 'silhouette') return { ok: false, reason: 'silhouette' }

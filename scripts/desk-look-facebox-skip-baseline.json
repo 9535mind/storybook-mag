@@ -1,0 +1,8 @@
+{
+  "criterion": "03-composite-v2.png",
+  "v2hot": 0,
+  "v2route": "skip",
+  "face1pxhot": 1,
+  "face1pxroute": "face-box",
+  "ok": true
+}
