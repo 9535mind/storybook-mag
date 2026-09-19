@@ -162,6 +162,16 @@ var DeskLookLib = (() => {
   }
   var HAND_ARM_SPAN_FRAC = 0.08;
   var HAND_DISTAL_FRAC = 0.22;
+  var BODY_SPAN_LABELS = /* @__PURE__ */ new Set([
+    "Upper-clothes",
+    "Skirt",
+    "Pants",
+    "Dress",
+    "Belt",
+    "Scarf",
+    "Left-leg",
+    "Right-leg"
+  ]);
   var VTON_CLOTHES_BLEED_PX = 12;
   var VTON_FACE_CLOTHES_CLEAR_PX = 22;
   var VTON_FACE_KEEP_FRAC = 0.62;
@@ -231,6 +241,35 @@ var DeskLookLib = (() => {
   function rgbDist(rgba, p, sample) {
     const i = p * 4;
     return Math.hypot(rgba[i] - sample.r, rgba[i + 1] - sample.g, rgba[i + 2] - sample.b);
+  }
+  function fillBetweenBodyGaps(mask, labels, width, height, woman, man) {
+    let filled = 0;
+    for (let y = 0; y < height; y++) {
+      let x0 = width;
+      let x1 = -1;
+      for (let x = 0; x < width; x++) {
+        const nx = (x + 0.5) / width;
+        const ny = (y + 0.5) / height;
+        if (man && pointIn(man, nx, ny)) continue;
+        if (woman && !pointIn(woman, nx, ny)) continue;
+        if (!BODY_SPAN_LABELS.has(labels[y * width + x] || "")) continue;
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+      }
+      if (x1 < 0 || x1 - x0 < 8) continue;
+      for (let x = x0; x <= x1; x++) {
+        const p = y * width + x;
+        const nx = (x + 0.5) / width;
+        const ny = (y + 0.5) / height;
+        if (man && pointIn(man, nx, ny)) continue;
+        if (woman && !pointIn(woman, nx, ny)) continue;
+        if (mask[p] >= 128) continue;
+        if ((labels[p] || "") !== "Background") continue;
+        mask[p] = 255;
+        filled += 1;
+      }
+    }
+    return filled;
   }
   function dropSmallProtectIslands(mask, width, height, minArea) {
     const n = width * height;
@@ -319,6 +358,7 @@ var DeskLookLib = (() => {
       releasedCuff: 0,
       releasedClothesColor: 0,
       releasedIslands: 0,
+      releasedGaps: 0,
       ok: false,
       reason: "parse_size"
     };
@@ -400,6 +440,7 @@ var DeskLookLib = (() => {
         }
       }
     }
+    const releasedGaps = fillBetweenBodyGaps(mask, labels, width, height, woman, man);
     const whiteBleed = bleedEditIntoBackground(
       mask,
       labels,
@@ -423,6 +464,7 @@ var DeskLookLib = (() => {
       releasedCuff,
       releasedClothesColor,
       releasedIslands,
+      releasedGaps,
       ok,
       reason: ok ? "" : "mask_too_small"
     };

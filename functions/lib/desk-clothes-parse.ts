@@ -223,7 +223,18 @@ export function assembleClothesRegionMasks(options: {
 }
 
 const HAND_ARM_SPAN_FRAC = 0.08
+/** 손목 장식은 알려진 제한. 이 값을 키우면 재킷 소매·청바지가 슬립에 붙는다. */
 const HAND_DISTAL_FRAC = 0.22
+const BODY_SPAN_LABELS = new Set([
+  'Upper-clothes',
+  'Skirt',
+  'Pants',
+  'Dress',
+  'Belt',
+  'Scarf',
+  'Left-leg',
+  'Right-leg',
+])
 const VTON_CLOTHES_BLEED_PX = 12
 const VTON_FACE_CLOTHES_CLEAR_PX = 22
 const VTON_FACE_KEEP_FRAC = 0.62
@@ -310,6 +321,44 @@ function isSkinLike(rgba: Uint8Array, p: number): boolean {
 function rgbDist(rgba: Uint8Array, p: number, sample: { r: number; g: number; b: number }): number {
   const i = p * 4
   return Math.hypot(rgba[i]! - sample.r, rgba[i + 1]! - sample.g, rgba[i + 2]! - sample.b)
+}
+
+/** 다리·몸통 사이의 배경 틈. 슬립 밑단 중앙에 원본 배경이 박히는 직사각형. */
+function fillBetweenBodyGaps(
+  mask: Uint8Array,
+  labels: string[],
+  width: number,
+  height: number,
+  woman?: { x: number; y: number; w: number; h: number } | null,
+  man?: { x: number; y: number; w: number; h: number } | null,
+): number {
+  let filled = 0
+  for (let y = 0; y < height; y++) {
+    let x0 = width
+    let x1 = -1
+    for (let x = 0; x < width; x++) {
+      const nx = (x + 0.5) / width
+      const ny = (y + 0.5) / height
+      if (man && pointIn(man, nx, ny)) continue
+      if (woman && !pointIn(woman, nx, ny)) continue
+      if (!BODY_SPAN_LABELS.has(labels[y * width + x] || '')) continue
+      if (x < x0) x0 = x
+      if (x > x1) x1 = x
+    }
+    if (x1 < 0 || x1 - x0 < 8) continue
+    for (let x = x0; x <= x1; x++) {
+      const p = y * width + x
+      const nx = (x + 0.5) / width
+      const ny = (y + 0.5) / height
+      if (man && pointIn(man, nx, ny)) continue
+      if (woman && !pointIn(woman, nx, ny)) continue
+      if (mask[p]! >= 128) continue
+      if ((labels[p] || '') !== 'Background') continue
+      mask[p] = 255
+      filled += 1
+    }
+  }
+  return filled
 }
 
 function dropSmallProtectIslands(mask: Uint8Array, width: number, height: number, minArea: number): number {
@@ -417,6 +466,7 @@ export function assembleVtonIdentityMask(options: {
   releasedCuff: number
   releasedClothesColor: number
   releasedIslands: number
+  releasedGaps: number
   ok: boolean
   reason: string
 } {
@@ -432,6 +482,7 @@ export function assembleVtonIdentityMask(options: {
     releasedCuff: 0,
     releasedClothesColor: 0,
     releasedIslands: 0,
+    releasedGaps: 0,
     ok: false,
     reason: 'parse_size',
   }
@@ -516,6 +567,7 @@ export function assembleVtonIdentityMask(options: {
       }
     }
   }
+  const releasedGaps = fillBetweenBodyGaps(mask, labels, width, height, woman, man)
   const whiteBleed = bleedEditIntoBackground(
     mask,
     labels,
@@ -539,6 +591,7 @@ export function assembleVtonIdentityMask(options: {
     releasedCuff,
     releasedClothesColor,
     releasedIslands,
+    releasedGaps,
     ok,
     reason: ok ? '' : 'mask_too_small',
   }
