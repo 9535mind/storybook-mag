@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20260919look'
+window.__DESK_BUILD = '20260920why'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -10185,7 +10185,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       else setStatus(msg, true)
       return null
     }
-    if (data.imageUrl) return { imageUrl: data.imageUrl }
+    // 어느 엔진이 그렸는지는 뒤에서 합성 여부를 가른다. VTON 은 얼굴을 스스로 지킨다.
+    const engine = typeof data.engine === 'string' ? data.engine : ''
+    if (data.imageUrl) return { imageUrl: data.imageUrl, engine }
     if (data.pending && data.predictionId) {
       const imageUrl = await pollReplicatePose(
         data.predictionId,
@@ -10193,7 +10195,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         pollLabel,
         pollLimitSec || 180,
       )
-      return imageUrl ? { imageUrl } : null
+      return imageUrl ? { imageUrl, engine } : null
     }
     if (data.pending && data.statusUrl && data.responseUrl) {
       const imageUrl = await pollTaleScene(
@@ -10202,7 +10204,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         pollLabel,
         pollLimitSec || 180,
       )
-      return imageUrl ? { imageUrl } : null
+      return imageUrl ? { imageUrl, engine } : null
     }
     setStatus('장면 결과를 받지 못했어요. 다시 시도해 주세요.', true)
     return null
@@ -12146,16 +12148,18 @@ async function compositeDeskClothesResult(srcUrl, genUrl, maskUrl, featherPx) {
     const maskImg = await loadDeskImage(maskUrl)
     const w = srcImg.naturalWidth || 1
     const h = srcImg.naturalHeight || 1
-    const grab = (img) => {
+    const grab = (img, nearest) => {
       const c = document.createElement('canvas')
       c.width = w
       c.height = h
-      c.getContext('2d').drawImage(img, 0, 0, w, h)
-      return c.getContext('2d').getImageData(0, 0, w, h)
+      const ctx = c.getContext('2d')
+      ctx.imageSmoothingEnabled = !nearest
+      ctx.drawImage(img, 0, 0, w, h)
+      return ctx.getImageData(0, 0, w, h)
     }
-    const src = grab(srcImg)
-    const gen = grab(genImg)
-    const mask = grab(maskImg)
+    const src = grab(srcImg, false)
+    const gen = grab(genImg, false)
+    const mask = grab(maskImg, true)
     const r = Number.isFinite(featherPx) ? Math.min(8, Math.max(3, Math.round(featherPx))) : 5
     const n = w * h
     const md = mask.data
@@ -12163,6 +12167,36 @@ async function compositeDeskClothesResult(srcUrl, genUrl, maskUrl, featherPx) {
     const s = src.data
     const g = gen.data
     const o = out.data
+    // 엔진이 사진 전체 톤을 조금 옮겨 놓으면 마스크 경계에 단차가 생긴다.
+    // 마스크 바깥 띠는 원본과 같은 내용이어야 하므로, 거기서 잰 차이만 되돌린다.
+    const tone = [0, 0, 0]
+    let ringN = 0
+    const sum = [0, 0, 0]
+    for (let p = 0; p < n; p += 1) {
+      const i = p * 4
+      if (md[i] >= 128) continue
+      const x = p % w
+      const y = (p - x) / w
+      let touches = false
+      if (x >= r && md[(p - r) * 4] >= 128) touches = true
+      else if (x + r < w && md[(p + r) * 4] >= 128) touches = true
+      else if (y >= r && md[(p - r * w) * 4] >= 128) touches = true
+      else if (y + r < h && md[(p + r * w) * 4] >= 128) touches = true
+      if (!touches) continue
+      sum[0] += s[i] - g[i]
+      sum[1] += s[i + 1] - g[i + 1]
+      sum[2] += s[i + 2] - g[i + 2]
+      ringN += 1
+    }
+    if (ringN >= 64) {
+      for (let c = 0; c < 3; c += 1) {
+        tone[c] = Math.max(-24, Math.min(24, Math.round(sum[c] / ringN)))
+      }
+    }
+    const gv = (i, c) => {
+      const v = g[i + c] + tone[c]
+      return v < 0 ? 0 : v > 255 ? 255 : v
+    }
     let protectN = 0
     let protectMax = 0
     for (let p = 0; p < n; p += 1) {
@@ -12194,16 +12228,40 @@ async function compositeDeskClothesResult(srcUrl, genUrl, maskUrl, featherPx) {
         const mad = (Math.abs(o[i] - s[i]) + Math.abs(o[i + 1] - s[i + 1]) + Math.abs(o[i + 2] - s[i + 2])) / 3
         if (mad > protectMax) protectMax = mad
       } else if (t >= 1) {
-        o[i] = g[i]
-        o[i + 1] = g[i + 1]
-        o[i + 2] = g[i + 2]
+        o[i] = gv(i, 0)
+        o[i + 1] = gv(i, 1)
+        o[i + 2] = gv(i, 2)
         o[i + 3] = 255
       } else {
-        o[i] = Math.round(s[i] * (1 - t) + g[i] * t)
-        o[i + 1] = Math.round(s[i + 1] * (1 - t) + g[i + 1] * t)
-        o[i + 2] = Math.round(s[i + 2] * (1 - t) + g[i + 2] * t)
+        o[i] = Math.round(s[i] * (1 - t) + gv(i, 0) * t)
+        o[i + 1] = Math.round(s[i + 1] * (1 - t) + gv(i, 1) * t)
+        o[i + 2] = Math.round(s[i + 2] * (1 - t) + gv(i, 2) * t)
         o[i + 3] = 255
       }
+    }
+    for (let p = 0; p < n; p += 1) {
+      const i = p * 4
+      if (md[i] < 128) continue
+      const x = p % w
+      const y = (p - x) / w
+      let bound = false
+      const x0 = Math.max(0, x - 2)
+      const x1 = Math.min(w - 1, x + 2)
+      const y0 = Math.max(0, y - 2)
+      const y1 = Math.min(h - 1, y + 2)
+      for (let yy = y0; yy <= y1 && !bound; yy += 1) {
+        for (let xx = x0; xx <= x1; xx += 1) {
+          if (md[(yy * w + xx) * 4] < 128) bound = true
+        }
+      }
+      if (!bound) continue
+      const outL = (o[i] + o[i + 1] + o[i + 2]) / 3
+      const srcL = (s[i] + s[i + 1] + s[i + 2]) / 3
+      if (outL > 78 || srcL < 120 || srcL < outL + 28) continue
+      if (s[i] <= 85 || s[i] + 8 < s[i + 1] || s[i] <= s[i + 2] + 6) continue
+      o[i] = s[i]
+      o[i + 1] = s[i + 1]
+      o[i + 2] = s[i + 2]
     }
     const canvas = document.createElement('canvas')
     canvas.width = w
@@ -12441,13 +12499,27 @@ async function deskLookVisualPasses(sourceUrl, resultUrl, maskUrl) {
       for (let p = 0, i = 0; p < m.length; p++, i += 4) m[p] = data[i] >= 128 ? 255 : 0
       return m
     }
-    return visualFn({
+    const gate = visualFn({
       src: grab(src, false),
       out: grab(out, false),
       mask: grab(maskImg, true),
       width: w,
       height: h,
     })
+    if (!gate.ok) {
+      // 왜 떨어졌는지 숫자로 남긴다. 이게 없으면 다음 수정이 추측이 된다.
+      console.info(
+        'desk look gate',
+        JSON.stringify({
+          reason: gate.reason,
+          failReasons: gate.failReasons,
+          seam: gate.seam,
+          silhouette: gate.silhouette,
+          regions: gate.regions,
+        }),
+      )
+    }
+    return gate
   } catch {
     return { ok: false, reason: 'clothes_goal' }
   }
@@ -12457,20 +12529,41 @@ function deskProtectSkipsFaceBox(protect) {
   return Boolean(protect && protect.ok && protect.skipped !== true)
 }
 
+/** 거부 문구에 붙일 짧은 숫자. 콘솔을 열지 않고도 어디가 걸렸는지 보이게. */
+function deskVisualDetail(visual) {
+  if (!visual) return ''
+  const r2 = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.round(v * 100) / 100 : '?')
+  const seam = visual.seam || {}
+  const sil = visual.silhouette || {}
+  const up = visual.regions?.upper || {}
+  const low = visual.regions?.lower || {}
+  if (visual.reason === 'mask_seam') {
+    return `단차 ${r2(seam.lumRel)} (한도 1.05) · 원본단차 ${r2(seam.srcLumJump)} → 결과 ${r2(seam.outLumJump)} · 질감 ${r2(seam.texRatio)} · 잔상 ${r2(seam.remnantMaxRun)}`
+  }
+  if (visual.reason === 'silhouette') {
+    return `몸너비 ${r2(sil.outWidth)} / 기준 ${r2(sil.bodyRef)} (허용 ${r2(sil.bodyMin)}~${r2(sil.clothingWidth)})`
+  }
+  return `상의 변화 ${r2(up.mad)} 닮음 ${r2(up.corr)} · 하의 변화 ${r2(low.mad)} 닮음 ${r2(low.corr)} (변화 24↑, 닮음 0.88↓ 필요)`
+}
+
 async function deskStillPasses(sourceUrl, resultUrl, expectPeople, maskUrl, layout, gateOpts) {
   const expect = expectPeople >= 2 ? 2 : 1
+  // VTON 은 마스크 밖도 다시 그리므로 화소 동일 검사는 뜻이 없다. 합성을 안 하니
+  // 이음매·실루엣도 생기지 않는다. 남는 질문은 둘뿐 — 같은 사람인가, 옷이 바뀌었는가.
+  const nativeIdentity = gateOpts?.nativeIdentity === true
   const protect = gateOpts?.protectIdentical
     ? { ok: true, skipped: false }
-    : maskUrl
+    : maskUrl && !nativeIdentity
       ? await deskProtectPixelDiff(sourceUrl, resultUrl, maskUrl)
       : { ok: true, skipped: true }
   const protectLocked = deskProtectSkipsFaceBox(protect)
   if (protectLocked) {
     const visual = await deskLookVisualPasses(sourceUrl, resultUrl, maskUrl)
     if (!visual.ok) {
-      if (visual.reason === 'silhouette') return { ok: false, reason: 'silhouette' }
-      if (visual.reason === 'mask_seam') return { ok: false, reason: 'mask_seam' }
-      return { ok: false, reason: 'clothes_goal' }
+      const detail = deskVisualDetail(visual)
+      if (visual.reason === 'silhouette') return { ok: false, reason: 'silhouette', detail }
+      if (visual.reason === 'mask_seam') return { ok: false, reason: 'mask_seam', detail }
+      return { ok: false, reason: 'clothes_goal', detail }
     }
     return { ok: true }
   }
@@ -12521,12 +12614,22 @@ async function deskStillPasses(sourceUrl, resultUrl, expectPeople, maskUrl, layo
       return { ok: false, reason: 'embed' }
     }
   }
-  if (maskUrl && !protect.ok) return { ok: false, reason: 'protect' }
+  if (maskUrl && !nativeIdentity && !protect.ok) return { ok: false, reason: 'protect' }
   const visual = await deskLookVisualPasses(sourceUrl, resultUrl, maskUrl)
   if (!visual.ok) {
-    if (visual.reason === 'silhouette') return { ok: false, reason: 'silhouette' }
-    if (visual.reason === 'mask_seam') return { ok: false, reason: 'mask_seam' }
-    return { ok: false, reason: 'clothes_goal' }
+    const detail = deskVisualDetail(visual)
+    if (nativeIdentity) {
+      // 합성을 안 하니 이음매(mask_seam)는 생길 수가 없다. 그러나 실루엣은 다르다 —
+      // 몸이 원본보다 홀쭉해지거나 옷이 부풀어 다른 몸이 되는 것은 여전히 잡아야 한다.
+      const live = (visual.failReasons?.length ? visual.failReasons : [visual.reason]).filter(
+        (why) => why && why !== 'mask_seam',
+      )
+      if (!live.length) return { ok: true }
+      return { ok: false, reason: live[0], detail }
+    }
+    if (visual.reason === 'silhouette') return { ok: false, reason: 'silhouette', detail }
+    if (visual.reason === 'mask_seam') return { ok: false, reason: 'mask_seam', detail }
+    return { ok: false, reason: 'clothes_goal', detail }
   }
   return { ok: true }
 }
@@ -12775,9 +12878,13 @@ function initAdultDesk() {
     const alreadyNude =
       currentDeskWork()?.lookApplied === 'nude' ||
       /이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude|옷을 녹여 나체/i.test(currentResult.prompt || '')
+    // 지금 장이 아직 슬립이 아니면 옷 바꾸기를 영상이 맡는다.
+    // 카드 문구의 "옷은 그대로"를 남겨 두면 엔진은 그쪽을 따르고 슬립을 버린다.
+    const slipPending = !nude && state.look === 'silk' && currentDeskWork()?.lookApplied !== 'silk'
     const finish = (text) => {
       let out = String(text || '').replace(/\s{2,}/g, ' ').trim()
-      if (nude) out = out.replace(/옷은 그대로\.?\s*/g, '')
+      if (nude || slipPending) out = out.replace(/옷은 그대로\.?\s*/g, '')
+      if (slipPending && !/슬립/.test(out)) out = `${out} 옷만 슬립 한 겹으로 바꾼다.`
       if (couple && !/남자는 남자로/.test(out)) out = `${out} 남자는 남자로. 여여 금지.`
       return out.replace(/\s{2,}/g, ' ').trim()
     }
@@ -13192,8 +13299,9 @@ function initAdultDesk() {
           void runDeskStillCard(key)
           return
         }
-        if (state.job === 'video' && key === 'look' && id === 'nude') {
-          void runDeskMoveQueue()
+        // 쇼츠 시작 프레임은 완성된 지금 장이다. 옷을 고르면 먼저 그 정지화를 만든다.
+        if (state.job === 'video' && key === 'look') {
+          void runDeskStillCard('look')
           return
         }
         if (state.job === 'video' && key === 'move' && id === 'undress' && state.move.includes('undress')) {
@@ -13608,15 +13716,27 @@ function initAdultDesk() {
     deskMoveRunning = true
     try {
     if (animatePanel) animatePanel.hidden = false
-    const labels = picked.map((one) => one.label).join('·')
-    setFormStatus(`${labels} 한 편 찍는 중…`, false)
     const coupleIds = new Set(['kiss', 'hug', 'come', 'zipper'])
-    const needCouple = picked.some((one) => coupleIds.has(one.id))
-    const frame = await resolveDeskFrame({ from: 'scene', needCouple })
+    let frame = await resolveDeskFrame({
+      from: 'scene',
+      needCouple: picked.some((one) => coupleIds.has(one.id)),
+    })
     if (!frame.ok) {
-      setFormStatus(frame.message || '지금 장이 없습니다.', true)
-      return
+      // 두 사람 동작만 못 찍는 경우라면 혼자 동작은 그대로 찍는다.
+      const solo = picked.filter((one) => !coupleIds.has(one.id))
+      const soloFrame = solo.length ? await resolveDeskFrame({ from: 'scene' }) : null
+      if (!soloFrame?.ok) {
+        setFormStatus(frame.message || '지금 장이 없습니다.', true)
+        return
+      }
+      const dropped = picked.filter((one) => coupleIds.has(one.id)).map((one) => one.label)
+      picked = solo
+      frame = soloFrame
+      setFormStatus(`${dropped.join('·')}는 두 사람이 필요해 뺐습니다. 혼자 동작만 찍습니다…`, false)
     }
+    const [head, ...rest] = picked
+    const clipPicked = [head]
+    const labels = head.label
     currentResult.imageUrl = frame.image
     if (String(frame.image).startsWith('data:')) currentResult.imageDataUrl = frame.image
     const coupleInStill = frame.couple
@@ -13631,8 +13751,8 @@ function initAdultDesk() {
     const alreadyNude =
       currentDeskWork()?.lookApplied === 'nude' ||
       /이미\s*나체|나체\s*유지|fully\s*nude|already\s*nude|옷을 녹여 나체/i.test(savedPrompt || '')
-    const rest = []
-    const motion = compileDeskMove(coupleInStill, picked)
+    const onlyUndress = !alreadyNude && head.id === 'undress'
+    const motion = compileDeskMove(coupleInStill, clipPicked)
     setFormStatus(`${labels} 한 편 찍는 중…`, false)
     const identityStill = currentResult.imageDataUrl || currentResult.imageUrl
     const prevVideoUrl =
@@ -14055,7 +14175,12 @@ function initAdultDesk() {
     let shown = stable
     let protectIdentical = false
     const expectPeople = sourcePeople >= 2 ? 2 : 1
-    if (deskStep === 'look') {
+    // VTON 은 얼굴·자세·배경을 스스로 남기고 해상도도 그대로 돌려준다(실측 ArcFace 0.964,
+    // 얼굴칸 이동 0.1%, 880×1184 → 880×1184). 여기에 마스크 합성을 덮으면 마스크 밖에 남은
+    // 원래 청바지·소매가 되살아나 톱니로 보인다 — 멀쩡한 결과를 우리가 망가뜨렸다.
+    // 그래서 합성을 건너뛰고, 같은 사람인지는 아래 얼굴 검사로 본다.
+    const nativeIdentity = job.engine === 'fal-fashn-tryon'
+    if (deskStep === 'look' && !nativeIdentity) {
       const maskForComp = opts?.clothesMaskFull || opts?.clothesMask
       if (!maskForComp || typeof compositeDeskClothesResult !== 'function') {
         setFormStatus('의상 마스크가 없어 결과를 붙이지 않습니다. 가운데는 원본입니다.', true)
@@ -14088,18 +14213,28 @@ function initAdultDesk() {
         expectPeople,
         opts?.clothesMaskFull || opts?.clothesMask,
         currentDeskWork()?.castLayout,
-        { protectIdentical },
+        { protectIdentical, nativeIdentity },
       )
       const lookRetryOk = { protect: 1, undetected: 1, embed: 1, faces: 1, extra: 1, 'mw-ww': 1, cast_people: 1 }
-      if (!gate.ok && !opts?._retried && (deskStep === 'place' || (deskStep === 'look' && lookRetryOk[gate.reason]))) {
-        setFormStatus('얼굴·인원·구도가 원본과 달라 한 번만 다시 그립니다. 얼굴을 붙이지 않습니다.', false)
+      // 옷이 안 바뀌는 건 엔진의 무작위라 다시 뽑으면 달라진다.
+      // 반면 mask_seam·silhouette 은 같은 마스크에서 매번 같게 걸리므로(실측 3/3)
+      // 다시 뽑아도 소용없다 — 돈만 든다.
+      const lookVisualRetryOk = { clothes_goal: 1 }
+      const attempt = Number(opts?._attempt) || 1
+      const lastAttempt = deskStep === 'look' && lookVisualRetryOk[gate.reason] ? 3 : 2
+      const mayRetry =
+        deskStep === 'place' ||
+        (deskStep === 'look' && (lookRetryOk[gate.reason] || lookVisualRetryOk[gate.reason]))
+      if (!gate.ok && attempt < lastAttempt && mayRetry) {
+        setFormStatus(`결과가 기준에 못 미쳐 다시 그립니다 (${attempt + 1}/${lastAttempt}).`, false)
         return runDeskKontextStep(images, description, deskStep, title, doneText, {
           ...opts,
+          _attempt: attempt + 1,
           _retried: true,
         })
       }
       if (!gate.ok) {
-        setFormStatus(
+        const gateWhy =
           gate.reason === 'mw-ww'
             ? '남자가 여자로 바뀌거나 한 명만 나와 저장하지 않습니다. 가운데는 원본입니다.'
             : gate.reason === 'extra'
@@ -14116,9 +14251,8 @@ function initAdultDesk() {
                         ? '몸 실루엣이 바뀌어 저장하지 않습니다. 가운데는 원본입니다.'
                         : gate.reason === 'mask_seam'
                           ? '옷 경계가 이어지지 않아 저장하지 않습니다. 가운데는 원본입니다.'
-                          : '얼굴·인원을 확인하지 못해 저장하지 않습니다. 가운데는 원본입니다.',
-          true,
-        )
+                          : '얼굴·인원을 확인하지 못해 저장하지 않습니다. 가운데는 원본입니다.'
+        setFormStatus(gate.detail ? `${gateWhy} ${gate.detail}` : gateWhy, true)
         return
       }
     }
