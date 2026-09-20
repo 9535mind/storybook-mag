@@ -22,15 +22,18 @@ L_SHOULDER, R_SHOULDER, L_HIP, R_HIP = 11, 12, 23, 24
 
 
 def make_landmarker():
+    # output_segmentation_masks 는 작은 그림에서 네이티브 크래시를 낸다(파이썬에서 못 잡음).
+    # 몸통 영역은 관절 좌표로 직접 잡는다.
     opts = vision.PoseLandmarkerOptions(
         base_options=mp_python.BaseOptions(model_asset_path=MODEL),
-        output_segmentation_masks=True,
     )
     return vision.PoseLandmarker.create_from_options(opts)
 
 
 def measure(landmarker, path):
-    img = mp.Image.create_from_file(path)
+    # create_from_file 은 투명 채널이 있는 PNG 에서 죽는다. 직접 RGB 로 읽어 넘긴다.
+    pil = Image.open(path).convert("RGB")
+    img = mp.Image(image_format=mp.ImageFormat.SRGB, data=np.ascontiguousarray(pil))
     res = landmarker.detect(img)
     if not res.pose_landmarks:
         return {"path": path, "error": "사람을 못 찾음"}
@@ -55,25 +58,24 @@ def measure(landmarker, path):
         "hipY": round(float(hip_mid[1]) / h, 4),
         "hipW": round(float(np.linalg.norm(lh - rh)) / h, 4),
         "torsoLen": round(torso / h, 4),
+        # 잘린 범위·해상도가 달라도 변하지 않는 몸 비율. 비교는 이것으로 한다.
+        "shoulderW_perTorso": round(float(np.linalg.norm(ls - rs)) / torso, 3),
+        "hipW_perTorso": round(float(np.linalg.norm(lh - rh)) / torso, 3),
     }
 
     # 가슴 꼭짓점 보조 측정: 어깨~엉덩이 사이 몸통 안쪽에서 세로 밝기가 가장
     # 볼록한 줄. 몸에 붙는 옷이라야 뜻이 있다. 헐렁한 옷이면 무의미하므로
     # 굴곡 세기(prom)를 같이 내보내 판단할 수 있게 한다.
-    seg = np.squeeze(res.segmentation_masks[0].numpy_view()) if res.segmentation_masks else None
-    gray = np.asarray(Image.open(path).convert("L"), dtype=float)
-    y0 = int(shoulder_mid[1] + torso * 0.12)
-    y1 = int(shoulder_mid[1] + torso * 0.72)
-    x0 = int(min(ls[0], rs[0]) + abs(ls[0] - rs[0]) * 0.22)
-    x1 = int(max(ls[0], rs[0]) - abs(ls[0] - rs[0]) * 0.22)
-    if seg is not None and y1 > y0 + 8 and x1 > x0 + 8:
-        band = gray[y0:y1, x0:x1]
-        mask = seg[y0:y1, x0:x1] > 0.5
-        rows = np.where(mask.sum(axis=1) > 4, (band * mask).sum(axis=1) / np.maximum(mask.sum(axis=1), 1), np.nan)
-        good = ~np.isnan(rows)
-        if good.sum() > 12:
-            ys = np.arange(y0, y0 + len(rows))[good]  # 그림 전체 기준 y
-            vals = rows[good]
+    gray = np.asarray(pil.convert("L"), dtype=float)
+    y0 = max(0, int(shoulder_mid[1] + torso * 0.12))
+    y1 = min(h, int(shoulder_mid[1] + torso * 0.72))
+    x0 = max(0, int(min(ls[0], rs[0]) + abs(ls[0] - rs[0]) * 0.22))
+    x1 = min(w, int(max(ls[0], rs[0]) - abs(ls[0] - rs[0]) * 0.22))
+    if y1 > y0 + 8 and x1 > x0 + 8:
+        rows = gray[y0:y1, x0:x1].mean(axis=1)
+        if len(rows) > 12:
+            ys = np.arange(y0, y0 + len(rows))  # 그림 전체 기준 y
+            vals = rows
             k = max(3, len(vals) // 12) | 1
             smooth = np.convolve(vals, np.ones(k) / k, mode="same")
             peak = int(np.argmax(smooth[k:-k])) + k
@@ -94,13 +96,18 @@ def main():
         if "error" in src or "error" in got:
             continue
         print(
-            "차이 : 어깨높이 {:+.2f}%(그림높이) · 어깨폭 {:+.1f}% · 몸통길이 {:+.1f}% · 엉덩이폭 {:+.1f}%".format(
-                100 * (got["shoulderY"] - src["shoulderY"]),
-                100 * (got["shoulderW"] / src["shoulderW"] - 1),
-                100 * (got["torsoLen"] / src["torsoLen"] - 1),
-                100 * (got["hipW"] / src["hipW"] - 1),
+            "차이(몸통 길이 기준 · 잘린 범위 무관) : 어깨폭 {:+.1f}% · 엉덩이폭 {:+.1f}%".format(
+                100 * (got["shoulderW_perTorso"] / src["shoulderW_perTorso"] - 1),
+                100 * (got["hipW_perTorso"] / src["hipW_perTorso"] - 1),
             )
         )
+        if src["size"] == got["size"]:
+            print(
+                "차이(그림 기준 · 같은 크기일 때만) : 어깨높이 {:+.2f}% · 몸통길이 {:+.1f}%".format(
+                    100 * (got["shoulderY"] - src["shoulderY"]),
+                    100 * (got["torsoLen"] / src["torsoLen"] - 1),
+                )
+            )
         if "bustFrac" in src and "bustFrac" in got:
             print(
                 "       가슴높이(몸통 대비) 원본 {:.3f} → 결과 {:.3f} ({:+.1f}%p, 굴곡세기 {:.1f}→{:.1f})".format(
