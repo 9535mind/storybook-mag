@@ -1078,6 +1078,60 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       /* 원문 유지 */
     }
 
+    // 자유 스튜디오. Desk 와 같은 엔진이지만 걸음·마스크·게이트가 없다.
+    // 사용자가 적은 말을 영어로 옮겨 그대로 보낸다. 사진이 있으면 그 사진을 고치고, 없으면 글만으로 그린다.
+    if (composeMode === 'free-still') {
+      try {
+        // aspectRatio 는 이 아래에서 선언되므로 여기서 따로 읽는다.
+        const freeRatio =
+          typeof body.aspectRatio === 'string' && body.aspectRatio.trim() ? body.aspectRatio.trim() : undefined
+        const submitted = images.length
+          ? await submitFalKontextEdit({
+              falKey: env.FAL_KEY,
+              imageUrl: images[0],
+              prompt: description,
+              tier: 'pro',
+              guidanceScale: 4.2,
+            })
+          : await submitFalTextToImage({
+              falKey: env.FAL_KEY,
+              prompt: description,
+              imageSize: aspectRatioToFalSize(freeRatio),
+              falModel: env.FAL_MODEL_ID?.trim() || 'fal-ai/flux-2-pro',
+            })
+        if ('imageUrl' in submitted && submitted.imageUrl) {
+          return jsonResponse(
+            { ok: true, imageUrl: submitted.imageUrl, composeMode: 'free-still', prompt: description },
+            200,
+          )
+        }
+        return jsonResponse(
+          {
+            ok: true,
+            pending: true,
+            statusUrl: submitted.statusUrl,
+            responseUrl: submitted.responseUrl,
+            composeMode: 'free-still',
+            prompt: description,
+          },
+          200,
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error'
+        if (isProviderContentBlock(message)) {
+          return jsonResponse(
+            {
+              ok: false,
+              error: 'provider_content_blocked',
+              message: '이미지 엔진이 이 요청을 거절했어요. 말을 조금 바꿔서 다시 눌러 주세요.',
+            },
+            422,
+          )
+        }
+        return jsonResponse({ ok: false, error: 'free_still_failed', message }, 502)
+      }
+    }
+
     if (composeMode === 'scene-bg') {
       try {
         const mask = images[1]

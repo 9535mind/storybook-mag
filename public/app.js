@@ -73,10 +73,11 @@ function getGenMode() {
 }
 
 const APP_AREA_KEY = 'storymagAppArea'
-const APP_AREAS = ['studio', 'admin', 'essay', 'tale', 'observe']
+const APP_AREAS = ['studio', 'admin', 'essay', 'tale', 'observe', 'free']
 const APP_AREA_META = {
   studio: { title: null, subtitle: null },
   admin: { title: null, subtitle: null },
+  free: { title: '자유 스튜디오', subtitle: '걸음 없이 · 적은 대로 한 장' },
   essay: { title: '에세이 아키텍트', subtitle: '냉혹한 편집장 · 출간 수준 해체' },
   tale: { title: 'AI 동화 편집', subtitle: '초등 눈높이 · 사건과 행동으로' },
   observe: { title: '그림관찰과 표현', subtitle: '보이는 것을 정확하게' },
@@ -84,7 +85,8 @@ const APP_AREA_META = {
 
 function getAppArea() {
   const saved = localStorage.getItem(APP_AREA_KEY)
-  if (saved === 'admin' && !isAdminUser()) return 'studio'
+  // 자유 스튜디오도 Desk 와 같은 성인 엔진을 쓴다. 관리자만.
+  if ((saved === 'admin' || saved === 'free') && !isAdminUser()) return 'studio'
   if (APP_AREAS.includes(saved)) return saved
   return isAdminUser() ? 'admin' : 'studio'
 }
@@ -105,10 +107,12 @@ function syncAppAreaUi() {
   const essayArea = document.getElementById('essay-area')
   const taleArea = document.getElementById('tale-area')
   const observeArea = document.getElementById('observe-area')
+  const freeArea = document.getElementById('free-area')
   if (studioArea) studioArea.hidden = !usesStudioForm
   if (essayArea) essayArea.hidden = area !== 'essay'
   if (taleArea) taleArea.hidden = area !== 'tale'
   if (observeArea) observeArea.hidden = area !== 'observe'
+  if (freeArea) freeArea.hidden = area !== 'free'
   // 「내 갤러리」(자유)와 「관리자 전용 갤러리」(화보)는 서로 섞이지 않게 탭별로 완전히 분리해서 보여준다.
   if (freeGallerySection) freeGallerySection.hidden = area !== 'studio'
   syncAdminWorkspaceUi()
@@ -170,11 +174,14 @@ function syncAdminModeVisibility() {
     isAdminUserEmail(typeof getRememberedLoginId === 'function' ? getRememberedLoginId() : '') ||
     isAdminUserEmail(authUserLabel?.textContent || '')
   if (adminTab) adminTab.hidden = !admin
+  const freeTab = document.getElementById('app-area-free')
+  if (freeTab) freeTab.hidden = !admin
   if (pinSettingsButton) pinSettingsButton.hidden = !admin
   if (!admin) {
     const freeRadio = document.querySelector('input[name="gen-mode"][value="free"]')
     if (freeRadio) freeRadio.checked = true
-    if (getAppArea() === 'admin') setAppArea('studio')
+    const now = getAppArea()
+    if (now === 'admin' || now === 'free') setAppArea('studio')
   }
   // 관리자는 그림 상세본(최대 3000자 미만)을 그대로 옮겨 붙일 수 있게 3000자까지 허용한다.
   // 실제 이미지 생성 모델에 넣기 직전에는 compileSdxlTagPrompt가 자동으로 ~70단어 태그로
@@ -10167,7 +10174,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return null
   }
 
-  async function postTaleSceneJob(payload, pollLabel, pollLimitSec) {
+  // onError 를 주면 그쪽으로 알린다. 자유 스튜디오처럼 폼이 숨어 있는 화면에서는
+  // setFormStatus 가 안 보이는 칸에 글을 써서 사용자가 이유를 못 본다.
+  async function postTaleSceneJob(payload, pollLabel, pollLimitSec, onError) {
     const response = await fetch('/api/tale-scene', {
       method: 'POST',
       headers: typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' },
@@ -10181,7 +10190,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     }
     if (!data.ok) {
       const msg = data.message || `실패: ${data.error || response.status}`
-      if (typeof setFormStatus === 'function') setFormStatus(msg, true)
+      if (typeof onError === 'function') onError(msg)
+      else if (typeof setFormStatus === 'function') setFormStatus(msg, true)
       else setStatus(msg, true)
       return null
     }

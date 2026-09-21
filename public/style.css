@@ -376,6 +376,38 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* 자유 스튜디오 */
+.free-photo-wrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+/* display 를 준 클래스는 [hidden] 을 이긴다. 사진 없을 때 깨진 그림이 보이던 원인. */
+.free-photo-wrap[hidden] {
+  display: none;
+}
+
+.free-photo-preview {
+  width: 120px;
+  max-height: 180px;
+  object-fit: contain;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.free-result {
+  display: block;
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
 .essay-output__heading {
   margin: 0;
   font-size: 14px;
@@ -2333,7 +2365,9 @@ body {
   text-align: center;
 }
 
-.app--adult-desk .app__area-btn:not([data-app-area="studio"]):not([data-app-area="admin"]) {
+/* Desk 화면은 탭을 줄인다. 자유 스튜디오는 Desk 에서 바로 건너갈 수 있어야 하므로 남긴다. */
+.app--adult-desk
+  .app__area-btn:not([data-app-area='studio']):not([data-app-area='admin']):not([data-app-area='free']) {
   display: none;
 }
 
