@@ -68,7 +68,19 @@ if (tabVisible) {
   afterPhoto = await page.evaluate(() => ({
     moveRowShown: document.getElementById('free-move-wrap')?.offsetParent !== null,
     fromLabel: document.getElementById('free-move-from')?.textContent?.trim() || '',
+    // 몸매 투영은 사진이 있을 때만 눌린다.
+    projectEnabled: document.getElementById('free-project')?.disabled === false,
   }))
+  // 24초를 고르면 후반 움직임 칸이 열려야 한다 (두 클립 이어 붙이기).
+  // 움직이기 칸이 보이는 지금(사진 있음) 확인해야 select 를 누를 수 있다.
+  await page.selectOption('#free-move-sec', '24').catch(() => {})
+  await page.waitForTimeout(300)
+  afterPhoto.dualRowShownAt24 = await page.evaluate(
+    () => document.getElementById('free-move-dual')?.hidden === false,
+  )
+  await page.screenshot({ path: path.join(OUT, '03-free-aug27.png'), fullPage: true })
+  await page.selectOption('#free-move-sec', '15').catch(() => {})
+
   await page.click('#free-photo-clear').catch(() => {})
   await page.waitForTimeout(500)
 
@@ -87,12 +99,28 @@ if (tabVisible) {
     // 일러스트 탭 안내문이 새어 나오면 안 된다.
     strayHint: document.getElementById('gen-mode-hint')?.offsetParent !== null,
     hasGuide: (document.querySelector('.free-guide')?.children.length || 0) >= 3,
+    // 8월 27일자 기능이 다 붙었는지
+    hasProject: Boolean(document.getElementById('free-project')),
+    projectDisabledWithoutPhoto: document.getElementById('free-project')?.disabled === true,
+    hasMoveProject: Boolean(document.getElementById('free-move-project')),
+    lengths: [...(document.getElementById('free-move-sec')?.options || [])].map((o) => Number(o.value)),
+    sizes: [...(document.getElementById('free-size')?.options || [])].map((o) => o.value),
+    // 움직이기 칸 자체가 숨어 있을 수 있으니 hidden 속성으로 본다.
+    dualRowHidden: document.getElementById('free-move-dual')?.hidden === true,
     tabActive: document.getElementById('app-area-free')?.classList.contains('app__area-btn--active'),
   }))
   // 빈 글로 누르면 엔진을 안 부르고 안내만 떠야 한다.
   await page.click('#free-run')
   await page.waitForTimeout(600)
   panel.emptyGuard = await page.evaluate(() => document.getElementById('free-status')?.textContent?.trim() || '')
+
+}
+
+// 얼린 8월 27일자 경로가 살아 있는지 (401 = 있음, 404 = 배포 안 됨)
+const routes = {}
+for (const name of ['free-refine', 'free-generate', 'free-animate']) {
+  const res = await page.request.post(`${BASE}/api/${name}`, { data: {}, failOnStatusCode: false })
+  routes[name] = res.status()
 }
 
 const report = {
@@ -101,6 +129,9 @@ const report = {
   ...panel,
   photoOpensMove: afterPhoto?.moveRowShown === true,
   moveFromLabel: afterPhoto?.fromLabel || '',
+  projectEnabledWithPhoto: afterPhoto?.projectEnabled === true,
+  dualRowShownAt24: afterPhoto?.dualRowShownAt24 === true,
+  routes,
   pageerrors,
   ok:
     tabVisible &&
@@ -115,8 +146,17 @@ const report = {
     panel.strayHint === false &&
     panel.hasGuide === true &&
     afterPhoto?.moveRowShown === true &&
+    afterPhoto?.projectEnabled === true &&
     /올린 사진/.test(afterPhoto?.fromLabel || '') &&
     /적어/.test(panel.emptyGuard || '') &&
+    panel.hasProject === true &&
+    panel.projectDisabledWithoutPhoto === true &&
+    panel.hasMoveProject === true &&
+    [10, 12, 15, 18, 24, 30].every((sec) => (panel.lengths || []).includes(sec)) &&
+    ['portrait', 'story', 'square', 'landscape'].every((s) => (panel.sizes || []).includes(s)) &&
+    panel.dualRowHidden === true &&
+    afterPhoto?.dualRowShownAt24 === true &&
+    Object.values(routes).every((code) => code === 401) &&
     pageerrors.length === 0,
 }
 writeFileSync(path.join(OUT, 'report.json'), JSON.stringify(report, null, 2))

@@ -1,0 +1,32 @@
+# 자유 스튜디오 = 8월 27일자 동결본 (2026-09-21)
+
+사용자가 **Desk 와 별도로** 8월 27일자(`7b98822`) 완성본을 자유 스튜디오에 통째로 옮기라고 지시함.
+Desk 는 불안해도 방향이 유의미하니 **그대로 둔다**. 둘을 섞지 않는다.
+
+## 동결된 것 (고치지 말 것)
+
+- `functions/lib/aug27/content-policy.ts` — 그날의 프롬프트 두뇌 사본 (외부 import 없음)
+- `functions/api/free-refine.ts` — 그날의 `refine.ts` (사진 + 지시문, 나체·포즈)
+- `functions/api/free-generate.ts` — 그날의 `generate.ts` (글만으로 한 장)
+- `functions/api/free-animate.ts` — 그날의 `animate.ts` (쇼츠, Wan `wan-2.2-i2v-fast`)
+
+다시 뽑아야 하면 `node scripts/vendor-aug27-free.mjs`. 손으로 고치지 말고 스크립트로 다시 뽑는다.
+
+## 갈라진 곳
+
+- 자유 스튜디오: `/api/free-*` + `functions/lib/aug27/*` + `public/free-studio.js`
+- Desk / 일러스트: 지금의 `/api/refine`, `/api/generate`, `/api/animate`, `functions/lib/content-policy.ts`
+- 요금 한도 키도 분리됨 (`free-refine` / `free-generate` / `free-animate`)
+
+## 자유 스튜디오에서 되는 것
+
+사진 + 지시문 한 장 · 글만으로 한 장 · **몸매 투영(체형 유지 탈의)** ·
+쇼츠 10/12/15/18초 단일 + 24/30초 두 클립 이어 붙이기 · 몸매 투영 쇼츠
+
+## 하면 안 되는 것
+
+- 동결본을 "개선"하거나 지금 `content-policy.ts` 로 되돌려 잇기
+- 자유 스튜디오 때문에 Desk 경로를 고치기 (반대도 마찬가지)
+- 검사·게이트를 자유 스튜디오에 넣기 — 여기는 거부 없이 나오는 칸이다
+
+회귀: `node scripts/aug27-free-wire-check.mjs`, `node scripts/free-studio-smoke.mjs`
