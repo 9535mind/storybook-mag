@@ -21,7 +21,27 @@
     photoUrl: '',
     /** 방금 만든 그림 URL */
     result: '',
+    /** 그 그림이 이미 나체인가 (몸매 투영으로 만든 것인가) */
+    resultNude: false,
     busy: false,
+  }
+
+  /** 움직임 주문이 벗기를 요구하는가. */
+  const NUDE_WORDS = /나체|알몸|누드|벗/
+
+  /**
+   * 이미 나체인 프레임에서 시작할 때는 "벗는다"를 빼야 한다.
+   * 안 빼면 엔진이 앞 절반을 탈의에 쓰고, 정작 동작은 끝에 몰려 뒤에서 옷이 되살아난다.
+   */
+  const holdNude = (text) => {
+    const stripped = text
+      .replace(/(완전\s*)?나체(로|가\s*되어|가\s*된\s*채|인\s*채|상태로|로\s*변해)?\s*/g, '')
+      .replace(/옷을?\s*(다\s*)?벗(고|은\s*채|어|기|는다)?\s*/g, '')
+      .replace(/알몸(으로|인\s*채)?\s*/g, '')
+      .replace(/누드(로|가\s*되어)?\s*/g, '')
+      .replace(/^[\s,.·]+/, '')
+      .trim()
+    return `이미 완전 나체 유지. ${stripped || text}`
   }
 
   const $ = (id) => document.getElementById(id)
@@ -106,8 +126,9 @@
     syncPhotoOnlyButtons()
   }
 
-  const showResult = (url) => {
+  const showResult = (url, nude) => {
     state.result = url || ''
+    state.resultNude = Boolean(url) && nude === true
     const wrap = $('free-result-wrap')
     const img = $('free-result')
     if (img) img.src = state.result
@@ -215,7 +236,8 @@
         setStatus('결과를 받지 못했습니다. 같은 단추를 다시 눌러 주세요.', true)
         return
       }
-      showResult(url)
+      // 글로 벗긴 경우에도 결과는 나체다 — 움직이기에서 또 벗기지 않게 표시해 둔다.
+      showResult(url, bodyProject || NUDE_WORDS.test(text))
       const label = out.data.engineLabel ? ` (${out.data.engineLabel})` : ''
       setStatus(`나왔습니다${label}. 더 고치려면 고칠 말을 바꿔서 다시 누르세요.`, false)
     } catch (error) {
@@ -267,12 +289,11 @@
    */
   const runMove = async () => {
     if (state.busy) return
-    const startFrame = moveSource()
-    if (!startFrame) {
+    if (!moveSource()) {
       setMoveStatus('사진을 올리거나 그림을 한 장 만드세요.', true)
       return
     }
-    const motion = String($('free-move-text')?.value || '').trim()
+    let motion = String($('free-move-text')?.value || '').trim()
     if (!motion) {
       setMoveStatus('어떤 움직임인지 적어 주세요.', true)
       return
@@ -280,7 +301,7 @@
     const total = Number($('free-move-sec')?.value) || 15
     const clipSec = DUAL[total] || total
     const dual = Boolean(DUAL[total])
-    const motion2 = String($('free-move-text2')?.value || '').trim()
+    let motion2 = String($('free-move-text2')?.value || '').trim()
     if (dual && !motion2) {
       setMoveStatus(`${total}초는 두 클립입니다. 후반 움직임도 적어 주세요.`, true)
       return
@@ -290,6 +311,36 @@
     const button = $('free-move-run')
     busy(true, button)
     try {
+      let startFrame = moveSource()
+
+      // 옷 입은 사진 한 장으로 「벗고 + 동작」을 통째로 시키면, 엔진은 앞 절반을 탈의에
+      // 쓰고 남은 시간에 시작 프레임(옷 입은 사진)으로 되돌아간다 — 11초쯤에 옷이 되살아나는
+      // 그 증상이다. 그래서 나체를 먼저 정지화로 확정하고, 그 프레임에서 동작만 시킨다.
+      const needsNudeFirst = NUDE_WORDS.test(`${motion} ${motion2}`) && !state.resultNude
+      if (needsNudeFirst) {
+        setMoveStatus('먼저 나체 한 장을 확정합니다 — 이래야 뒤에서 옷이 되살아나지 않습니다…', false)
+        const nude = await callJson('/api/free-refine', {
+          mode: 'text',
+          genMode: 'fashion',
+          imageUrl: await hostPhoto(),
+          baseDescription: '',
+          revision: '',
+          bodyProject: true,
+          size: sizeValue(),
+          mood: 'clean',
+        })
+        if (nude.auth) throw new Error('로그인이 풀렸습니다. 다시 로그인해 주세요.')
+        if (nude.error) throw new Error(nude.error)
+        const nudeUrl = nude.data.imageUrl || ''
+        if (!nudeUrl) throw new Error('나체 한 장을 받지 못했습니다. 다시 눌러 주세요.')
+        showResult(nudeUrl, true)
+        startFrame = nudeUrl
+      }
+      if (state.resultNude) {
+        motion = holdNude(motion)
+        if (motion2) motion2 = holdNude(motion2)
+      }
+
       setMoveStatus(
         dual ? `${total}초 쇼츠: 전반(1/2) 만드는 중… 1~2분` : `영상 만드는 중… 1~2분 (${total}초)`,
         false,
