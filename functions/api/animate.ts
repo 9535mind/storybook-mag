@@ -10,6 +10,7 @@ import {
   wantsNudeOrUndress,
   wantsUndressAction,
   wantsOtbeotgim,
+  wantsPantyMeltOnly,
 } from '../lib/content-policy'
 import { mediaUrlError } from '../lib/media-url'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
@@ -100,8 +101,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     bustHeight?: string
     /** 지금장 얼굴 수. 1이면 혼자 경로 고정 */
     sourcePeople?: number
+    /** ww = 여여. mw = 남녀 */
+    sourceCast?: 'ww' | 'mw'
     /** 증명/상반신 소스면 벗기 때 줌아웃으로 전신을 연다 */
     sourceBust?: boolean
+    genMode?: 'free' | 'fashion'
   }
   try {
     body = await request.json()
@@ -198,6 +202,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // 중요: ensureNudeHoldMotionPhrase가 붙인 팬티/포그 상용구는 번역하지 않는다 —
   // 그걸 같이 번역하면 사용자 모션이 희석되고 1500자 예산이 잠금문으로 샌다.
   // 잠금은 buildAnimationPrompt 구역(BODY/END)에서 짧게 다시 넣는다.
+  try {
   const continuitySource = originalPrompt
   const [{ text: promptForVideo }, motionTx] = await Promise.all([
     continuitySource
@@ -216,6 +221,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     clipRoleRaw === 'dual-a' || clipRoleRaw === 'dual-b' ? clipRoleRaw : ('single' as const)
   const landmarks = normalizeBodyLandmarks(body.landmarks)
   const sourcePeople = body.sourcePeople === 1 || body.sourcePeople === 2 ? body.sourcePeople : undefined
+  const sourceCast = body.sourceCast === 'ww' || body.sourceCast === 'mw' ? body.sourceCast : undefined
   const sourceBust = body.sourceBust === true
   // 몸매 투영: 긴 화보 설명이 I2V에 다시 옷을 먹이지 않도록 짧은 become + 타점만 사용.
   const landmarkMotion = landmarks
@@ -248,7 +254,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         durationSec: approxDurationSec,
         bustHeight,
         sourcePeople,
+        sourceCast,
         sourceBust,
+        genMode: body.genMode === 'fashion' ? 'fashion' : body.genMode === 'free' ? 'free' : undefined,
       })
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
@@ -262,7 +270,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     wantsUndressAction(motionForVideo) ||
     wantsNudeOrUndress(motionForVideo)
 
-  try {
     // delivery URL은 금방 만료 → 항상 Files API로 재업로드한 뒤 I2V 시작
     const freshImageUrl = await resolveVideoSourceImageUrl({
       apiToken: env.REPLICATE_API_TOKEN,
@@ -282,12 +289,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // 모션·나체/탈의·몸매 투영이면 go_fast OFF — 켜면 중반에 팬티·브라·남자 발명이 잦음(실측)
       goFast: !(motion || nudeOrUndress || sourceNudeHold || bodyProjectFlag),
       // 몸매 투영: 원본 벨트/바지 픽셀에 달라붙는 회귀 → sample_shift를 올려 옷 용해 여유.
-      // 나체/탈의 쇼츠도 기본값(12)에선 하의·팬티 픽셀이 남아 전신 와이드에서
-      // 「나체+팬티」가 된다(실측: 자기 가슴 주무르기). 낮은 값으로 원본에 더 붙이면
-      // 바지가 안 벗겨지므로, 탈의·나체만 16으로 올려 옷을 녹인다. 옷 입은 일반 모션은 기본값.
-      sampleShift:
-        bodyProjectFlag || wantsOtbeotgim(rawMotion) || wantsOtbeotgim(motionForVideo)
-          ? 18
+      // 옷벗김을 18로 두면 겉·속·팬티를 한 번에 녹여 검정 브라/노팬티가 됨(실측).
+      // 겹 벗김은 13, 팬티만 녹임·일반 나체는 16. 옷 입은 일반 모션은 기본값.
+      sampleShift: bodyProjectFlag
+        ? 18
+        : (wantsOtbeotgim(rawMotion) || wantsOtbeotgim(motionForVideo)) &&
+            !(wantsPantyMeltOnly(rawMotion) || wantsPantyMeltOnly(motionForVideo))
+          ? 13
           : nudeOrUndress || sourceNudeHold
             ? 16
             : undefined,

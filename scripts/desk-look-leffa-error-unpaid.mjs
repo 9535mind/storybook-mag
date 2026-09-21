@@ -17,22 +17,17 @@ function clientKeepCenter(job, center) {
   return { center: job.imageUrl, painted: true }
 }
 
-function serverLeffaFail(look) {
-  const clothesReplace = look === 'silk'
-  try {
-    throw new Error('leffa_simulated')
-  } catch {
-    return {
-      ok: false,
-      error: clothesReplace ? 'look_leffa_failed' : 'look_inpaint_failed',
-      message: '옷을 녹이지 못했습니다. 가운데는 원본입니다. 얼굴을 붙이지 않습니다.',
-    }
+function serverLookFail() {
+  return {
+    ok: false,
+    error: 'look_inpaint_failed',
+    message: '옷을 녹이지 못했습니다. 가운데는 원본입니다. 얼굴을 붙이지 않습니다.',
   }
 }
 
 const source = 'data:image/jpeg;base64,SOURCEKEEP'
 const fails = [
-  serverLeffaFail('silk'),
+  serverLookFail(),
   { ok: false, error: 'look_garment_missing', message: '옷을 녹이지 못했습니다. 가운데는 원본입니다.' },
   null,
   { ok: true },
@@ -44,21 +39,18 @@ for (const job of fails) {
   checks.push(out.center === source && out.painted === false)
 }
 
-const nudeFail = serverLeffaFail('nude')
-const silkFail = serverLeffaFail('silk')
+const lookFail = serverLookFail()
 const sourceStay = /가운데는 원본입니다/.test(app) && /if \(!job \|\| job\.auth \|\| !job\.imageUrl\)/.test(app)
 const noPaintOnFail = /if \(!job \|\| job\.auth \|\| !job\.imageUrl\) \{[\s\S]{0,220}?return/.test(app)
-const silkOnly = /const clothesReplace = deskLookKind\(\) === 'silk'/.test(app) && /intent\.look === 'silk'/.test(tale)
-const serverNoImage = silkFail.ok === false && !silkFail.imageUrl && silkFail.error === 'look_leffa_failed'
-const nudeNotLeffa = nudeFail.error === 'look_inpaint_failed'
+const silkInpaint = /engine = 'fal-look-inpaint'/.test(tale) && !/submitFalLeffaVirtualTryon/.test(tale)
+const serverNoImage = lookFail.ok === false && !lookFail.imageUrl && lookFail.error === 'look_inpaint_failed'
 
 const ok =
   checks.every(Boolean) &&
   sourceStay &&
   noPaintOnFail &&
-  silkOnly &&
-  serverNoImage &&
-  nudeNotLeffa
+  silkInpaint &&
+  serverNoImage
 
 console.log(
   JSON.stringify(
@@ -67,8 +59,7 @@ console.log(
       paidCall: false,
       keepCenter: checks.every(Boolean),
       clientFailClosed: sourceStay && noPaintOnFail,
-      silkError: silkFail.error,
-      nudeError: nudeFail.error,
+      lookError: lookFail.error,
     },
     null,
     2,

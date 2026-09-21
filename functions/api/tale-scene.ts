@@ -14,10 +14,10 @@ import {
 import { buildDeskStillPrompt, deskStillNegativePrompt, parseDeskIntent } from '../lib/desk-still-prompt'
 import { verifyLookInpaintPayload } from '../lib/desk-look-server-verify'
 import {
+  submitFalFashnTryon,
   submitFalInpaint,
   submitFalKontextEdit,
   submitFalKontextMultiImage,
-  submitFalLeffaVirtualTryon,
   submitFalTextToImage,
   uploadDataUrlToFal,
   type FalImageSize,
@@ -72,19 +72,6 @@ function genderWord(g?: string): string {
   if (v === 'female') return 'woman'
   if (v === 'non-binary') return 'non-binary adult'
   return ''
-}
-
-async function loadHiddenSlipGarment(request: Request): Promise<string> {
-  const res = await fetch(new URL('/desk-look-garment-slip.png', request.url))
-  if (!res.ok) throw new Error('look_garment_missing')
-  const bytes = new Uint8Array(await res.arrayBuffer())
-  let bin = ''
-  const step = 4096
-  for (let i = 0; i < bytes.length; i += step) {
-    const slice = bytes.subarray(i, Math.min(bytes.length, i + step))
-    bin += String.fromCharCode(...slice)
-  }
-  return `data:image/png;base64,${btoa(bin)}`
 }
 
 function parseDataUrlForClaude(dataUrl: string): ClaudeImageInput | null {
@@ -840,30 +827,67 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               lookGate.status,
             )
           }
-          const clothesReplace = intent.look === 'silk'
+          // 슬립은 말로 옷을 설명하지 않는다. 옷 사진을 그대로 입힌다.
+          // 인페인팅은 같은 마스크·같은 글로도 캐미솔·조끼·타이츠가 섞여 나왔다(3번에 1번).
+          // VTON 은 목표 옷이 그림으로 고정되고 얼굴도 스스로 보존한다(ArcFace 0.964).
+          if (slipStill) {
+            try {
+              const submitted = await submitFalFashnTryon({
+                falKey: env.FAL_KEY,
+                humanUrl: images[0],
+                garmentUrl: new URL('/desk-look-garment-slip.png', request.url).toString(),
+                category: 'one-pieces',
+              })
+              const engine = 'fal-fashn-tryon'
+              if ('imageUrl' in submitted && submitted.imageUrl) {
+                return jsonResponse(
+                  { ok: true, imageUrl: submitted.imageUrl, composeMode: 'desk-still', engine, prompt },
+                  200,
+                )
+              }
+              return jsonResponse(
+                {
+                  ok: true,
+                  pending: true,
+                  statusUrl: submitted.statusUrl,
+                  responseUrl: submitted.responseUrl,
+                  composeMode: 'desk-still',
+                  engine,
+                  prompt,
+                },
+                200,
+              )
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'unknown_error'
+              return jsonResponse(
+                {
+                  ok: false,
+                  error: 'look_tryon_failed',
+                  message: '슬립을 입히지 못했습니다. 가운데는 원본입니다.',
+                  detail: message,
+                },
+                502,
+              )
+            }
+          }
+          // 나체·그 밖은 흰 칸 안만 그리는 인페인팅. 사람을 다시 그리게 두지 않는다.
+          const localEdit = nudeStill
+            ? `${prompt} Local edit ONLY the white-masked clothes. Melt that garment to bare adult skin of the SAME CAST body. Unmasked face, neck, hands, limbs, man, and background stay exact source pixels. Same pose, same crop. FORBIDDEN new person, bodysuit, lingerie, catalog model, white studio, oval face sticker.`
+            : `${prompt} Local edit ONLY the white-masked clothes of the CAST woman slot. Unmasked face, neck, skin, hands, man, and background stay exact source pixels. Same body, same crop. FORBIDDEN new person, catalog model, white studio, oval face sticker, assume right person is woman.`
           try {
-            const submitted = clothesReplace
-              ? await submitFalLeffaVirtualTryon({
-                  falKey: env.FAL_KEY,
-                  humanUrl: images[0],
-                  garmentUrl: await loadHiddenSlipGarment(request),
-                  garmentType: 'dresses',
-                })
-              : await submitFalInpaint({
-                  falKey: env.FAL_KEY,
-                  imageUrl: images[0],
-                  maskUrl: clientMask,
-                  prompt: nudeStill
-                    ? `${prompt} Local edit ONLY the white-masked clothes. Melt that garment to bare adult skin of the SAME CAST body. Unmasked face, neck, hands, limbs, man, and background stay exact source pixels. Same pose, same crop. FORBIDDEN new person, bodysuit, lingerie, catalog model, white studio, oval face sticker.`
-                    : `${prompt} Local edit ONLY the white-masked clothes of the CAST woman slot. Unmasked face, neck, skin, hands, man, and background stay exact source pixels. Same body, same crop. FORBIDDEN new person, catalog model, white studio, oval face sticker, assume right person is woman.`,
-                  negativePrompt: deskStillNegativePrompt({
-                    couple,
-                    nudeStill,
-                    descriptionKo,
-                  }),
-                  strength: nudeStill ? 0.85 : 0.56,
-                })
-            const engine = clothesReplace ? 'fal-look-leffa' : 'fal-look-inpaint'
+            const submitted = await submitFalInpaint({
+              falKey: env.FAL_KEY,
+              imageUrl: images[0],
+              maskUrl: clientMask,
+              prompt: localEdit,
+              negativePrompt: deskStillNegativePrompt({
+                couple,
+                nudeStill,
+                descriptionKo,
+              }),
+              strength: nudeStill ? 0.85 : 0.56,
+            })
+            const engine = 'fal-look-inpaint'
             if ('imageUrl' in submitted && submitted.imageUrl) {
               return jsonResponse(
                 {
@@ -893,7 +917,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             return jsonResponse(
               {
                 ok: false,
-                error: clothesReplace ? 'look_leffa_failed' : 'look_inpaint_failed',
+                error: 'look_inpaint_failed',
                 message: '옷을 녹이지 못했습니다. 가운데는 원본입니다. 얼굴을 붙이지 않습니다.',
                 detail: message,
               },

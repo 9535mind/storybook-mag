@@ -1,0 +1,10 @@
+{
+  "engine": "fal-look-leffa",
+  "rawHasArmLine": false,
+  "compositeHasArmLine": false,
+  "decision": "keep_engine_fix_mask_seam",
+  "officeArmResiduePx": 834,
+  "thresholdChanged": false,
+  "paidCall": false,
+  "ok": true
+}

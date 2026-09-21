@@ -21,7 +21,7 @@ export function buildPantyLayerBanLock(): string {
     'PANTY BAN (CRITICAL): ZERO panties, ZERO thong, ZERO briefs, ZERO underwear, ZERO lingerie bottoms, ZERO bikini bottoms',
     'FORBIDDEN: white panties, sheer panties, double-layer panties, darker panty outline under a lighter layer, gusset seam, elastic waistband on the hips, fabric covering the crotch or mons',
     'Pants/jeans/trousers leave first, then any underwear under them must also leave — never stop at panties-only',
-    'Crotch must be bare adult skin (natural pubic hair ok) — no second fabric layer, no panty shadow',
+    'Crotch must be bare adult skin with a neat Korean-30s pubic patch on the mons (slightly fuller than 20s, still tidy) — no second fabric layer, no panty shadow'
   ].join('. ')
 }
 

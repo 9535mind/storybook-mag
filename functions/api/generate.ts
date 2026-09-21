@@ -6,10 +6,24 @@ import {
   polishKoreanPromptText,
   resolveFashionDescriptionWordBudget,
   wantsNudeOrUndress,
+  wantsDeskUncensoredStill,
 } from '../lib/content-policy'
-import { FAL_WILDLIFE_TIMEOUT_MS, generateFalImage, resolveFalImageSize } from '../lib/fal-client'
+import { buildDeskStillPrompt, deskStillNegativePrompt } from '../lib/desk-still-prompt'
+import {
+  FAL_WILDLIFE_TIMEOUT_MS,
+  generateFalImage,
+  resolveFalImageSize,
+  submitFalKontextEdit,
+  submitFalKontextMultiImage,
+} from '../lib/fal-client'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
-import { generateReplicateImage, resolveReplicateImageSize, startReplicateImage } from '../lib/replicate-client'
+import {
+  generateReplicateImage,
+  resolveReplicateImageSize,
+  startReplicateImage,
+  startReplicateImageToImage,
+} from '../lib/replicate-client'
+import { describesAnimalSubject } from '../lib/animal-scene-detect'
 import {
   compileResponsiveFreePrompt,
   isRealWildlifeScene,
@@ -57,6 +71,21 @@ function isProviderContentBlock(message: string): boolean {
   return /nsfw|content.?policy|flagged|safety|could not be processed/i.test(message)
 }
 
+function sizeToKontextAspect(size: string): string {
+  if (size === 'landscape') return '16:9'
+  if (size === 'story') return '9:16'
+  if (size === 'portrait') return '3:4'
+  return '1:1'
+}
+
+function parseRefImageUrls(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((u) => String(u || '').trim())
+    .filter((u) => /^https?:\/\//i.test(u))
+    .slice(0, 2)
+}
+
 // Cloudflare Pages Functions는 HTTP 요청 1건당 총 30초 벽시계 한도가 있다(플랫폼이 강제
 // 종료 — 우리 try/catch가 못 잡고, 클라이언트는 본문 없는 raw 502를 받는다. 실측으로 확인:
 // Replicate 기본 타임아웃(55초)을 그대로 쓰면 번역 단계 시간과 합쳐 이 한도를 조용히 넘겨서
@@ -90,6 +119,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       size?: string
       mode?: string
       precision?: boolean
+      imageUrls?: string[]
       /** true면 Replicate에 제출만 하고 predictionId 반환 — 클라이언트가 /api/generate-status 폴링 */
       async?: boolean
     }
@@ -124,7 +154,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // 누드/탈의 요청은 기본(Lightning) 엔진이 "안전한" 결과 쪽으로 쏠려 옷을 입혀버리는 경향이
     // 실측으로 확인됐다 — 스텝이 적은 증류 모델일수록 이 편향이 강했다. 그래서 누드 요청은
     // 사용자가 체크박스를 안 켜도 자동으로 정밀 모드(스텝 30, CFG 7.5)로 전환한다.
-    const autoPrecisionForNude = mode === 'fashion' && wantsNudeOrUndress(description)
+    // 일러스트(free)도 성인 장면이면 같은 성인 엔진을 쓴다. Flux는 검열로 빈 장이 난다.
+    const likelyAdult =
+      wantsNudeOrUndress(description) ||
+      /란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit|성기|자위|섹스/i.test(description)
+    const adultHumanScene = likelyAdult && !describesAnimalSubject(description)
+    const autoPrecisionForNude = adultHumanScene
     const precision = Boolean(body.precision) || autoPrecisionForNude
 
     const policyVerdict = evaluateContentPolicy(description, { mode })
@@ -149,16 +184,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // 많은 시각 정보가 실제로 모델에 도달하게 한다. 예산을 55로 고정하지 않고, 뒤에 붙을 인종/
     // 의상보강/무드/구도/품질 태그의 실제 길이(resolveFashionDescriptionWordBudget)에 맞춰 정한다.
     // 자유(동화) 모드는 별도 scene-compiler가 구조화 파싱을 하므로 기존 번역만 사용한다.
-    const descriptionForPrompt =
-      mode === 'free'
-        ? (await translateDescriptionForImagePrompt(description, env)).text
-        : (
-            await compileSdxlTagPrompt(
-              description,
-              env,
-              resolveFashionDescriptionWordBudget({ mood, size, rawDescription: description }),
-            )
-          ).text
+    // 다만 성인 인물 장면은 화보와 같은 성인 엔진·태그 프롬프트로 보낸다.
+    const useAdultFashionPrompt = mode === 'fashion' || adultHumanScene
+    const descriptionForPrompt = useAdultFashionPrompt
+      ? (
+          await compileSdxlTagPrompt(
+            description,
+            env,
+            resolveFashionDescriptionWordBudget({ mood, size, rawDescription: description }),
+          )
+        ).text
+      : (await translateDescriptionForImagePrompt(description, env)).text
 
     let prompt: string
     let negativePrompt: string
@@ -166,7 +202,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     let complexScene = false
     let wildlifeScene = false
 
-    if (mode === 'free') {
+    if (mode === 'free' && !adultHumanScene) {
       const compiled = await compileResponsiveFreePrompt({
         description: descriptionForPrompt,
         size,
@@ -184,7 +220,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         compiled.plan.needsWideScene
       sceneMeta = summarizePlan(compiled.plan)
     } else {
-      // free는 위에서 scene-compiler만 사용. fashion만 화보 프롬프트.
+      // 화보, 또는 일러스트의 성인 인물 장면.
       prompt = buildFashionMagazinePrompt({
         description: descriptionForPrompt,
         mood,
@@ -196,13 +232,140 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     const attempts: EngineAttempt[] = []
     const wantAsync = body.async === true
-
-    // wantsNudeOrUndress로 조사(을/를 등) 붙은 자연스러운 한국어까지 포함해서 판별한다 —
-    // 예전엔 이 정규식이 \s*(공백만)라 "속옷을 제거해줘"처럼 흔한 말투를 놓쳐서, fal(엄격한
-    // 콘텐츠 검열)로 먼저 시도했다가 거부당하고서야 Replicate로 넘어가는 낭비가 있었다.
-    const likelyAdult =
-      wantsNudeOrUndress(description) ||
-      /란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit|성기|자위|섹스/i.test(description)
+    const refUrls = parseRefImageUrls(body.imageUrls)
+    const adultRef = adultHumanScene || wantsDeskUncensoredStill(description)
+    if (refUrls.length && adultRef) {
+      if (!env.REPLICATE_API_TOKEN?.trim()) {
+        return jsonResponse({ ok: false, error: 'replicate_token_not_configured' }, 500)
+      }
+      const couple = refUrls.length >= 2
+      const stillPrompt = buildDeskStillPrompt(description, couple, 'look')
+      const dims = resolveReplicateImageSize(size)
+      try {
+        const started = await startReplicateImageToImage({
+          apiToken: env.REPLICATE_API_TOKEN,
+          modelOwner: env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
+          modelName: env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
+          modelVersion: env.REPLICATE_MODEL_VERSION,
+          imageUrl: refUrls[0],
+          prompt: stillPrompt,
+          negativePrompt: deskStillNegativePrompt({
+            couple,
+            nudeStill: wantsNudeOrUndress(description),
+            descriptionKo: description,
+          }),
+          width: dims.width,
+          height: dims.height,
+          strength: wantsNudeOrUndress(description) ? 0.42 : 0.38,
+          guidanceScale: 1.35,
+          disableSafetyChecker: true,
+        })
+        if (started.imageUrl) {
+          return jsonResponse(
+            {
+              ok: true,
+              imageUrl: started.imageUrl,
+              prompt: stillPrompt,
+              mode,
+              engine: 'replicate',
+              engineLabel: '참고 한 장 · 성인 엔진',
+            },
+            200,
+          )
+        }
+        return jsonResponse(
+          {
+            ok: true,
+            pending: true,
+            predictionId: started.predictionId,
+            prompt: stillPrompt,
+            mode,
+            engine: 'replicate',
+            engineLabel: '참고 한 장 · 성인 엔진',
+          },
+          200,
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error'
+        return jsonResponse({ ok: false, error: 'generation_failed', message }, 502)
+      }
+    }
+    if (refUrls.length) {
+      if (!env.FAL_KEY?.trim()) {
+        return jsonResponse(
+          {
+            ok: false,
+            error: 'fal_key_required_for_refs',
+            message: '참고 이미지를 섞으려면 서버에 FAL_KEY가 필요합니다.',
+          },
+          500,
+        )
+      }
+      const mixPrompt =
+        refUrls.length >= 2
+          ? `BLEND both reference images into ONE scene. Keep BOTH subjects from the two PNGs — same faces, same bodies. Match both subjects to similar body height and similar head size, same ground plane. FORBIDDEN replacing a face, a new person, one giant subject and one tiny subject, or a soft low-res smear. Sharp photoreal detail. Mix them together in the same frame. ${prompt}`
+          : `Use this reference image. Keep the source face and body. Do not redraw identity. Sharp detail. ${prompt}`
+      try {
+        const submitted =
+          refUrls.length >= 2
+            ? await submitFalKontextMultiImage({
+                falKey: env.FAL_KEY,
+                imageUrls: refUrls,
+                prompt: mixPrompt,
+                aspectRatio: sizeToKontextAspect(size),
+                guidanceScale: 5.2,
+              })
+            : await submitFalKontextEdit({
+                falKey: env.FAL_KEY,
+                imageUrl: refUrls[0],
+                prompt: mixPrompt,
+                tier: 'pro',
+                guidanceScale: 4.6,
+              })
+        if ('imageUrl' in submitted && submitted.imageUrl) {
+          return jsonResponse(
+            {
+              ok: true,
+              imageUrl: submitted.imageUrl,
+              prompt: mixPrompt,
+              mode,
+              engine: 'fal-kontext-mix',
+              engineLabel:
+                refUrls.length >= 2 ? '참고 두 장 비비기' : '참고 한 장으로 그리기',
+            },
+            200,
+          )
+        }
+        return jsonResponse(
+          {
+            ok: true,
+            pending: true,
+            statusUrl: submitted.statusUrl,
+            responseUrl: submitted.responseUrl,
+            prompt: mixPrompt,
+            mode,
+            engine: 'fal-kontext-mix',
+            engineLabel:
+              refUrls.length >= 2 ? '참고 두 장 비비기' : '참고 한 장으로 그리기',
+          },
+          200,
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error'
+        if (isProviderContentBlock(message)) {
+          return jsonResponse(
+            {
+              ok: false,
+              error: 'provider_content_blocked',
+              message:
+                '참고 이미지를 섞는 엔진이 이 장면을 거절했습니다. 설명을 조금 바꿔 다시 시도해 주세요.',
+            },
+            422,
+          )
+        }
+        return jsonResponse({ ok: false, error: 'generation_failed', message }, 502)
+      }
+    }
 
     // 얼굴·장면 스튜디오 등: 20~45초 생성을 Pages 30초 sync로 끝내면 "서버 시간 한도"로 조기 실패.
     // 프롬프트만 조립해 Replicate에 제출하고, 완료는 클라이언트가 폴링한다.
@@ -266,7 +429,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             mode,
             engine: 'replicate',
             engineLabel: usePrecisionModel
-              ? `Replicate · ${modelOwner}/${modelName} · 정밀(비동기)`
+              ? `Replicate · ${modelOwner}/${modelName} · 성인 엔진`
               : 'Replicate · Juggernaut XL Lightning (비동기)',
           },
           200,

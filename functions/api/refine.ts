@@ -182,10 +182,17 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // 만든 경우) "성인 여성 얼굴 유지" 문구를 쓰면 안 된다. 번역이 "말"을 애매하게 옮길 수도
   // 있으니, 번역 전 원문 한국어 텍스트로 먼저 판별해서 아래 img2img 경로 전체에 재사용한다.
   const animalSubject = describesAnimalSubject(`${baseDescription} ${revision}`)
+  const likelyAdultRefine =
+    wantsNudeOrUndress(`${baseDescription} ${revision}`) ||
+    /란제리|lingerie|야한|에로|섹시|nsfw|porn|explicit|성기|자위|섹스/i.test(
+      `${baseDescription} ${revision}`,
+    )
+  const adultHumanRefine = likelyAdultRefine && !animalSubject
 
   // ═══════════════════════════════════════════════════════════
   // 지시형 수정: Flux Kontext (쇼츠 Wan≠이미지편집 — 편집 전용 엔진)
   // 마스크 추측 inpaint보다 "문장으로 고쳐줘"에 맞음. 실패 시 아래 기존 경로.
+  // 성인 인물 장면은 Flux 검열을 피하고 성인 엔진으로 보낸다.
   // ═══════════════════════════════════════════════════════════
   // 무릎·전신 확장은 진짜 아웃페인트가 맞음 — Kontext가 장면을 새로 그리면 얼굴이 바뀜
   const skipKontextForFraming = isFramingExtendRevision(revision)
@@ -193,6 +200,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     mode === 'text' &&
     env.FAL_KEY?.trim() &&
     !skipKontextForFraming &&
+    !adultHumanRefine &&
     !wantsFullNude(revision, baseDescription) &&
     !wantsNudeOrUndress(revision)
   ) {
@@ -263,24 +271,45 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     // 한글 병합 브리프(merged)는 그대로 두고, 실제 이미지 프롬프트 조립 직전에만 영어로
     // 번역한다 — 그래야 씬 파서(Llama)와 최종 프롬프트 둘 다 영어 텍스트를 받게 된다.
     const merged = mergeFreeRevisionDescription(baseDescription, revision)
-    const { text: mergedForPrompt } = await translateDescriptionForImagePrompt(merged, env)
     try {
-      const compiled = await compileResponsiveFreePrompt({
-        description: mergedForPrompt,
-        size,
-        mood,
-        ai: env.AI,
-      })
-      const prompt = compiled.prompt
-      const negativePrompt = compiled.negativePrompt
-      const wildlifeScene = isRealWildlifeScene(compiled.plan)
-      const complexScene =
-        compiled.plan.multiSpecies ||
-        compiled.plan.actions.length > 0 ||
-        compiled.plan.states.length > 0 ||
-        compiled.plan.traits.length > 0 ||
-        compiled.plan.needsWideScene
-      const sceneMeta = summarizePlan(compiled.plan)
+      const adultHumanFree = adultHumanRefine
+      let prompt = ''
+      let negativePrompt = ''
+      let wildlifeScene = false
+      let complexScene = false
+      let sceneMeta: ReturnType<typeof summarizePlan> | null = null
+      if (adultHumanFree) {
+        const { text: mergedForPrompt } = await compileSdxlTagPrompt(
+          merged,
+          env,
+          resolveFashionDescriptionWordBudget({ mood, size, rawDescription: merged }),
+        )
+        prompt = buildFashionMagazinePrompt({
+          description: mergedForPrompt,
+          mood,
+          size,
+          rawDescription: merged,
+        })
+        negativePrompt = buildFashionNegativePrompt(merged)
+      } else {
+        const { text: mergedForPrompt } = await translateDescriptionForImagePrompt(merged, env)
+        const compiled = await compileResponsiveFreePrompt({
+          description: mergedForPrompt,
+          size,
+          mood,
+          ai: env.AI,
+        })
+        prompt = compiled.prompt
+        negativePrompt = compiled.negativePrompt
+        wildlifeScene = isRealWildlifeScene(compiled.plan)
+        complexScene =
+          compiled.plan.multiSpecies ||
+          compiled.plan.actions.length > 0 ||
+          compiled.plan.states.length > 0 ||
+          compiled.plan.traits.length > 0 ||
+          compiled.plan.needsWideScene
+        sceneMeta = summarizePlan(compiled.plan)
+      }
 
       const tryFal = async (asPrimary: boolean) => {
         if (!env.FAL_KEY?.trim()) {
@@ -332,14 +361,19 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           return null
         }
         try {
-          const steps = wildlifeScene ? 18 : complexScene ? 14 : 12
-          const cfg = wildlifeScene ? 7.0 : complexScene ? 5.0 : 4.0
+          const usePrecision = adultHumanFree
+          const steps = usePrecision ? 30 : wildlifeScene ? 18 : complexScene ? 14 : 12
+          const cfg = usePrecision ? 7.5 : wildlifeScene ? 7.0 : complexScene ? 5.0 : 4.0
           const dims = resolveReplicateImageSize(size)
           const { imageUrl: nextUrl } = await generateReplicateImage({
             apiToken: env.REPLICATE_API_TOKEN,
-            modelOwner: env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
-            modelName: env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
-            modelVersion: env.REPLICATE_MODEL_VERSION,
+            modelOwner: usePrecision
+              ? env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'
+              : env.REPLICATE_MODEL_OWNER?.trim() || 'sdxl-based',
+            modelName: usePrecision
+              ? env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'
+              : env.REPLICATE_MODEL_NAME?.trim() || 'juggernaut-xl-lightning',
+            modelVersion: usePrecision ? env.REPLICATE_PRECISION_MODEL_VERSION : env.REPLICATE_MODEL_VERSION,
             prompt,
             negativePrompt,
             disableSafetyChecker: true,
@@ -358,9 +392,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               structuralRegen: true,
               scene: sceneMeta,
               engine: 'replicate',
-              engineLabel: wildlifeScene
-                ? 'Replicate · 장면 재생성 (자유 수정 · 야생동물)'
-                : 'Replicate · 장면 재생성 (자유 수정)',
+              engineLabel: usePrecision
+                ? `Replicate · ${env.REPLICATE_PRECISION_MODEL_OWNER?.trim() || 'stability-ai'}/${env.REPLICATE_PRECISION_MODEL_NAME?.trim() || 'sdxl'} · 성인 엔진`
+                : wildlifeScene
+                  ? 'Replicate · 장면 재생성 (자유 수정 · 야생동물)'
+                  : 'Replicate · 장면 재생성 (자유 수정)',
               message:
                 '자유 일러스트 수정은 장면 재생성으로 처리해요. 원본 동물·구도를 유지한 채 요청을 반영합니다.',
               wildlifeRoute: wildlifeScene,
@@ -377,7 +413,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         }
       }
 
-      if (wildlifeScene) {
+      if (adultHumanFree) {
+        const repRes = await tryReplicate()
+        if (repRes) return repRes
+      } else if (wildlifeScene) {
         const falRes = await tryFal(true)
         if (falRes) return falRes
         const repRes = await tryReplicate()
@@ -589,6 +628,29 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         413,
       )
     }
+    const regionJewelry = wantsJewelryAccessoryRefine(revision)
+    // 머리 제거·사람/사물 지우기: 배경만 메움 — Flux에 넘기면 그룹 사진에서 새 얼굴을 발명함(실측).
+    const regionBgFill =
+      wantsObjectEraseRevision(revision) ||
+      /seamless continuation of the surrounding background|fill only the masked region|background fill|remove leftover head|OBJECT ERASE/i.test(
+        `${revision} ${prompt}`,
+      )
+    if (regionBgFill && !regionJewelry) {
+      return jsonResponse(
+        {
+          ok: true,
+          imageUrl,
+          prompt: 'OBJECT ERASE / local background fill — no generative person',
+          mode,
+          genMode,
+          engine: 'local-erase',
+          engineLabel: '선택 지우기 · 배경 메움',
+          regionCount: body.regionCount ?? 1,
+          message: '선택한 사람을 지우고 배경만 남겼습니다. 새 얼굴은 만들지 않습니다.',
+        },
+        200,
+      )
+    }
     if (!env.FAL_KEY?.trim()) {
       return jsonResponse(
         {
@@ -602,13 +664,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
     try {
       // 올가미+귀걸이: strength 0.85는 마스크·건물 발명을 자주 함(실측) → 전용 프롬프트·강도↓
-      const regionJewelry = wantsJewelryAccessoryRefine(revision)
-      // 머리 제거·사람/사물 지우기: 배경만 메움 — 새 사람 발명 금지
-      const regionBgFill =
-        wantsObjectEraseRevision(revision) ||
-        /seamless continuation of the surrounding background|fill only the masked region|background fill|remove leftover head|OBJECT ERASE/i.test(
-          `${revision} ${prompt}`,
-        )
       const regionPrompt = regionJewelry
         ? buildJewelryAccessoryRefinePrompt(revisionForPrompt || revision)
         : regionBgFill
@@ -945,7 +1000,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           engineLabel: 'fal.ai · Flux Inpaint (유두·유륜만)',
           autoBreastMask: true,
           message: alsoPubic
-            ? '유두·유륜만 먼저 손봤어요. 이어서 「음모 조금 더 풍성하고 곱슬·가닥 보이게」로 한 번 더 수정하세요.'
+            ? '유두·유륜만 먼저 손봤어요. 이어서 「음모 한국 30대처럼 치골에만 정돈되게」로 한 번 더 수정하세요.'
             : '가슴(유두·유륜) 부위만 손봤어요.',
           attempts: attempts.length ? attempts : undefined,
         },

@@ -19,6 +19,11 @@ export function wantsPubicHairOnlyRefine(revision: string): boolean {
   return /음모|치모|체모|곱슬\s*음모|pubic\s*hair|\bbush\b/i.test(t)
 }
 
+/** 기본 음모 — 치골에만 정돈된 한국 30대. 20대보다 조금 더 있고, 넓은 역삼각은 금지. */
+export const KOREAN_THIRTIES_PUBIC =
+  'neat dark-brown curls on the mons only (한국 30대 치골, slightly fuller than a 20s patch, still tidy). FORBIDDEN tall wide inverted triangle, thigh spread, navel climb, dense black bush, or hairless blank'
+export const KOREAN_TWENTIES_PUBIC = KOREAN_THIRTIES_PUBIC
+
 /** 제모·민무늬를 아주 명시했을 때만 true (bare/smooth 같은 약한 단어로는 허용하지 않음) */
 export function wantsExplicitPubicShave(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
@@ -50,8 +55,8 @@ export function buildFemaleAdultAnatomyLock(text = ''): string {
 }
 
 /**
- * 성인 여성 음모·외음 — 기본 강제(곱슬 가닥 + 현실적 비율).
- * 민무늬·점묘 텍스처·과도하게 다문 “인형형” 금지. 명시적 제모만 예외.
+ * 성인 여성 음모·외음 — 기본은 한국 30대 치골 정돈(20대보다 조금 더).
+ * 민무늬·넓은 역삼각 금지. 명시적 제모·넓은 요청만 예외.
  */
 export function buildAdultPubicHairLock(text = ''): string {
   const t = polishKoreanPromptText(text || '')
@@ -59,14 +64,14 @@ export function buildAdultPubicHairLock(text = ''): string {
     return 'pubic area smooth/shaved ONLY because the user explicitly requested shaving/waxing'
   }
   return [
-    'MANDATORY photorealistic adult pubic hair: soft dark-brown natural CURLS with visible separate strands on the mons pubis (곱슬·가닥)',
-    'hair looks like real coiled hair in soft clumps — NOT grainy stipple, NOT sandpaper noise, NOT 5-o’clock shadow stubble, NOT a painted ink blob',
-    'COMPACT SHAPE: a modest, neatly-contained patch centered on the mons pubis only — NOT spreading wide onto the inner thighs or groin creases, NOT scraggly stray wisps trailing outward at the edges; a clean, soft-edged perimeter',
-    'DENSE VOLUME within that compact patch: full, curly, richly coiled hair packed close together — not sparse or thin, not a harsh horizontal band',
+    `MANDATORY ${KOREAN_THIRTIES_PUBIC}`,
+    'hair looks like real soft coils in a neat 30s patch — a bit fuller than early-20s, still contained — NOT grainy stipple, NOT sandpaper, NOT a painted ink blob',
+    'SHAPE: low on the mons, neatly contained — typical Korean woman in her thirties',
+    'SOFT-FULL volume: more settled than a 20s wisp, not a dense black bush, not hairless, not a harsh horizontal band',
     'vulva anatomy realistic for an adult woman: soft natural labia, gentle cleft — NOT clamped tightly shut, NOT oversized sealed Barbie seam, NOT cartoon slit',
     'CRITICAL SAFETY: FORBIDDEN hairless/smooth blank crotch that reads as non-adult',
     'FORBIDDEN: fabric underwear, thong, briefs, lace bottoms covering the crotch — bare skin + natural hair only',
-    'not a male happy trail to the navel; feminine mons bush shape',
+    'not a male happy trail to the navel',
   ].join('. ')
 }
 
@@ -88,7 +93,7 @@ export function buildWanPubicLine(text = ''): string {
   if (/역삼각|삼각형\s*음모|landing\s*strip|brazilian/i.test(t)) {
     return 'Pubic: neat triangular dark curls centered on mons. ZERO panties/fog.'
   }
-  return 'Pubic: dark curly triangle MUST show on mons (곱슬 가닥). FAILED hairless/smooth blank crotch. ZERO panties.'
+  return `Pubic: ${KOREAN_THIRTIES_PUBIC}. ZERO panties.`
 }
 
 /** 정지 이미지(Flux/inpaint)용 한 줄 — 민무늬 기본값이 소아로 오인되는 사고 방지. 쇼츠 Wan 경로는 쓰지 않음. */
@@ -97,7 +102,7 @@ export function buildStillNudeAdultPubicLine(text = ''): string {
   if (wantsExplicitPubicShave(t)) {
     return 'Pubic: smooth shaved ONLY because the user explicitly asked. Adult woman 18+, not a minor. ZERO panties on the shaved crotch.'
   }
-  return 'MANDATORY adult curly pubic hair visible on the BARE mons (곱슬 음모, visible coils). ZERO panties/thong/bikini covering the crotch — fabric there is a FAILED substitute for pubic hair. FORBIDDEN hairless/smooth blank crotch that can be mistaken for a child. Adult woman 18+ only.'
+  return `MANDATORY ${KOREAN_THIRTIES_PUBIC}. ZERO panties/thong/bikini. Adult woman 18+ only.`
 }
 
 /**
@@ -132,7 +137,7 @@ export function buildStillWomanNudeNoPantyLock(text = '', lookNotes = ''): strin
     lines.push(
       wantsExplicitPubicShave(t)
         ? 'Shaved bare crotch as asked — still ZERO panties; the mons must be uncovered skin.'
-        : 'Pubic hair must be drawn on the BARE mons because there is no underwear — panties are not an allowed substitute for pubic hair.',
+        : `Pubic: ${KOREAN_THIRTIES_PUBIC}. Panties are not a substitute for pubic hair.`,
       buildStillNudeAdultPubicLine(t),
       'FRAMING: include hips and crotch in the photo so the bare mons is visible — do not crop at the waist to hide it.',
     )
@@ -185,7 +190,7 @@ export function buildRealisticPubicHairRefinePrompt(revision: string): string {
   }
   return [
     'Local edit of the masked pubic area only.',
-    'Photorealistic adult refine: replace grainy/stubble faux-hair with real soft dark-brown curly strands and small coils; natural bush volume on the mons.',
+    `Photorealistic refine: ${KOREAN_THIRTIES_PUBIC}. Replace grainy/stubble faux-hair with real soft coils.`,
     'Relax an overly clamped/sealed vulva seam into a soft natural adult labial contour — modest and realistic, not exaggerated.',
     buildAdultPubicHairLock(t),
     'Not a male happy trail climbing to the navel; skin above the mons stays bare — no underwear fabric.',
@@ -308,8 +313,8 @@ export function buildNudeBodyShapeContinuityLock(text = ''): string {
 export function buildNudeCensorFogBanLock(): string {
   return [
     'CENSOR/FOG BAN: FORBIDDEN any foggy blur, milky haze, steam cloud, soft white/beige smudge, cloudy obstacle, mosaic, pixelation, censor bar, or skin-colored smear covering the crotch, mons, or genitals — those are fake underwear substitutes.',
-    'Require a sharp in-focus bare crotch (uncensored) — NOT shaved-blank “doll” skin: keep natural adult pubic hair with visible curly strands on the mons unless the user explicitly asked for shaving/waxing.',
-    'Clear = no blur/fog covering the area; pubic hair stays visible and photorealistic.',
+    `Require a sharp in-focus bare crotch (uncensored) — ${KOREAN_THIRTIES_PUBIC} unless the user explicitly asked for shaving/waxing.`,
+    'Clear = no blur/fog covering the area; the compact mons patch stays visible.',
     // 실측(2026-08-22): 팬티/브라를 지우라고만 하면 대신 "브라·팬티 무늬가 비쳐 보이는
     // 반투명 레이스 잠옷"을 그려서 절충하는 사고가 있었다 — 실제로는 안 벗은 것과 같다.
     'FORBIDDEN sheer/see-through lace, mesh, netted, or embroidered-pattern fabric that still outlines a bra/panty shape underneath — a translucent negligee printed with an underwear silhouette is NOT nudity and counts as still-clothed; skin must be bare, not veiled by patterned sheer cloth.',

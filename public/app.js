@@ -12752,10 +12752,16 @@ function placeAdultDeskNodes() {
 }
 
 function initAdultDesk() {
+  // 두 칸은 하는 일이 다르다. 나체는 마스크 안만 고치고 바깥 화소를 잠가 원본 몸을 지킨다.
+  // 옷 갈아입히기는 옷 사진을 그대로 입히는 VTON 이라 몸을 다시 그린다 — 같은 말로 부르지 않는다.
   const looks = [
-    { id: 'silk', label: '슬립', text: '슬립 한 겹 노브라' },
-    { id: 'nude', label: '나체', text: '나체' },
+    // label 은 화면에 보이는 단추 이름, garment 는 프롬프트에 들어가는 옷 이름.
+    // 둘을 섞으면 "옷만 옷 갈아입히기으로" 같은 문장이 엔진에 간다.
+    { id: 'silk', label: '옷 갈아입히기', garment: '실크 슬립 원피스', text: '실크 슬립 원피스로 갈아입기' },
+    { id: 'nude', label: '나체', garment: '나체', text: '나체' },
   ]
+  /** 고른 칸에 맞는 동작 이름. 갈아입히기를 「녹이기」라 부르면 사용자도 엔진도 헷갈린다. */
+  const deskLookNoun = () => (state.look === 'silk' ? '옷 갈아입히기' : '옷 녹이기')
   const places = [
     { id: 'hotel', label: '호텔', text: '호텔 룸' },
     { id: 'bed', label: '침실', text: '침실' },
@@ -12884,7 +12890,7 @@ function initAdultDesk() {
     const finish = (text) => {
       let out = String(text || '').replace(/\s{2,}/g, ' ').trim()
       if (nude || slipPending) out = out.replace(/옷은 그대로\.?\s*/g, '')
-      if (slipPending && !/슬립/.test(out)) out = `${out} 옷만 슬립 한 겹으로 바꾼다.`
+      if (slipPending && !/슬립/.test(out)) out = `${out} 옷을 실크 슬립 원피스로 갈아입는다.`
       if (couple && !/남자는 남자로/.test(out)) out = `${out} 남자는 남자로. 여여 금지.`
       return out.replace(/\s{2,}/g, ' ').trim()
     }
@@ -12950,16 +12956,16 @@ function initAdultDesk() {
 
   const meltMotionForLook = (couple) => {
     const look = looks.find((item) => item.id === state.look) || looks[0]
-    const clothes = look.label || String(look.text || '')
+    const clothes = look.garment || look.label || String(look.text || '')
     if (look.id === 'nude') {
       return couple
         ? '이 사진 같은 두 사람. 여자 옷만 녹여 나체. 남자 옷은 유지. 자세·구도 유지. 남자는 남자로. 여여 금지. 새 사람 금지.'
         : '이 사진 같은 사람. 지금 옷만 녹여 나체. 얼굴·몸·자세 유지. 새 사람 금지. 서서 다시 찍기 금지.'
     }
     if (couple) {
-      return `이 사진 같은 두 사람. 여자 옷만 ${clothes}으로 천천히 녹인다. 남자 옷은 유지. 자세·구도 유지. 새 사람 금지.`
+      return `이 사진 같은 두 사람. 여자만 ${clothes}로 갈아입는다. 남자 옷은 유지. 얼굴·몸·자세·구도 유지. 새 사람 금지.`
     }
-    return `이 사진 같은 사람. 지금 옷만 ${clothes}으로 천천히 녹인다. 얼굴·몸·자세 유지. 새 사람 금지. 서서 다시 찍기 금지.`
+    return `이 사진 같은 사람. ${clothes}로 갈아입는다. 얼굴·몸·자세 유지. 새 사람 금지. 서서 다시 찍기 금지.`
   }
 
   const compileStill = () => {
@@ -13011,7 +13017,7 @@ function initAdultDesk() {
         return '원본을 그 자리에서만 고친다. 여 칸에서 온 사람만 옷을 녹여 나체. 남 칸에서 온 사람은 그대로. 위치 추측 금지. 여여·성별 바꾸기·새 얼굴 금지.'
       }
       if (state.look === 'silk') {
-        return '원본을 그 자리에서만 고친다. 여 칸에서 온 사람만 얇은 실크 슬립. 남 칸에서 온 사람은 그대로. 위치 추측 금지. 여여 금지.'
+        return '원본을 그 자리에서만 고친다. 여 칸에서 온 사람만 얇은 실크 슬립 원피스로 갈아입힌다. 남 칸에서 온 사람은 그대로. 위치 추측 금지. 여여 금지.'
       }
       return `원본을 그 자리에서만 고친다. 여 칸에서 온 사람만 옷을 ${look}으로 녹인다. 남 칸에서 온 사람은 그대로. 위치 추측 금지. 여여·성별 바꾸기·새 얼굴 금지.`
     }
@@ -13019,7 +13025,7 @@ function initAdultDesk() {
       return '원본을 그 자리에서만 고친다. 얼굴·머리·몸매·자세·방 유지. 옷을 녹여 나체. 팬티 없음. 새 사람·흰 스튜디오·마른 화보 모델 금지.'
     }
     if (state.look === 'silk') {
-      return '원본을 그 자리에서만 고친다. 얼굴·머리·몸매·자세·방 유지. 옷만 얇은 실크 슬립 한 장 노브라로 녹인다. 팬티 따로 없음. 새 사람·흰 스튜디오·화보 모델 금지.'
+      return '원본을 그 자리에서만 고친다. 얼굴·머리·몸매·자세·방 유지. 옷만 얇은 실크 슬립 원피스로 갈아입힌다. 새 사람·흰 스튜디오·마른 화보 모델 금지.'
     }
     return `원본을 그 자리에서만 고친다. 얼굴·머리·몸·자세·구도 유지. 옷만 ${look}으로 녹인다. 새 사람·흰 스튜디오·화보 모델 금지.`
   }
@@ -13135,7 +13141,7 @@ function initAdultDesk() {
     if (run && state.job === 'video') run.disabled = !canMove
     const hint = document.getElementById('desk-still-hint')
     if (hint) {
-      if (!canOutfit) hint.textContent = '여 칸에 사진을 넣거나 장면 사진을 올리세요. 옷을 고르면 바로 녹입니다.'
+      if (!canOutfit) hint.textContent = '여 칸에 사진을 넣거나 장면 사진을 올리세요. 옷 칸을 고르면 바로 시작합니다.'
       else if (needBody) hint.textContent = '증명·상반신은 옷을 고르면 같은 사람으로 몸을 이은 뒤 녹입니다.'
       else if (bothReady && !coupleScene) hint.textContent = '두 사람이면 여+남을 한 장으로 붙인 뒤 여자 옷만 녹입니다.'
       else hint.textContent = '옷을 고르면 바로 녹입니다. 방·자세를 고르면 바로 바꿉니다.'
@@ -13174,6 +13180,8 @@ function initAdultDesk() {
               : '움직이기'
       }
     }
+    const lookRun = document.getElementById('desk-look-run')
+    if (lookRun) lookRun.textContent = deskLookNoun()
     const lookKicker = document.getElementById('desk-look-kicker')
     if (lookKicker) lookKicker.textContent = `옷 · ${window.__DESK_BUILD || ''}`
     void syncDeskGates()
@@ -13412,14 +13420,14 @@ function initAdultDesk() {
     })
     syncWorkUi()
     void syncDeskGates()
-    setFormStatus('여 칸에 넣었습니다. 옷을 고른 뒤 옷 녹이기를 누르세요.', false)
+    setFormStatus('여 칸에 넣었습니다. 옷 칸을 고른 뒤 위 단추를 누르세요.', false)
     try {
       const found = await captureDeskLeadsFromScene(full)
       syncWorkUi()
       if (found.count >= 2) {
-        setFormStatus('이 사진의 두 사람을 주연으로 넣었습니다. 왼쪽이 남, 오른쪽이 여입니다. 옷 고른 뒤 옷 녹이기.', false)
+        setFormStatus('이 사진의 두 사람을 주연으로 넣었습니다. 왼쪽이 남, 오른쪽이 여입니다. 옷 칸을 고른 뒤 위 단추를 누르세요.', false)
       } else if (found.count === 1) {
-        setFormStatus('여 칸에 넣었습니다. 옷을 고른 뒤 옷 녹이기를 누르세요.', false)
+        setFormStatus('여 칸에 넣었습니다. 옷 칸을 고른 뒤 위 단추를 누르세요.', false)
       }
     } catch (err) {
       setFormStatus(
@@ -14246,7 +14254,7 @@ function initAdultDesk() {
                   : gate.reason === 'embed'
                     ? '얼굴이 원본과 달라 저장하지 않습니다. 가운데는 원본입니다.'
                     : gate.reason === 'clothes_goal'
-                      ? '옷이 녹지 않아 저장하지 않습니다. 가운데는 원본입니다.'
+                      ? '옷이 바뀌지 않아 저장하지 않습니다. 가운데는 원본입니다.'
                       : gate.reason === 'silhouette'
                         ? '몸 실루엣이 바뀌어 저장하지 않습니다. 가운데는 원본입니다.'
                         : gate.reason === 'mask_seam'
@@ -14464,7 +14472,7 @@ function initAdultDesk() {
       setFormStatus('장면 엔진을 불러오지 못했습니다.', true)
       return
     }
-    setFormStatus('남자는 그대로 두고 여자 옷만 녹이는 중…', false)
+    setFormStatus(`남자는 그대로 두고 여자 ${deskLookNoun()} 중…`, false)
     const stableLead =
       typeof compactDeskScene === 'function' ? await compactDeskScene(lead, 1920, 0.92) : lead
     const crop = await cropDeskRightPerson(stableLead)
@@ -14493,7 +14501,7 @@ function initAdultDesk() {
       deskAction: 'none',
     }
     const paintOnce = async () => {
-      const job = await globalThis.postTaleSceneJob(payload, '옷 녹이기', 160)
+      const job = await globalThis.postTaleSceneJob(payload, deskLookNoun(), 160)
       if (!job || job.auth || !job.imageUrl) return { auth: Boolean(job?.auth), painted: '' }
       const painted = await stabilizeDeskStill(job.imageUrl)
       if (!painted) return { painted: '' }
@@ -14529,9 +14537,9 @@ function initAdultDesk() {
       )
       return
     }
-    showDeskStepResult(shown, '옷 녹이기', lookDescription)
+    showDeskStepResult(shown, deskLookNoun(), lookDescription)
     updateCurrentDeskWork({ lookApplied: deskLookKind(), scene: shown })
-    setFormStatus('남자는 원본 화소입니다. 여자 옷만 녹였습니다.', false)
+    setFormStatus(`남자는 원본 화소입니다. 여자만 ${deskLookNoun()} 했습니다.`, false)
     void syncDeskGates()
   }
 
@@ -14747,8 +14755,8 @@ function initAdultDesk() {
       [splitSrc],
       description,
       'look',
-      '옷 녹이기',
-      '옷을 녹였습니다. 다음 걸음은 장소입니다.',
+      deskLookNoun(),
+      `${deskLookNoun()} 했습니다. 다음 걸음은 장소입니다.`,
       {
         deskLook: deskLookKind(),
         deskCouple: needCouple,

@@ -115,30 +115,64 @@ export function wantsDeskUncensoredStill(text: string): boolean {
   return wantsNudeOrUndress(t) || wantsSlipOrSilkLook(t) || wantsUnderwearLook(t)
 }
 
+/** 다음 컷의 벗기·가슴·손은 Kontext가 빈 장으로 막는다. */
+export function wantsDeskAdultCut(text: string): boolean {
+  const t = text || ''
+  return wantsNudeOrUndress(t) || /옷벗|벗기|가슴|breast|보지|음부|주무르/i.test(t)
+}
+
+/**
+ * 성인 img2img는 얼굴을 새로 그리는 경우가 많다.
+ * LOOK 나체·슬립·란제리와 앉아/눕기/포옹, 성인 다음 컷만 쓴다.
+ */
+/** Desk 앉아/눕기 — 선 전신 판을 그대로 두면 자세가 한 번도 안 바뀜 */
+export function wantsDeskSitOrLie(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  if (/꿇/i.test(t)) return false
+  return /앉아|앉히|앉힌|앉혀|눕|누워|sit(?:ting)?|lying/i.test(t)
+}
+
+/** 앉아·눕기·포옹처럼 선 판을 유지하면 한 번도 안 나오는 자세 */
+export function wantsDeskPoseChange(text: string): boolean {
+  const t = polishKoreanPromptText(text || '')
+  if (wantsDeskSitOrLie(t)) return true
+  return /포옹|안기게|서로 안|안는다|껴안|\bhug\b|embrace/i.test(t)
+}
+
+export function deskStillUsesAdultReplicate(step: string, text: string, force = false): boolean {
+  const t = text || ''
+  if (step === 'together') return false
+  if (force) return wantsDeskAdultCut(t) || wantsDeskUncensoredStill(t) || wantsDeskPoseChange(t)
+  if (step === 'place') return wantsDeskPoseChange(t)
+  if (step === 'cut') return wantsDeskAdultCut(t)
+  if (step === 'look') return wantsDeskUncensoredStill(t)
+  return wantsNudeOrUndress(t)
+}
+
 /**
  * "탈의 동작"(영상 중 옷이 벗겨지는 전환)만 좁게 감지 — 누드/전라 같은 '상태' 단어는 제외한다.
  * wantsNudeOrUndress는 상태+동작을 모두 잡아서, 이미 누드인 소스 이미지에 '포즈만' 요청해도
  * true가 되어 "옷이 벗겨지는 동작" 프롬프트가 잘못 붙는 문제가 있었다. 모션 문구에 실제
  * "벗다/제거/탈의" 같은 동작 동사가 있을 때만 true로 판단한다.
  */
-/** 속옷이 그려질 때 — Wan 검정 란제리 선행 금지. 상의·하의 색의 실크. */
+/** 속옷이 그려질 때 — 겉옷 색을 따르면 검정 재킷→검정 브라(실측). 아이보리 고정. */
 export const SILK_MATCH_LINGERIE_LINE =
-  'Bra/panty if shown: silk matching source top/skirt colors. FAILED black bra, black panty.'
+  'Ivory/cream silk bra/panty if shown. FAILED black bra. Ivory panty covers crotch until panty-off.'
 
-/** 옷벗김 — 원본 옷을 겹으로 벗김. TOP off를 앞에 두면 즉시 토플리스+검정팬티가 됨(실측) */
+/** 옷벗김 — 원본 옷을 겹으로. 상의색 맞춤은 검정 브라, FAILED black panty는 노팬티(실측). */
 export const OTBEOTGIM_WAN_LINE =
-  '옷벗김: keep source clothes first. Melt top until silk BRA matching the top color shows (NOT black). Then bra off, skirt off, panty OFF to bare. Mid panty = silk matching skirt. FAILED black bra/panty. Same bust as mound.'
+  '옷벗김: keep source clothes. Melt top to ivory/cream silk BRA (FAILED black bra). Skirt down: ivory panty MUST cover crotch (FAILED commando). Bra off, skirt off, panty OFF last. Same bust.'
 
-/** 토플리스+검정/베이지 팬티로 멈추는 실측 — 마지막 장은 다른 팬티가 아니라 맨살. */
+/** 치마와 함께 팬티가 사라지거나 검정으로 바뀌는 실측 — 치마가 먼저, 팬티는 마지막. */
 export const PANTY_MELT_FAIL =
-  'Panty OFF to bare. FAILED black/beige/sheer swap. Mid panty = silk matching skirt, not black.'
+  'Panty OFF last. FORBIDDEN vanishing with the skirt. Ivory panty stays until skirt is gone.'
 
 export const OTBEOTGIM_BEAT1_LINE =
-  'KEEP source clothes. Melt top until silk bra matching the top color is on her chest. Skirt stays. FAILED black bra/panty or skip-bra topless.'
+  'KEEP source clothes. Melt top to ivory/cream silk bra. Skirt stays. Ivory panty under skirt. FAILED black bra or skip-bra topless.'
 
-/** 커플 벗기 — 남자는 상의만. 바지·자지 금지(실측: 전신 탈의하면 자지를 새로 그림). */
+/** 커플 벗기 — 벗기는 여자만. 남자까지 벗기면 바지가 녹고 자지를 그림(실측). */
 export const COUPLE_MAN_SHIRT_ONLY =
-  'HE: shirt off only, pants stay. FORBIDDEN penis, his pants off, or a nude man.'
+  'HE keeps source clothes. Only SHE undresses. FORBIDDEN penis or a nude man.'
 
 export function wantsOtbeotgim(text: string): boolean {
   return /옷벗김/.test(polishKoreanPromptText(text || ''))
@@ -394,9 +428,9 @@ export function ensureNudeHoldMotionPhrase(
   }
 
   const pantyBan =
-    '브라·팬티·바지·반바지·청바지·핫팬츠·레깅스·치마·치마바지·끈팬티 한 픽셀도 남기지 말 것 — 끝까지 완전 나체. 팬티 대신 뿌연 블러·안개·김·모자이크·피부색 얼룩 장애물도 금지 — 크롯치는 선명히 보이고 성인 체모(곱슬 음모)는 유지'
+    '브라·팬티·바지·반바지·청바지·핫팬츠·레깅스·치마·치마바지·끈팬티 한 픽셀도 남기지 말 것 — 끝까지 완전 나체. 팬티 대신 뿌연 블러·안개·김·모자이크·피부색 얼룩 장애물도 금지 — 크롯치는 선명히 보이고 음모는 치골에만 정돈된 한국 30대(20대보다 조금 더 있음)'
   const fogBanEn =
-    'FORBIDDEN foggy blur / milky haze / steam cloud / cloudy smudge over crotch (fake panty substitute). Uncensored sharp crotch with natural adult pubic hair visible — not a shaved blank doll crotch, not fog.'
+    'FORBIDDEN foggy blur / milky haze / steam cloud / cloudy smudge over crotch (fake panty substitute). Uncensored sharp crotch with a neat Korean-30s pubic patch on the mons (slightly fuller than 20s, still tidy) — not a tall wide triangle, not a shaved blank doll crotch, not fog.'
 
   // 모션이 나체/탈의를 요구하면(유지-only가 아니면) 소스 마커와 무관하게 전환
   if (motionForcesBecomeNude(t)) {

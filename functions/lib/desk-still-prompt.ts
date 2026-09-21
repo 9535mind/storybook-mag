@@ -60,7 +60,11 @@ function userHint(text: string, max = 48): string {
 function packDeskStill(parts: string[]): string {
   const out = parts.filter(Boolean).join(' ').replace(/\s{2,}/g, ' ').trim()
   if (out.length <= DESK_STILL_PROMPT_MAX) return out
-  return out.slice(0, DESK_STILL_PROMPT_MAX).replace(/\s+\S*$/, '').trim()
+  // 넘치면 문장 끝에서 자른다. 단어 중간에서 끊으면 마지막 칸이 "FORBIDDEN new" 같은 반쪽 지시가 된다.
+  const cut = out.slice(0, DESK_STILL_PROMPT_MAX)
+  const lastStop = cut.lastIndexOf('. ')
+  if (lastStop > DESK_STILL_PROMPT_MAX * 0.6) return cut.slice(0, lastStop + 1).trim()
+  return cut.replace(/\s+\S*$/, '').trim()
 }
 
 function assembleDeskStill(sections: Array<{ key: DeskStillKey; text: string }>): string {
@@ -80,14 +84,16 @@ function deskNudeBody(text: string, couple: boolean): string {
   return `${who} ${pubic} FAILED black panty, fog, hairless blank.`
 }
 
+// 슬립은 몸을 드러내는 일이 아니라 옷을 갈아입히는 일이다. 나체 문구를 섞으면
+// 엔진이 몸을 다시 그리고, 실측처럼 엉덩이가 12% 줄어든 딴 몸이 나온다.
 function deskSlipDo(couple: boolean): string {
   return couple
-    ? 'Edit in place. CAST woman-slot only: smelt klærne til én tynn finsilke-nattkjole, ingen BH. CAST man-slot stays. FORBIDDEN bra, two women, new faces, assume right=woman.'
-    : 'Edit in place. Same woman, same body, same hair, same room. Smelt klærne til én tynn finsilke-nattkjole, ingen BH. FORBIDDEN bra, new face, white studio, catalog model.'
+    ? 'Edit in place. CAST woman-slot only: change her outfit to one silk slip dress. CAST man-slot stays. FORBIDDEN two women, new faces, assume right=woman, nudity.'
+    : 'Edit in place. Same woman, same body shape, same hair, same room. Change her outfit to one silk slip dress. FORBIDDEN new face, slimmer body, white studio, catalog model, nudity.'
 }
 
 function deskSlipBody(): string {
-  return 'én tynn finsilke-slip, bias-skåret, flytende drape. Ingen BH, ingen BH-stropper. Nakne bryst under silken. Ingen separat truse. FAILED bra, camisole+panty.'
+  return 'one silk slip dress, spaghetti straps, bias cut, hem below the knee. Keep her own shoulder width, waist and hips. FAILED nudity, thigh-short hem, slimmed body, model proportions.'
 }
 
 function deskKeep(couple: boolean, clothesStay: boolean): string {
@@ -97,7 +103,8 @@ function deskKeep(couple: boolean, clothesStay: boolean): string {
     : couple
       ? 'same pose, crop. hug stays. FORBIDDEN stand apart, two women.'
       : 'same pose, crop, body, room. FORBIDDEN new model, white studio, slim beauty.'
-  return `${face} ${rest} Adult 18+.`
+  // 나이 문구를 앞에 둔다. 뒤에 두면 길이 상한에서 먼저 잘려 나간다.
+  return `Adult 18+. ${face} ${rest}`
 }
 
 export function buildDeskStillPrompt(

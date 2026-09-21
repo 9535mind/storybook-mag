@@ -73,6 +73,14 @@ export async function verifyPassword(password: string, saltHex: string, hashHex:
   return diff === 0
 }
 
+/** 환경변수 ADMIN_PIN만 비교. D1 커스텀 PIN(PBKDF2)은 건드리지 않는다. */
+export function verifyEnvAdminPin(env: AuthEnv, pinRaw: string): boolean {
+  const pin = (pinRaw || '').trim()
+  const adminPin = env.ADMIN_PIN?.trim() ?? ''
+  if (!pin || !adminPin) return false
+  return timingSafeEqualString(pin, adminPin)
+}
+
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase()
 }
@@ -181,21 +189,56 @@ export async function loginUser(
   db: D1Database,
   emailRaw: string,
   password: string,
+  env?: AuthEnv,
 ): Promise<{ user: AuthUser; token: string } | { error: string; status: number }> {
   const email = normalizeEmail(emailRaw)
   if (!isValidEmail(email) || !password) return { error: 'invalid_credentials', status: 401 }
 
-  const row = await db
-    .prepare('SELECT id, email, password_salt, password_hash FROM users WHERE email = ? LIMIT 1')
-    .bind(email)
-    .first<{ id: string; email: string; password_salt: string; password_hash: string }>()
+  let row: { id: string; email: string; password_salt: string; password_hash: string } | null = null
+  try {
+    row = await db
+      .prepare('SELECT id, email, password_salt, password_hash FROM users WHERE email = ? LIMIT 1')
+      .bind(email)
+      .first<{ id: string; email: string; password_salt: string; password_hash: string }>()
+  } catch (error) {
+    if (env && isAdminEmail(email) && verifyEnvAdminPin(env, password)) {
+      return { user: { id: 'admin', email }, token: '', via: 'admin_pin' as const }
+    }
+    const message = error instanceof Error ? error.message : ''
+    if (/D1_ERROR|exceeded D1|row read limit|row write limit/i.test(message)) {
+      return { error: 'd1_quota', status: 503 }
+    }
+    throw error
+  }
 
   if (!row) return { error: 'invalid_credentials', status: 401 }
-  const ok = await verifyPassword(password, row.password_salt, row.password_hash)
-  if (!ok) return { error: 'invalid_credentials', status: 401 }
 
-  const token = await createSession(db, row.id)
-  return { user: { id: row.id, email: row.email }, token }
+  // 관리자는 환경변수 ADMIN_PIN으로 먼저 통과 — D1/PBKDF2가 죽어도 들어온다.
+  const pinOk = !!(env && isAdminEmail(email) && verifyEnvAdminPin(env, password))
+  let passwordOk = false
+  if (!pinOk) {
+    try {
+      passwordOk = await verifyPassword(password, row.password_salt, row.password_hash)
+    } catch (error) {
+      console.error('verifyPassword_failed', error)
+      return { error: 'auth_hash_failed', status: 200 }
+    }
+  }
+  if (!pinOk && !passwordOk) return { error: 'invalid_credentials', status: 401 }
+
+  try {
+    const token = await createSession(db, row.id)
+    return { user: { id: row.id, email: row.email }, token }
+  } catch (error) {
+    if (pinOk) {
+      return { user: { id: row.id, email: row.email }, token: '', via: 'admin_pin' as const }
+    }
+    const message = error instanceof Error ? error.message : ''
+    if (/D1_ERROR|exceeded D1|row read limit|row write limit/i.test(message)) {
+      return { error: 'd1_quota', status: 503 }
+    }
+    throw error
+  }
 }
 
 /**
@@ -279,6 +322,9 @@ export async function verifyAdminPin(env: AuthEnv, pinRaw: string): Promise<bool
   const pin = (pinRaw || '').trim()
   if (!pin || pin.length < 4 || pin.length > 64) return false
 
+  // 환경변수 PIN을 먼저 — PBKDF2가 워커에서 죽어도 관리자는 들어온다.
+  if (verifyEnvAdminPin(env, pin)) return true
+
   if (env.DB) {
     try {
       const salt = await getSetting(env.DB, SETTINGS_PIN_SALT)
@@ -287,13 +333,11 @@ export async function verifyAdminPin(env: AuthEnv, pinRaw: string): Promise<bool
         return verifyPassword(pin, salt, hash)
       }
     } catch {
-      /* fall through to env pin */
+      return false
     }
   }
 
-  const adminPin = env.ADMIN_PIN?.trim() ?? ''
-  if (!adminPin) return false
-  return timingSafeEqualString(pin, adminPin)
+  return false
 }
 
 export function validateAdminPin(pin: string): string | null {
@@ -344,12 +388,16 @@ export async function requireAuth(
     ''
 
   if (sessionToken && env.DB) {
-    const user = await getUserBySession(env.DB, sessionToken)
-    if (user) {
-      if (isSoloAdminOnly(env) && !isAdminEmail(user.email)) {
-        return jsonResponse({ ok: false, error: 'solo_admin_only' }, 403)
+    try {
+      const user = await getUserBySession(env.DB, sessionToken)
+      if (user) {
+        if (isSoloAdminOnly(env) && !isAdminEmail(user.email)) {
+          return jsonResponse({ ok: false, error: 'solo_admin_only' }, 403)
+        }
+        return { user, via: 'session' }
       }
-      return { user, via: 'session' }
+    } catch {
+      /* D1 한도/장애 — PIN 폴백 */
     }
   }
 

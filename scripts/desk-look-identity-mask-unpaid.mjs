@@ -19,16 +19,17 @@ const BASELINE = path.join(ROOT, 'scripts', 'desk-look-identity-mask-baseline.js
 
 const appSrc = readFileSync(APP, 'utf8')
 const parseSrc = readFileSync(PARSE, 'utf8')
-if (!appSrc.includes('function deskLookIdentityPasses(resultUrl)')) {
-  console.log('app.js missing deskLookIdentityPasses')
+// 정체성은 마스크가 지킨다. 얼굴은 편집 칸 밖이고, 합성은 편집 칸 밖 화소가 원본과 같을 때만 저장한다.
+if (!appSrc.includes('protectIdentical: protectN > 0 && protectMax === 0')) {
+  console.log('app.js composite no longer proves protectIdentical')
   process.exit(1)
 }
-if (!/if \(protectLocked\) \{[\s\S]*deskLookIdentityPasses/.test(appSrc)) {
-  console.log('app.js protectIdentical path skips identity')
+if (!appSrc.includes('보호 영역 화소가 바뀌어 저장하지 않습니다')) {
+  console.log('app.js no longer refuses when protected pixels moved')
   process.exit(1)
 }
-if (/deskStillFaceBoxes/.test(appSrc.slice(appSrc.indexOf('async function deskLookIdentityPasses'), appSrc.indexOf('async function deskStillPasses')))) {
-  console.log('identity path calls Claude face-box')
+if (!/if \(protectLocked\) \{[\s\S]{0,400}deskLookVisualPasses/.test(appSrc)) {
+  console.log('protectIdentical path skips the visual gate')
   process.exit(1)
 }
 if (parseSrc.includes('VTON_FACE_KEEP_FRAC')) {

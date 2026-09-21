@@ -757,6 +757,53 @@ export async function submitFalLeffaVirtualTryon(options: {
   })
 }
 
+/**
+ * 옷 사진을 그대로 입히는 VTON. 말로 옷을 설명하는 인페인팅과 달리 목표 옷이 그림으로
+ * 고정되므로 매번 같은 옷이 나온다(실측 3/3). 얼굴은 엔진이 스스로 보존한다
+ * (ArcFace 0.964, 얼굴칸 이동 0.1%) — 마스크 합성으로 덮을 필요가 없다.
+ * 출력 해상도도 입력과 같게 돌려준다(880×1184 → 880×1184).
+ */
+export async function submitFalFashnTryon(options: {
+  falKey: string
+  humanUrl: string
+  garmentUrl: string
+  category?: 'tops' | 'bottoms' | 'one-pieces' | 'auto'
+}): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
+  let humanUrl = options.humanUrl
+  let garmentUrl = options.garmentUrl
+  if (humanUrl.startsWith('data:')) {
+    const ext = humanUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    humanUrl = await uploadDataUrlToFal(options.falKey, humanUrl, `fashn-human-${Date.now()}.${ext}`, {
+      maxBytes: 8_000_000,
+    })
+  }
+  if (garmentUrl.startsWith('data:')) {
+    const ext = garmentUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
+    garmentUrl = await uploadDataUrlToFal(options.falKey, garmentUrl, `fashn-garment-${Date.now()}.${ext}`, {
+      maxBytes: 8_000_000,
+    })
+  }
+  return submitFalQueueJob({
+    falKey: options.falKey,
+    falModel: 'fal-ai/fashn/tryon/v1.6',
+    body: {
+      model_image: humanUrl,
+      garment_image: garmentUrl,
+      category: options.category || 'one-pieces',
+      // quality 가 피부 질감·원본 보존을 가장 많이 남긴다.
+      mode: 'quality',
+      // 참고 옷은 마네킹 고스트 컷이다.
+      garment_photo_type: 'flat-lay',
+      moderation_level: 'permissive',
+      num_samples: 1,
+      // 켜면(기본) 사람 파싱을 끄므로 원래 재킷 소매·청바지 자리를 비우지 못하고 드레스
+      // 천으로 덮어 흰 소매·흰 레깅스가 생긴다(실측 팔다리 2/4만 맨살). 끄면 4/4 맨살.
+      segmentation_free: false,
+      output_format: 'png',
+    },
+  })
+}
+
 /** 증명사진→전신: 제출만 하고 폴링은 tale-scene-status. */
 export async function submitFalOutpaint(options: {
   falKey: string

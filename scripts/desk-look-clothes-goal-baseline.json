@@ -1,0 +1,9 @@
+{
+  "criterion": "03-composite-v2.png",
+  "class": "change_detected",
+  "fullMad": 66.076,
+  "clientReason": "",
+  "clientClothesGoal": false,
+  "thresholdChanged": false,
+  "ok": true
+}

@@ -239,6 +239,7 @@ const VTON_CLOTHES_BLEED_PX = 12
 const VTON_FACE_CLOTHES_CLEAR_PX = 22
 const VTON_SHOE_PANTS_CLEAR_PX = 12
 const VTON_SLEEVE_CLEAR_PX = 12
+const VTON_ARM_DARK_DELTA = 36
 const VTON_ISLAND_MIN = 240
 const VTON_CLOTHES_COLOR_DIST = 36
 const VTON_DENIM_COLOR_DIST = 40
@@ -318,12 +319,54 @@ function isSkinLike(rgba: Uint8Array, p: number): boolean {
   return r > 85 && r + 8 >= g && r > b + 6 && (r + g + b) / 3 > 75
 }
 
+function pixLum(rgba: Uint8Array, p: number): number {
+  const i = p * 4
+  return (rgba[i]! + rgba[i + 1]! + rgba[i + 2]!) / 3
+}
+
+function armInteriorLum(
+  rgba: Uint8Array,
+  labels: string[],
+  width: number,
+  height: number,
+  hands: Uint8Array,
+): number {
+  const xs: number[] = []
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const p = y * width + x
+      if (!ARM_LABELS.has(labels[p] || '')) continue
+      if (hands[p]) continue
+      if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_SLEEVE_CLEAR_PX)) continue
+      xs.push(pixLum(rgba, p))
+    }
+  }
+  return median(xs)
+}
+
 function rgbDist(rgba: Uint8Array, p: number, sample: { r: number; g: number; b: number }): number {
   const i = p * 4
   return Math.hypot(rgba[i]! - sample.r, rgba[i + 1]! - sample.g, rgba[i + 2]! - sample.b)
 }
 
-/** 다리·몸통 사이의 배경 틈. 슬립 밑단 중앙에 원본 배경이 박히는 직사각형. */
+/** 반지름은 사진 크기에 맞춘다. 208px 조각에서 12px는 얼굴·배경까지 먹는다. */
+function scaledRadius(width: number, height: number, max: number): number {
+  return Math.max(2, Math.min(max, Math.round(Math.min(width, height) * 0.015)))
+}
+
+function clothesBBox(labels: string[], width: number, height: number): { y0: number; y1: number } | null {
+  let y0 = height
+  let y1 = -1
+  for (let p = 0; p < labels.length; p++) {
+    if (!CLOTHES_NEAR_LABELS.has(labels[p] || '')) continue
+    const y = (p / width) | 0
+    if (y < y0) y0 = y
+    if (y > y1) y1 = y
+  }
+  return y1 < 0 ? null : { y0, y1 }
+}
+
+/** 옷 세로 구간 안의 배경 틈만. 앉은 자세의 의자·다리 사이까지 칠하지 않는다. */
 function fillBetweenBodyGaps(
   mask: Uint8Array,
   labels: string[],
@@ -332,8 +375,10 @@ function fillBetweenBodyGaps(
   woman?: { x: number; y: number; w: number; h: number } | null,
   man?: { x: number; y: number; w: number; h: number } | null,
 ): number {
+  const box = clothesBBox(labels, width, height)
+  if (!box) return 0
   let filled = 0
-  for (let y = 0; y < height; y++) {
+  for (let y = box.y0; y <= box.y1; y++) {
     let x0 = width
     let x1 = -1
     for (let x = 0; x < width; x++) {
@@ -498,7 +543,9 @@ export function assembleVtonIdentityMask(options: {
   }
   if (labels.length !== n) return empty
   const hands = armHandProtect(labels, width, height)
+  const sleeveClearPx = scaledRadius(width, height, VTON_SLEEVE_CLEAR_PX)
   const jacket = srcRgba && srcRgba.length === n * 4 ? labeledMedianRgb(srcRgba, labels, 'Upper-clothes') : { r: 0, g: 0, b: 0, n: 0 }
+  const armMed = srcRgba && srcRgba.length === n * 4 ? armInteriorLum(srcRgba, labels, width, height, hands) : 0
   const denim = srcRgba && srcRgba.length === n * 4 ? labeledMedianRgb(srcRgba, labels, 'Pants') : { r: 0, g: 0, b: 0, n: 0 }
   let pantsY1 = -1
   for (let p = 0; p < n; p++) {
@@ -535,18 +582,8 @@ export function assembleVtonIdentityMask(options: {
       }
       const jacketLike = jacket.n > 0 && srcRgba ? rgbDist(srcRgba, p, jacket) <= VTON_CLOTHES_COLOR_DIST : false
       const denimLike = denim.n > 0 && srcRgba ? rgbDist(srcRgba, p, denim) <= VTON_DENIM_COLOR_DIST : false
-      if (lab === 'Face' || lab === 'Hair' || lab === 'Hat') {
-        if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_FACE_CLOTHES_CLEAR_PX)) {
-          mask[p] = 255
-          releasedNeck += 1
-          continue
-        }
-        if (jacketLike) {
-          mask[p] = 255
-          releasedClothesColor += 1
-          continue
-        }
-      }
+      // 얼굴·머리는 절대 열지 않는다. 검은 상의는 검은 머리와 색이 같아 색 비교로 머리를 먹는다.
+      if (lab === 'Face' || lab === 'Hair' || lab === 'Hat' || lab === 'Sunglasses') continue
       if (lab === 'Left-shoe' || lab === 'Right-shoe') {
         const cuffBand = pantsY1 >= 0 && y <= pantsY1
         const cuffTouch = nearAnyLabel(labels, width, height, x, y, PANTS_NEAR_LABELS, VTON_SHOE_PANTS_CLEAR_PX)
@@ -556,8 +593,16 @@ export function assembleVtonIdentityMask(options: {
           continue
         }
       }
+      // 옷감으로 볼 수 있는 화소만. 피부는 어떤 색 비교로도 열지 않는다.
+      const skinHere = srcRgba ? isSkinLike(srcRgba, p) : true
+      const garmentLike =
+        !skinHere &&
+        (jacketLike ||
+          denimLike ||
+          (Boolean(srcRgba) &&
+            pixLum(srcRgba!, p) <= Math.min(110, armMed > 0 ? armMed - VTON_ARM_DARK_DELTA : 110)))
       if (hands[p]) {
-        if (denimLike || (srcRgba && !isSkinLike(srcRgba, p))) {
+        if (garmentLike) {
           mask[p] = 255
           releasedClothesColor += 1
           continue
@@ -565,8 +610,8 @@ export function assembleVtonIdentityMask(options: {
         handProtect += 1
         continue
       }
-      if (ARM_LABELS.has(lab) && srcRgba && !isSkinLike(srcRgba, p)) {
-        if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_SLEEVE_CLEAR_PX)) {
+      if (ARM_LABELS.has(lab) && garmentLike) {
+        if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, sleeveClearPx)) {
           mask[p] = 255
           releasedSleeve += 1
           continue
@@ -580,7 +625,7 @@ export function assembleVtonIdentityMask(options: {
     labels,
     width,
     height,
-    VTON_CLOTHES_BLEED_PX,
+    scaledRadius(width, height, VTON_CLOTHES_BLEED_PX),
     woman,
     man,
   )

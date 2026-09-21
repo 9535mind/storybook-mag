@@ -83,6 +83,138 @@ const cases = [
   ],
   ['wantsDeskUncensoredStill/jeans-false', () => mod.wantsDeskUncensoredStill('흰 티와 청바지를 입은 성인 한국 여성, 화보 사진')],
   ['wantsDeskUncensoredStill/nude-true', () => mod.wantsDeskUncensoredStill('나체의 성인 한국 여성, 화보 사진')],
+  [
+    'deskStillUsesAdultReplicate/look-slip-true',
+    () =>
+      mod.deskStillUsesAdultReplicate(
+        'look',
+        '실크 슬립 원피스만 입은 성인 한국 여성, 노브라, 슬립 한 겹, 화보 사진',
+      ),
+  ],
+  [
+    'deskStillUsesAdultReplicate/look-nude-true',
+    () => mod.deskStillUsesAdultReplicate('look', '나체의 성인 한국 여성, 화보 사진'),
+  ],
+  [
+    'deskStillUsesAdultReplicate/place-sit-true',
+    () => mod.deskStillUsesAdultReplicate('place', '호텔 룸, 지금 선 자세를 바꿔 앉힌다. 소파나 침대에 앉아.'),
+  ],
+  [
+    'deskStillUsesAdultReplicate/place-hug-true',
+    () =>
+      mod.deskStillUsesAdultReplicate(
+        'place',
+        '호텔 룸, 지금 떨어져 선 두 사람을 가볍게 서로 안기게 한다. 옷은 유지.',
+      ),
+  ],
+  [
+    'wantsDeskPoseChange/hug-true',
+    () => mod.wantsDeskPoseChange('지금 떨어져 선 두 사람을 가볍게 서로 안기게 한다'),
+  ],
+  [
+    'wantsDeskPoseChange/stand-false',
+    () => mod.wantsDeskPoseChange('호텔 룸, 두 사람 모두 서서. 한 장.'),
+  ],
+  [
+    'wantsDeskSitOrLie/앉힌다-true',
+    () => mod.wantsDeskSitOrLie('지금 선 자세를 바꿔 앉힌다'),
+  ],
+  [
+    'buildDeskStillPrompt/look-nude-short',
+    () => {
+      const p = mod.buildDeskStillPrompt(
+        '이 사진 같은 두 사람. 여자 옷을 녹여 나체가 된다. 남자 옷은 유지. 자세·구도 유지. 새 얼굴 금지.',
+        true,
+        'look',
+      )
+      return {
+        length: p.length,
+        underBudget: p.length <= mod.DESK_STILL_PROMPT_MAX,
+        startsWithDo: /^\[DO\] melt ONLY her clothes to full nude/i.test(p),
+        pantyOff: /panty OFF/i.test(p),
+        blackPantyFail: /FAILED black panty/i.test(p),
+        pubic: /Korean-30s pubic/i.test(p),
+        hasKeep: /\[KEEP\]/i.test(p),
+      }
+    },
+  ],
+  [
+    'buildDeskStillPrompt/place-hug-short',
+    () => {
+      const p = mod.buildDeskStillPrompt(
+        '호텔 룸, 지금 떨어져 선 두 사람을 가볍게 서로 안기게 한다. 옷은 유지. 둘 다 얼굴이 보임., 얼굴은 같은 사람',
+        true,
+        'place',
+      )
+      return {
+        length: p.length,
+        underBudget: p.length <= mod.DESK_STILL_PROMPT_MAX,
+        startsWithHug: /^\[DO\] light hug/i.test(p),
+      }
+    },
+  ],
+  [
+    'buildDeskStillPrompt/place-sit-short',
+    () => {
+      const p = mod.buildDeskStillPrompt(
+        '호텔 룸, 지금 선 자세를 바꿔 앉힌다. 소파나 침대에 앉아. 서서 유지 금지., 얼굴은 같은 사람',
+        false,
+        'place',
+      )
+      return {
+        length: p.length,
+        underBudget: p.length <= mod.DESK_STILL_PROMPT_MAX,
+        startsWithSit: /^\[DO\] she SITS/i.test(p),
+      }
+    },
+  ],
+  [
+    'deskStillUsesAdultReplicate/place-slip-false',
+    () =>
+      mod.deskStillUsesAdultReplicate(
+        'place',
+        '실크 슬립 원피스만 입은 성인 한국 여성, 욕실, 허리를 살짝 숙이며',
+      ),
+  ],
+  [
+    'deskStillUsesAdultReplicate/cut-slip-false',
+    () => mod.deskStillUsesAdultReplicate('cut', '실크 슬립, 욕실, 숙이기, 같은 사람'),
+  ],
+  [
+    'deskStillUsesAdultReplicate/cut-undress-true',
+    () =>
+      mod.deskStillUsesAdultReplicate(
+        'cut',
+        '옷벗김. 혼자. 자신의 가슴을 양손으로 주무른다. 원본 구도 유지.',
+      ),
+  ],
+  [
+    'deskStillUsesAdultReplicate/look-slip-force-true',
+    () =>
+      mod.deskStillUsesAdultReplicate(
+        'look',
+        '실크 슬립 원피스만 입은 성인 한국 여성, 노브라, 슬립 한 겹, 화보 사진',
+        true,
+      ),
+  ],
+  [
+    'deskStillUsesAdultReplicate/place-hug-force-true',
+    () =>
+      mod.deskStillUsesAdultReplicate(
+        'place',
+        '호텔 룸, 지금 떨어져 선 두 사람을 가볍게 서로 안기게 한다. 옷은 유지.',
+        true,
+      ),
+  ],
+  [
+    'deskStillUsesAdultReplicate/place-sit-force-true',
+    () =>
+      mod.deskStillUsesAdultReplicate(
+        'place',
+        '호텔 룸, 지금 선 자세를 바꿔 앉힌다. 소파나 침대에 앉아.',
+        true,
+      ),
+  ],
   ['wantsSlipOrSilkLook/slip-true', () => mod.wantsSlipOrSilkLook('실크 슬립 원피스만 입은 성인 한국 여성, 노브라')],
   ['wantsNudeOrUndress/striped-false-positive-guard', () => mod.wantsNudeOrUndress('striped dress')],
   ['wantsUndressAction/basic', () => mod.wantsUndressAction('천천히 벗어')],
@@ -108,6 +240,9 @@ const cases = [
 
   // --- jewelry / accessory ---
   ['wantsJewelryAccessoryRefine/earring', () => mod.wantsJewelryAccessoryRefine('귀걸이 추가해줘')],
+  ['wantsObjectEraseRevision/lasso-erase', () => mod.wantsObjectEraseRevision('선택한 사람·사물을 완전히 지우고 주변 배경·벽·바닥 질감으로 자연스럽게 메워 주세요. 빈 자리에 새 사람·새 얼굴을 만들지 마세요.')],
+  ['wantsObjectEraseRevision/beside-person', () => mod.wantsObjectEraseRevision('옆 사람 지워')],
+  ['wantsObjectEraseRevision/undress-not-erase', () => mod.wantsObjectEraseRevision('옷을 벗겨줘')],
   ['buildJewelryAccessoryRefinePrompt/butterfly', () => mod.buildJewelryAccessoryRefinePrompt('나비 귀걸이 추가해줘')],
   ['buildWristWatchRefinePrompt/watch+bracelet', () => mod.buildWristWatchRefinePrompt('손목시계랑 팔찌 추가')],
   ['buildNecklaceRefinePrompt/remove', () => mod.buildNecklaceRefinePrompt('목걸이 제거해줘')],
@@ -127,7 +262,7 @@ const cases = [
     () => {
       const p = mod.buildWanPubicLine('옷벗김. 혼자.')
       return {
-        curls: /dark curly triangle|곱슬/i.test(p),
+        curls: /한국 30대|thirties|fuller than a 20s/i.test(p),
         noHairless: /FAILED hairless/i.test(p),
         notShavedDefault: !/smooth shaved as requested/i.test(p),
       }
@@ -176,6 +311,26 @@ const cases = [
     'amplifyAdultMotionForVideo/split-hands-left-breast-right-vulva',
     () => mod.amplifyAdultMotionForVideo('남자의 왼손은 가슴을 오른손은 보지를 만진다'),
   ],
+  [
+    'buildAnimationPrompt/desk-손-왼가슴-오른보지',
+    () => {
+      const p = mod.buildAnimationPrompt({
+        motion: '혼자. 왼손은 가슴을, 오른손은 보지를 만진다.',
+        rawMotion: '혼자. 왼손은 가슴을, 오른손은 보지를 만진다.',
+        prompt: 'already nude continuity',
+        durationSec: 10,
+        sourcePeople: 1,
+      })
+      return {
+        herLeft: /HER LEFT hand/i.test(p),
+        herRight: /HER RIGHT hand/i.test(p),
+        breast: /bare breast/i.test(p),
+        vulva: /vulva|crotch/i.test(p),
+        noHisHand: !/HIS LEFT hand/i.test(p),
+        underWanBudget: p.length <= 1500,
+      }
+    },
+  ],
   ['amplifyAdultMotionForVideo/undress', () => mod.amplifyAdultMotionForVideo('천천히 옷을 벗는다')],
 
   // --- fashion prompt ---
@@ -199,7 +354,7 @@ const cases = [
       })
       const neg = mod.buildFashionNegativePrompt('속옷만 입은 성인 한국 여성')
       return {
-        silkMatch: /silk underwear|silk matching|matching the outfit colors/i.test(p),
+        silkMatch: /ivory\/cream silk|silk underwear/i.test(p),
         noBlackPos: /NOT black lingerie|FAILED black bra/i.test(p),
         noBlackNeg: /black bra, black panties/i.test(neg),
       }
@@ -323,6 +478,28 @@ const cases = [
     },
   ],
   [
+    'buildAnimationPrompt/two-women-undress-no-touch',
+    () => {
+      const p = mod.buildAnimationPrompt({
+        motion: '옷벗김. 여여. 두 여자 둘 다 나체. 만지기 없음. 안기 없음. 같은 두 얼굴. 원본 구도 유지.',
+        rawMotion: '옷벗김. 여여. 두 여자 둘 다 나체. 만지기 없음. 안기 없음. 같은 두 얼굴. 원본 구도 유지.',
+        prompt: '두 여자가 나란히 선 전신',
+        durationSec: 10,
+        sourcePeople: 2,
+        sourceCast: 'ww',
+      })
+      return {
+        length: p.length,
+        bothWomenUndress: /EVERY woman|both women lose ALL clothes/i.test(p),
+        noTouch: /FORBIDDEN hugging, touching|hands off each other|not touching/i.test(p),
+        noManLock: !/FORBIDDEN two women|turning him into a second woman|MAN stays male/i.test(p),
+        noPartnerHand: !/HIS (?:LEFT )?hand|source MAN/i.test(p),
+        staysTwoWomen: /stay two women|two source women/i.test(p),
+        underWanBudget: p.length <= 1500,
+      }
+    },
+  ],
+  [
     'buildAnimationPrompt/couple-nude-kiss-keeps-man',
     () => {
       const p = mod.buildAnimationPrompt({
@@ -411,6 +588,7 @@ const cases = [
         fullBody: /full body|head-to-shoes|head to shoes/i.test(p),
         noExactCrop: !/exact source crop/i.test(p),
         noZoomIn: /FORBIDDEN zoom-in/i.test(p),
+        ivoryBra: /ivory\/cream|FAILED black bra/i.test(p) || /ZOOM OUT|PULLS BACK/i.test(p),
         underWanBudget: p.length <= 1500,
       }
     },
@@ -426,12 +604,12 @@ const cases = [
         sourcePeople: 1,
       })
       return {
-        braLayer: /silk bra matching the top color|silk BRA matching/i.test(p),
+        braLayer: /ivory\/cream silk bra|ivory\/cream silk BRA|silk BRA \(FAILED black bra/i.test(p),
         beat2HasTime: /BEAT2 3–8s/i.test(p),
-        pantyOffNotSwap: /panty OFF to bare|Mid panty = silk/i.test(p),
-        noSheerAsNude: /black\/beige\/sheer|FAILED black bra\/panty/i.test(p),
-        silkNotBlack: /silk matching|NOT black|not black/i.test(p),
-        pubicVisible: /dark curly (?:pubic )?triangle|곱슬|FAILED hairless/i.test(p),
+        pantyOffNotSwap: /panty OFF last|Ivory panty stays/i.test(p),
+        noSheerAsNude: /FAILED commando|ivory panty MUST cover/i.test(p),
+        silkNotBlack: /ivory\/cream|FAILED black bra/i.test(p),
+        pubicVisible: /한국 30대|thirties|fuller than a 20s|FORBIDDEN/i.test(p),
         holdNude: /HOLD 8–10s:.*fully nude/i.test(p),
         noInvent: /Only the source woman|do not invent a partner/i.test(p),
         underWanBudget: p.length <= 1500,
@@ -467,7 +645,7 @@ const cases = [
       })
       return {
         melts: /panty dissolves|Melt the remaining panty/i.test(p),
-        noNewPanty: /FAILED black bra, black panty|FORBIDDEN a new black panty/i.test(p),
+        noNewPanty: /Ivory panty|FAILED black bra|FORBIDDEN panty vanishing/i.test(p),
         noInvent: /Only the source woman/i.test(p),
         noKissPath: !/PASSIONATE KISS/i.test(p),
         underWanBudget: p.length <= 1500,
@@ -502,8 +680,8 @@ const cases = [
         samePeelToken: /옷벗김/.test(a) && /옷벗김/.test(b),
         noJumpAll: !/remove ALL clothes → full nude/.test(a),
         noInstantTopless: /skip-bra topless|FAILED (?:instant|skip-bra) topless|instant topless/i.test(a),
-        braShows: /silk BRA matching|silk bra matching/i.test(a),
-        noReplacementPanty: /FAILED black bra\/panty|black\/beige\/sheer|silk matching skirt/i.test(a),
+        braShows: /ivory\/cream silk BRA|ivory\/cream silk bra/i.test(a),
+        noReplacementPanty: /ivory panty MUST|panty OFF last|Ivory panty stays/i.test(a),
         underWanBudget: a.length <= 1500 && b.length <= 1500,
       }
     },
@@ -521,8 +699,9 @@ const cases = [
       return {
         hasAnchor: /BUST ANCHOR|L 38\.0%,42\.0%|38\.0%/.test(p),
         knead: /knead|squeez/i.test(p),
-        pantsMustGo: /pants on|top\+pants|SOURCE clothes/i.test(p),
-        noNewBlackPanty: /FAILED black bra\/panty|black panty/i.test(p),
+        fullNudeFirst: /remove ALL clothes|Panty OFF|ZERO panties/i.test(p),
+        noCover: /FORBIDDEN modest covering|nipples stay visible/i.test(p),
+        noPeelHold: !/Ivory panty under skirt|KEEP source clothes\. Melt top/i.test(p),
         notBecomeOnly: !/BEAT1 0–\d+s: dissolve top\+bra\+trousers/i.test(p),
         underWanBudget: p.length <= 1500,
       }
@@ -539,7 +718,7 @@ const cases = [
       })
       return {
         bothStay: /Keep BOTH source adults/i.test(p),
-        manShirtOnly: /shirt off only|pants stay/i.test(p),
+        manKeepsClothes: /HE keeps source clothes|Only SHE undresses/i.test(p),
         noPenis: /FORBIDDEN penis/i.test(p),
         noBothNude: !/BOTH strip all|his shirt\+jeans\+briefs/i.test(p),
         manStays: /Man stays|FORBIDDEN deleting the man/i.test(p),
@@ -565,6 +744,28 @@ const cases = [
         noNudeLock: !/fully nude|ZERO panties|bare crotch/i.test(p),
         noManGone: /FORBIDDEN (?:the man disappearing|deleting the man)/i.test(p),
         hasKiss: /kiss/i.test(p),
+        holdKiss: /mouths (?:stay |still )?locked|FORBIDDEN (?:pulling|unclenching)/i.test(p),
+        underWanBudget: p.length <= 1500,
+      }
+    },
+  ],
+  [
+    'buildAnimationPrompt/zipper-clothed-couple',
+    () => {
+      const p = mod.buildAnimationPrompt({
+        motion: '여자가 남자 바지 지퍼를 내린다. 바지는 유지.',
+        rawMotion: '여자가 남자 바지 지퍼를 내린다. 바지는 유지.',
+        prompt: '스튜디오에서 남녀가 가까이 서 있다',
+        durationSec: 15,
+        sourcePeople: 2,
+      })
+      return {
+        zipper: /zipper slider DOWN|zipper stays down|zipper still down|pulls HIS pants zipper/i.test(p),
+        pantsOn: /Pants stay on|pants on|Keep source clothes/i.test(p),
+        noNudeLock: !/fully nude|ZERO panties|bare crotch/i.test(p),
+        noPenis: /FORBIDDEN penis/i.test(p),
+        manStays: /FORBIDDEN (?:the man disappearing|deleting the man)/i.test(p),
+        bothStay: /BOTH source adults stay|BOTH stay visible/i.test(p),
         underWanBudget: p.length <= 1500,
       }
     },

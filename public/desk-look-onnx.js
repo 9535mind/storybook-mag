@@ -58,6 +58,8 @@
       if (ort.env?.wasm && !ort.env.wasm.wasmPaths) {
         ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/'
       }
+      // 교차 출처 격리가 없으면 멀티스레드가 못 뜬다. 1로 고정해 경고와 워커 폴백을 없앤다.
+      if (ort.env?.wasm) ort.env.wasm.numThreads = 1
       return ort
     }
     return null

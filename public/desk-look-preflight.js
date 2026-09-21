@@ -183,9 +183,9 @@ var DeskLookLib = (() => {
     "Right-leg"
   ]);
   var VTON_CLOTHES_BLEED_PX = 12;
-  var VTON_FACE_CLOTHES_CLEAR_PX = 22;
   var VTON_SHOE_PANTS_CLEAR_PX = 12;
   var VTON_SLEEVE_CLEAR_PX = 12;
+  var VTON_ARM_DARK_DELTA = 36;
   var VTON_ISLAND_MIN = 240;
   var VTON_CLOTHES_COLOR_DIST = 36;
   var VTON_DENIM_COLOR_DIST = 40;
@@ -248,13 +248,46 @@ var DeskLookLib = (() => {
     const b = rgba[i + 2];
     return r > 85 && r + 8 >= g && r > b + 6 && (r + g + b) / 3 > 75;
   }
+  function pixLum(rgba, p) {
+    const i = p * 4;
+    return (rgba[i] + rgba[i + 1] + rgba[i + 2]) / 3;
+  }
+  function armInteriorLum(rgba, labels, width, height, hands) {
+    const xs = [];
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const p = y * width + x;
+        if (!ARM_LABELS.has(labels[p] || "")) continue;
+        if (hands[p]) continue;
+        if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_SLEEVE_CLEAR_PX)) continue;
+        xs.push(pixLum(rgba, p));
+      }
+    }
+    return median(xs);
+  }
   function rgbDist(rgba, p, sample) {
     const i = p * 4;
     return Math.hypot(rgba[i] - sample.r, rgba[i + 1] - sample.g, rgba[i + 2] - sample.b);
   }
+  function scaledRadius(width, height, max) {
+    return Math.max(2, Math.min(max, Math.round(Math.min(width, height) * 0.015)));
+  }
+  function clothesBBox(labels, width, height) {
+    let y0 = height;
+    let y1 = -1;
+    for (let p = 0; p < labels.length; p++) {
+      if (!CLOTHES_NEAR_LABELS.has(labels[p] || "")) continue;
+      const y = p / width | 0;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    return y1 < 0 ? null : { y0, y1 };
+  }
   function fillBetweenBodyGaps(mask, labels, width, height, woman, man) {
+    const box = clothesBBox(labels, width, height);
+    if (!box) return 0;
     let filled = 0;
-    for (let y = 0; y < height; y++) {
+    for (let y = box.y0; y <= box.y1; y++) {
       let x0 = width;
       let x1 = -1;
       for (let x = 0; x < width; x++) {
@@ -377,7 +410,9 @@ var DeskLookLib = (() => {
     };
     if (labels.length !== n) return empty;
     const hands = armHandProtect(labels, width, height);
+    const sleeveClearPx = scaledRadius(width, height, VTON_SLEEVE_CLEAR_PX);
     const jacket = srcRgba && srcRgba.length === n * 4 ? labeledMedianRgb(srcRgba, labels, "Upper-clothes") : { r: 0, g: 0, b: 0, n: 0 };
+    const armMed = srcRgba && srcRgba.length === n * 4 ? armInteriorLum(srcRgba, labels, width, height, hands) : 0;
     const denim = srcRgba && srcRgba.length === n * 4 ? labeledMedianRgb(srcRgba, labels, "Pants") : { r: 0, g: 0, b: 0, n: 0 };
     let pantsY1 = -1;
     for (let p = 0; p < n; p++) {
@@ -414,18 +449,7 @@ var DeskLookLib = (() => {
         }
         const jacketLike = jacket.n > 0 && srcRgba ? rgbDist(srcRgba, p, jacket) <= VTON_CLOTHES_COLOR_DIST : false;
         const denimLike = denim.n > 0 && srcRgba ? rgbDist(srcRgba, p, denim) <= VTON_DENIM_COLOR_DIST : false;
-        if (lab === "Face" || lab === "Hair" || lab === "Hat") {
-          if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_FACE_CLOTHES_CLEAR_PX)) {
-            mask[p] = 255;
-            releasedNeck += 1;
-            continue;
-          }
-          if (jacketLike) {
-            mask[p] = 255;
-            releasedClothesColor += 1;
-            continue;
-          }
-        }
+        if (lab === "Face" || lab === "Hair" || lab === "Hat" || lab === "Sunglasses") continue;
         if (lab === "Left-shoe" || lab === "Right-shoe") {
           const cuffBand = pantsY1 >= 0 && y <= pantsY1;
           const cuffTouch = nearAnyLabel(labels, width, height, x, y, PANTS_NEAR_LABELS, VTON_SHOE_PANTS_CLEAR_PX);
@@ -435,8 +459,10 @@ var DeskLookLib = (() => {
             continue;
           }
         }
+        const skinHere = srcRgba ? isSkinLike(srcRgba, p) : true;
+        const garmentLike = !skinHere && (jacketLike || denimLike || Boolean(srcRgba) && pixLum(srcRgba, p) <= Math.min(110, armMed > 0 ? armMed - VTON_ARM_DARK_DELTA : 110));
         if (hands[p]) {
-          if (denimLike || srcRgba && !isSkinLike(srcRgba, p)) {
+          if (garmentLike) {
             mask[p] = 255;
             releasedClothesColor += 1;
             continue;
@@ -444,8 +470,8 @@ var DeskLookLib = (() => {
           handProtect += 1;
           continue;
         }
-        if (ARM_LABELS.has(lab) && srcRgba && !isSkinLike(srcRgba, p)) {
-          if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, VTON_SLEEVE_CLEAR_PX)) {
+        if (ARM_LABELS.has(lab) && garmentLike) {
+          if (nearAnyLabel(labels, width, height, x, y, CLOTHES_NEAR_LABELS, sleeveClearPx)) {
             mask[p] = 255;
             releasedSleeve += 1;
             continue;
@@ -459,7 +485,7 @@ var DeskLookLib = (() => {
       labels,
       width,
       height,
-      VTON_CLOTHES_BLEED_PX,
+      scaledRadius(width, height, VTON_CLOTHES_BLEED_PX),
       woman,
       man
     );
@@ -519,6 +545,8 @@ var DeskLookLib = (() => {
   // functions/lib/desk-look-visual-gate.ts
   var WHITE_MAD_MIN = 24;
   var WHITE_CORR_MAX = 0.88;
+  var WHITE_CORR_STRONG = 0.45;
+  var WHITE_MAD_FLOOR = 12;
   var BODY_CRUSH_RATIO = 0.82;
   var CLOTHING_EXPLODE_RATIO = 1.22;
   var SEAM_LUM_REL_MAX = 1.05;
@@ -920,7 +948,9 @@ var DeskLookLib = (() => {
   }
   function changeOk(stats) {
     if (stats.n < MASK_MIN_WHITE) return true;
-    return stats.mad >= WHITE_MAD_MIN && stats.corr <= WHITE_CORR_MAX;
+    if (stats.corr > WHITE_CORR_MAX) return false;
+    if (stats.mad >= WHITE_MAD_MIN) return true;
+    return stats.corr <= WHITE_CORR_STRONG && stats.mad >= WHITE_MAD_FLOOR;
   }
   function scoreRegion(name, src, out, region, width, height, bodyRef) {
     const stats = whiteStats(src, out, (p) => region[p] >= 128, width * height);

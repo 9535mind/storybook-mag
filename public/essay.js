@@ -152,6 +152,7 @@
   const OCR_SCALE = 2.2 // 인식률을 위해 확대 렌더링
 
   let ocrWorkerPromise = null
+  let pdfJsPromise = null
   let pdfChunks = []
   let pdfChunkIndex = 0
   let pdfSourceName = ''
@@ -254,8 +255,24 @@
     return (data?.text || '').replace(/[ \t]+/g, ' ').trim()
   }
 
+  function ensurePdfJs() {
+    if (window.pdfjsLib) return Promise.resolve(window.pdfjsLib)
+    if (pdfJsPromise) return pdfJsPromise
+    pdfJsPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.6.82/pdf.min.js'
+      s.onload = () => {
+        if (window.pdfjsLib) resolve(window.pdfjsLib)
+        else reject(new Error('pdfjs_missing'))
+      }
+      s.onerror = () => reject(new Error('pdfjs_missing'))
+      document.head.appendChild(s)
+    })
+    return pdfJsPromise
+  }
+
   async function extractPdfText(file, onProgress) {
-    const pdfjsLib = window.pdfjsLib
+    const pdfjsLib = await ensurePdfJs()
     if (!pdfjsLib) throw new Error('pdfjs_missing')
     if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
       pdfjsLib.GlobalWorkerOptions.workerSrc = PDF_WORKER_SRC

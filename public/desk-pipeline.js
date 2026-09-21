@@ -82,6 +82,7 @@
     const ground = Math.round(ch * 0.94)
     const maxW = list.length === 1 ? cw * 0.52 : cw * 0.4
     const xs = list.length === 1 ? [0.5] : list.length === 2 ? [0.34, 0.66] : [0.22, 0.5, 0.78]
+    const placements = []
     cuts.forEach((cut, i) => {
       const scale = fitBody(cut, cw, ch, list[i].heightFactor || 1, maxW)
       const { w, h } = sourceSize(cut)
@@ -93,8 +94,10 @@
       if (typeof global.drawFootContactShadow === 'function') {
         global.drawFootContactShadow(ctx, cx, ground, dw * 0.28, Math.max(10, dw * 0.045))
       }
-      ctx.drawImage(cut, x, y, dw, dh)
+        ctx.drawImage(cut, x, y, dw, dh)
+      placements.push({ x, y, w: dw, h: dh, cw, ch, slot: list[i].slot || '' })
     })
+    global.DeskPipeline.lastPlacements = placements
     return canvas.toDataURL('image/jpeg', JPEG)
   }
 
@@ -102,6 +105,7 @@
     composePlate,
     composeSize,
     isolate,
+    lastPlacements: [],
     MAX_EDGE: 1920,
     JPEG,
   }

@@ -5,6 +5,14 @@ import { MASK_MIN_WHITE, bodyGuidesFromLabels } from './desk-clothes-parse'
 /** 변화량만. 요청 의상으로 바뀌었는지는 보지 않음. 결과 보고 바꾸지 않음. */
 export const WHITE_MAD_MIN = 24
 export const WHITE_CORR_MAX = 0.88
+/**
+ * 원래 옷과 비슷한 밝기의 옷으로 바꾸면 화소 차이(mad)는 작게 나온다.
+ * 하지만 무늬가 통째로 달라지므로 상관(corr)은 0 근처로 떨어진다.
+ * 이때 mad만 보고 거절하면 제대로 바뀐 결과를 버린다(실측: 하의 mad 21, corr 0.11).
+ */
+export const WHITE_CORR_STRONG = 0.45
+/** 상관이 낮아도 이만큼은 달라져야 한다. 잡음·톤 보정만으로 통과하지 않게. */
+export const WHITE_MAD_FLOOR = 12
 /** 추정 몸통보다 가늘면 붕괴. 헐렁한 옷이 몸 쪽으로 줄어드는 것은 허용. */
 export const BODY_CRUSH_RATIO = 0.82
 export const CLOTHING_EXPLODE_RATIO = 1.22
@@ -518,9 +526,11 @@ function regionBoundaryRemnant(
   return { n, maxRun, elong: bestElong, ok: true }
 }
 
-function changeOk(stats: { n: number; mad: number; corr: number }): boolean {
+export function changeOk(stats: { n: number; mad: number; corr: number }): boolean {
   if (stats.n < MASK_MIN_WHITE) return true
-  return stats.mad >= WHITE_MAD_MIN && stats.corr <= WHITE_CORR_MAX
+  if (stats.corr > WHITE_CORR_MAX) return false
+  if (stats.mad >= WHITE_MAD_MIN) return true
+  return stats.corr <= WHITE_CORR_STRONG && stats.mad >= WHITE_MAD_FLOOR
 }
 
 function scoreRegion(

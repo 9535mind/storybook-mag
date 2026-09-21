@@ -33,7 +33,7 @@ function pngChunk(type: string, data: Uint8Array): Uint8Array {
 }
 
 /** 비압축 grayscale PNG (filter None). */
-function encodeGrayPng(width: number, height: number, pixels: Uint8Array): Uint8Array {
+export function encodeGrayPng(width: number, height: number, pixels: Uint8Array): Uint8Array {
   const raw = new Uint8Array((width + 1) * height)
   for (let y = 0; y < height; y++) {
     const row = y * (width + 1)
@@ -114,6 +114,34 @@ export function buildFacePreserveBodyMaskDataUrl(options?: {
   for (let y = 0; y < height; y++) {
     const v = y < cutY ? 0 : 255
     pixels.fill(v, y * width, y * width + width)
+  }
+  const png = encodeGrayPng(width, height, pixels)
+  return `data:image/png;base64,${bytesToBase64(png)}`
+}
+
+/** Desk 옷 녹이기 — 얼굴·머리·가장자리 배경은 검정(유지), 몸통 옷만 흰(수정). */
+export function buildDeskClothesMaskDataUrl(options?: {
+  width?: number
+  height?: number
+  faceKeepRatio?: number
+  /** 남녀 커플: 왼쪽(남자) 전체는 검정, 오른쪽 여자 옷만 흰. */
+  rightHalfOnly?: boolean
+}): string {
+  const width = Math.max(64, Math.min(1536, options?.width ?? 768))
+  const height = Math.max(64, Math.min(1536, options?.height ?? 1024))
+  const faceKeepRatio = Math.min(0.48, Math.max(0.22, options?.faceKeepRatio ?? 0.34))
+  const cutY = Math.floor(height * faceKeepRatio)
+  const padX = Math.floor(width * 0.06)
+  const padBot = Math.floor(height * 0.04)
+  const midX = options?.rightHalfOnly ? Math.floor(width * 0.5) : 0
+  const pixels = new Uint8Array(width * height)
+  for (let y = 0; y < height; y++) {
+    const row = y * width
+    for (let x = 0; x < width; x++) {
+      const keep =
+        x < midX || y < cutY || x < padX || x >= width - padX || y >= height - padBot
+      pixels[row + x] = keep ? 0 : 255
+    }
   }
   const png = encodeGrayPng(width, height, pixels)
   return `data:image/png;base64,${bytesToBase64(png)}`

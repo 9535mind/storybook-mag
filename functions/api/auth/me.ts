@@ -21,12 +21,16 @@ export const onRequestGet: PagesFunction<Env> = async (context) => {
     ''
 
   if (token && env.DB) {
-    const user = await getUserBySession(env.DB, token)
-    if (user) {
-      if (isSoloAdminOnly(env) && !isAdminEmail(user.email)) {
-        return jsonResponse({ ok: false, error: 'solo_admin_only' }, 403)
+    try {
+      const user = await getUserBySession(env.DB, token)
+      if (user) {
+        if (isSoloAdminOnly(env) && !isAdminEmail(user.email)) {
+          return jsonResponse({ ok: false, error: 'solo_admin_only' }, 403)
+        }
+        return jsonResponse({ ok: true, user }, 200)
       }
-      return jsonResponse({ ok: true, user }, 200)
+    } catch {
+      /* D1 한도 — PIN 폴백 */
     }
   }
 

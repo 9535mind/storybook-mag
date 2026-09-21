@@ -116,13 +116,13 @@ export function kissIntensityActionLine(intensity: KissIntensity, opts?: { backH
   }
   if (intensity === 'deep') {
     return back
-      ? 'DEEP KISS (딥키스) from behind: mouths locked over her shoulder, tongues visibly intertwining, passionate — not a peck'
-      : 'DEEP KISS (딥키스): mouths locked, lips sucking hard, tongues visibly intertwining / french kiss — continuous, not a peck'
+      ? 'DEEP KISS (딥키스) from behind: mouths locked over her shoulder through the LAST FRAME, tongues intertwining — FORBIDDEN pulling apart'
+      : 'DEEP KISS (딥키스): mouths locked through the LAST FRAME, lips sucking hard, tongues intertwining — FORBIDDEN pulling faces apart'
   }
   // default 「키스」
   return back
-    ? 'PASSIONATE KISS from behind: mouths locked over her shoulder, lips pressing and sucking firmly together for most of the clip — NOT a light peck/뽀뽀; tongue optional unless deep-kiss was requested'
-    : 'PASSIONATE KISS: mouths locked, lips pressing and sucking firmly together (서로 입술을 세게 빠는 키스) for most of the clip — NOT a light peck/뽀뽀; heads lean in; continuous'
+    ? 'PASSIONATE KISS from behind: mouths locked over her shoulder through the LAST FRAME — NOT a peck; FORBIDDEN unclenching or standing apart'
+    : 'PASSIONATE KISS: mouths locked through the LAST FRAME (서로 입술을 세게 빠는 키스) — FORBIDDEN pulling faces apart or the opening still'
 }
 
 /**
@@ -192,9 +192,9 @@ export function detectTouchVerbPhrase(t: string): string {
   return 'squeezing and stroking continuously'
 }
 
-/** 자지 만짐 대체 — 지퍼에 손. 자지를 그리면 실패(실측). */
+/** 자지 만짐 대체 — 지퍼를 내린다. 자지를 그리면 실패(실측). */
 export const MAN_ZIPPER_HAND_LINE =
-  'Her hand slides into HIS pants zipper. Pants stay on. FORBIDDEN penis, open fly showing genitals, or a nude man.'
+  'Her hand pulls HIS pants zipper slider DOWN until the fly is open. Pants stay on. FORBIDDEN penis, genitals, or a nude man.'
 
 /**
  * 여성이 남성 가랑이를 손으로 — 자지 대신 지퍼.
@@ -204,9 +204,9 @@ export function wantsMaleGenitalHand(text: string): boolean {
   if (!t) return false
   return (
     /(?:남자|남친|애인|파트너|그의?)\s*(?:의\s*)?(?:자지|좆|페니스|성기|지퍼|cock|dick|penis|zipper|fly)/i.test(t) ||
-    /(?:자지|좆|페니스|지퍼)\s*(?:을|를|에)?\s*(?:만지|만져|만짐|만진|만졌|애무|넣|잡|쥐|쓰다듬|문지|비비)/i.test(t) ||
+    /(?:자지|좆|페니스|지퍼)\s*(?:을|를|에)?\s*(?:만지|만져|만짐|만진|만졌|애무|넣|잡|쥐|쓰다듬|문지|비비|내리|내려|열고|연)/i.test(t) ||
     /(?:여자가?|그녀가?)\s*.{0,12}(?:자지|좆|페니스|지퍼|cock|dick|penis|zipper)/i.test(t) ||
-    /hand\s*job|stroke(?:s|ing)?\s*(?:his\s*)?(?:cock|dick|penis)|(?:her\s*)?hand\s*(?:on|around|in|into)\s*(?:his\s*)?(?:cock|dick|penis|zipper|fly)/i.test(
+    /hand\s*job|stroke(?:s|ing)?\s*(?:his\s*)?(?:cock|dick|penis)|(?:her\s*)?hand\s*(?:on|around|in|into)\s*(?:his\s*)?(?:cock|dick|penis|zipper|fly)|pulls?\s*(?:his\s*)?(?:pants\s*)?zipper\s*down|unzip(?:s|ping)?/i.test(
       t,
     )
   )
@@ -319,7 +319,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
   if (maleGenitalHand) {
     wantsPartner = true
     wantsPoseChange = true
-    bits.push(MAN_ZIPPER_HAND_LINE, 'She stays female. Last frame: her hand still in HIS zipper.')
+    bits.push(MAN_ZIPPER_HAND_LINE, 'She stays female. Last frame: HIS zipper still down, her hand on the open fly.')
   }
 
   const splitHands = detectSplitHandTargets(t)
@@ -354,7 +354,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
     }
     bits.push(
       splitLine,
-      'Bare crotch first — FORBIDDEN a new black panty/bikini. If fabric remains it is silk matching the skirt, not black. Adult pubic hair visible under the crotch hand',
+      'Bare crotch first — FORBIDDEN a new black panty/bikini. If fabric remains it is silk matching the skirt, not black. Neat Korean-30s pubic patch on the mons under the crotch hand',
       'LAST FRAME FREEZE: left and right hands STILL on those two places — source photo is START ONLY',
     )
   } else if (crotchTouch && breastTouch) {
@@ -363,7 +363,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
     const verbPhrase = detectTouchVerbPhrase(t)
     bits.push(
       `TWO HANDS: one partner hand on her bare breast AND the other on her bare vulva at the same time — ${verbPhrase}.`,
-      'PANTY OFF FIRST: panties off, adult pubic hair visible under the crotch hand.',
+      'PANTY OFF FIRST: panties off, neat Korean-30s pubic patch on the mons under the crotch hand.',
       'LAST FRAME FREEZE: one hand still on breast, the other still on vulva.',
     )
   } else if (crotchTouch) {
@@ -381,7 +381,7 @@ export function amplifyAdultMotionForVideo(motion: string): {
       )
     }
     bits.push(
-      'PANTY OFF FIRST: panties/thong/briefs must be fully removed before the fondling — bare crotch with adult pubic hair visible under the hand',
+      'PANTY OFF FIRST: panties/thong/briefs must be fully removed before the fondling — bare crotch with a neat Korean-30s pubic patch on the mons under the hand',
       'FORBIDDEN: hand hovering near the hip/thigh without touching genitals; hand only on outer thigh; fondling over panties; ending still wearing underwear',
       'LAST FRAME FREEZE: hand STILL on bare crotch through the final frame — source photo is START ONLY, never snap back to clothed/stiff opening pose',
     )

@@ -178,7 +178,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const auth = await requireAuth(request, env)
   if (auth instanceof Response) return auth
 
-  const limited = await enforceRateLimit(env, 'face-box', rateLimitIdentity(auth), 60, 3600)
+    const limited = await enforceRateLimit(env, 'face-box', rateLimitIdentity(auth), 400, 3600)
   if (limited) return limited
 
   if (!(env.ANTHROPIC_API_KEY || '').trim()) {

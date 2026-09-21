@@ -8,6 +8,9 @@ const ALLOWED_HOST_SUFFIXES = [
   'replicate.com',
   'fal.media',
   'fal.ai',
+  // FASHN VTON 은 결과를 자기 CDN(cdn.fashn.ai)으로 돌려준다. fal.ai 와 다른 호스트라
+  // 여기에 없으면 프록시가 막고 화면에는 "그림이 안 붙었습니다" 로만 보인다.
+  'fashn.ai',
   // storymag-media R2 버킷의 공개 r2.dev 주소 (persist-media로 영구 저장한 이미지)
   'r2.dev',
   'r2.cloudflarestorage.com',

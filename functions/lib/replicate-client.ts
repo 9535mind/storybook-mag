@@ -366,6 +366,7 @@ export async function startReplicateImageToImage(options: {
   width: number
   height: number
   strength?: number
+  minStrength?: number
   disableSafetyChecker?: boolean
   numInferenceSteps?: number
   guidanceScale?: number
@@ -388,9 +389,13 @@ export async function startReplicateImageToImage(options: {
     )
   }
 
+  const floor =
+    typeof options.minStrength === 'number' && Number.isFinite(options.minStrength)
+      ? Math.min(0.95, Math.max(0.05, options.minStrength))
+      : 0.35
   const strength =
     typeof options.strength === 'number' && Number.isFinite(options.strength)
-      ? Math.min(0.95, Math.max(0.35, options.strength))
+      ? Math.min(0.95, Math.max(floor, options.strength))
       : 0.82
   const input: Record<string, unknown> = {
     prompt: options.prompt,
