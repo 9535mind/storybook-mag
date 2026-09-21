@@ -6388,19 +6388,21 @@ function syncGenModeUi() {
   // 자유 모드에서 비활성화하지 않는다.
   const subtitle = document.getElementById('app-subtitle')
   const title = document.getElementById('app-title') || document.querySelector('.app__title')
-  if (subtitle) {
+  // 자유 스튜디오는 제 제목·안내를 쓴다. 여기서 덮으면 일러스트 문구가 새어 나온다.
+  const inFreeStudio = typeof getAppArea === 'function' && getAppArea() === 'free'
+  if (subtitle && !inFreeStudio) {
     subtitle.textContent = free ? '자유 일러스트' : ''
   }
-  if (title) {
+  if (title && !inFreeStudio) {
     title.textContent = free || !admin ? '자유 일러스트 스튜디오' : 'Storymag'
   }
-  document.title = free || !admin ? 'Storymag · 자유 일러스트' : 'Storymag'
+  if (!inFreeStudio) document.title = free || !admin ? 'Storymag · 자유 일러스트' : 'Storymag'
   const genBtn = document.getElementById('generate-button')
   if (genBtn) genBtn.textContent = free ? '이미지 생성' : '만들기'
   const resultTitle = document.getElementById('result-title')
   if (resultTitle) resultTitle.textContent = free ? '생성 결과' : ''
   if (genModeHint) {
-    if (admin && !free) {
+    if (inFreeStudio || (admin && !free)) {
       genModeHint.textContent = ''
       genModeHint.hidden = true
     } else if (admin) {

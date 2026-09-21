@@ -48,10 +48,30 @@ await page.screenshot({ path: path.join(OUT, '01-after-login.png'), fullPage: fa
 
 const tabVisible = await page.locator('#app-area-free').isVisible().catch(() => false)
 let panel = {}
+let afterPhoto = {}
 if (tabVisible) {
   await page.click('#app-area-free')
   await page.waitForTimeout(900)
   await page.screenshot({ path: path.join(OUT, '02-free-tab.png'), fullPage: false })
+  // 사진을 올리면 그림을 안 만들어도 움직이기가 열려야 한다.
+  await page
+    .setInputFiles('#free-photo', {
+      name: 'probe.png',
+      mimeType: 'image/png',
+      buffer: Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64',
+      ),
+    })
+    .catch(() => {})
+  await page.waitForTimeout(900)
+  afterPhoto = await page.evaluate(() => ({
+    moveRowShown: document.getElementById('free-move-wrap')?.offsetParent !== null,
+    fromLabel: document.getElementById('free-move-from')?.textContent?.trim() || '',
+  }))
+  await page.click('#free-photo-clear').catch(() => {})
+  await page.waitForTimeout(500)
+
   panel = await page.evaluate(() => ({
     areaShown: document.getElementById('free-area')?.hidden === false,
     deskHidden: document.getElementById('studio-area')?.hidden === true,
@@ -64,6 +84,9 @@ if (tabVisible) {
     moveRowHidden: document.getElementById('free-move-wrap')?.offsetParent === null,
     hasMoveRun: Boolean(document.getElementById('free-move-run')),
     title: document.getElementById('app-title')?.textContent?.trim() || '',
+    // 일러스트 탭 안내문이 새어 나오면 안 된다.
+    strayHint: document.getElementById('gen-mode-hint')?.offsetParent !== null,
+    hasGuide: (document.querySelector('.free-guide')?.children.length || 0) >= 3,
     tabActive: document.getElementById('app-area-free')?.classList.contains('app__area-btn--active'),
   }))
   // 빈 글로 누르면 엔진을 안 부르고 안내만 떠야 한다.
@@ -76,6 +99,8 @@ const report = {
   base: BASE,
   tabVisible,
   ...panel,
+  photoOpensMove: afterPhoto?.moveRowShown === true,
+  moveFromLabel: afterPhoto?.fromLabel || '',
   pageerrors,
   ok:
     tabVisible &&
@@ -87,6 +112,10 @@ const report = {
     panel.photoRowHidden === true &&
     panel.moveRowHidden === true &&
     panel.hasMoveRun === true &&
+    panel.strayHint === false &&
+    panel.hasGuide === true &&
+    afterPhoto?.moveRowShown === true &&
+    /올린 사진/.test(afterPhoto?.fromLabel || '') &&
     /적어/.test(panel.emptyGuard || '') &&
     pageerrors.length === 0,
 }

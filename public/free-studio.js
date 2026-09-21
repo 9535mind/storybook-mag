@@ -42,11 +42,28 @@
       reader.readAsDataURL(file)
     })
 
+  /** 움직이기가 쓸 시작 프레임. 새로 만든 그림이 있으면 그것, 없으면 올린 사진. */
+  const moveSource = () => state.result || state.photo || ''
+
+  const syncMoveRow = () => {
+    const wrap = $('free-move-wrap')
+    if (wrap) wrap.hidden = !moveSource()
+    const from = $('free-move-from')
+    if (from) {
+      from.textContent = state.result
+        ? '시작 프레임: 방금 만든 그림'
+        : state.photo
+          ? '시작 프레임: 올린 사진 (그림을 안 만들어도 바로 됩니다)'
+          : ''
+    }
+  }
+
   const showPhoto = () => {
     const wrap = $('free-photo-wrap')
     const preview = $('free-photo-preview')
     if (preview) preview.src = state.photo || ''
     if (wrap) wrap.hidden = !state.photo
+    syncMoveRow()
   }
 
   const showResult = (url) => {
@@ -55,13 +72,11 @@
     const img = $('free-result')
     if (img) img.src = state.result
     if (wrap) wrap.hidden = !state.result
-    // 움직이기는 만들어진 그림이 있어야 시작점이 생긴다.
-    const move = $('free-move-wrap')
-    if (move) move.hidden = !state.result
     if (!state.result) {
       const video = $('free-video-wrap')
       if (video) video.hidden = true
     }
+    syncMoveRow()
   }
 
   const setMoveStatus = (text, bad) => {
@@ -127,8 +142,9 @@
    */
   const runMove = async () => {
     if (state.busy) return
-    if (!state.result) {
-      setMoveStatus('먼저 그림을 한 장 만드세요.', true)
+    const startFrame = moveSource()
+    if (!startFrame) {
+      setMoveStatus('사진을 올리거나 그림을 한 장 만드세요.', true)
       return
     }
     const motion = String($('free-move-text')?.value || '').trim()
@@ -147,7 +163,8 @@
         method: 'POST',
         headers,
         body: JSON.stringify({
-          imageUrl: state.result,
+          // 서버가 data URL 도 imageUrl 로 받아 준다 (animate.ts 가 알아서 갈라 씀).
+          imageUrl: startFrame,
           prompt: '',
           motion,
           durationSec,

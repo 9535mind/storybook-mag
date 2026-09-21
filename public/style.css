@@ -389,6 +389,18 @@ body {
   display: none;
 }
 
+.free-guide {
+  margin: 10px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--muted);
+}
+
+.free-guide b {
+  color: var(--text);
+}
+
 .free-photo-preview {
   width: 120px;
   max-height: 180px;

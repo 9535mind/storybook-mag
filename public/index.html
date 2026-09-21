@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag</title>
-  <link rel="stylesheet" href="/style.css?v=20260921free2" />
+  <link rel="stylesheet" href="/style.css?v=20260921use" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -1826,8 +1826,13 @@
           </div>
           <p class="essay-panel__lead">
             Desk 와 같은 엔진입니다. 걸음도, 옷 마스크도, 저장 거부 검사도 없습니다.
-            사진을 올리고 하고 싶은 말을 적으면 그대로 한 장 나옵니다. 사진 없이 글만으로도 됩니다.
           </p>
+          <ol class="free-guide">
+            <li><b>사진만 있고 영상만 필요하면</b> — 사진을 올리고 아래 <b>움직이기</b>에 동작을 적으세요. 그림은 안 만들어도 됩니다.</li>
+            <li><b>사진을 고치고 싶으면</b> — 사진을 올리고 고칠 말을 적은 뒤 <b>한 장 만들기</b>.</li>
+            <li><b>맨바닥에서 그리려면</b> — 사진 없이 말만 적고 <b>한 장 만들기</b>.</li>
+            <li>결과가 아쉬우면 같은 단추를 다시 누르세요. 매번 달라집니다. 여기는 되돌려 보내는 검사가 없습니다.</li>
+          </ol>
         </header>
 
         <label class="form__label" for="free-photo">사진 (없어도 됩니다)</label>
@@ -1872,8 +1877,9 @@
         <!-- 움직이기: 쇼츠 파이프라인(Wan wan-2.2-i2v-fast)은 그대로 쓰고 Desk 걸음만 뺀다. -->
         <div id="free-move-wrap" class="essay-output-wrap" hidden>
           <div class="field-head">
-            <h3 class="essay-output__heading">이 그림으로 움직이기</h3>
+            <h3 class="essay-output__heading">움직이기 (쇼츠)</h3>
           </div>
+          <p id="free-move-from" class="form__hint"></p>
           <label class="form__label" for="free-move-text">어떤 움직임</label>
           <textarea
             id="free-move-text"
@@ -1915,8 +1921,8 @@
   <script src="/desk-look-preflight.js?v=20260920goal"></script>
   <script src="/desk-look-onnx.js?v=20260920thread1"></script>
   <script src="/desk-look-runtime.js?v=20260917vis"></script>
-  <script src="/app.js?v=20260921free"></script>
+  <script src="/app.js?v=20260921use"></script>
   <script src="/desk-pipeline.js?v=20260914pixel-pipe2"></script>
-  <script src="/free-studio.js?v=20260921move"></script>
+  <script src="/free-studio.js?v=20260921use"></script>
 </body>
 </html>
