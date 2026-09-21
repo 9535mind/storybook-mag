@@ -60,6 +60,9 @@ if (tabVisible) {
     hasRun: Boolean(document.getElementById('free-run')),
     // 사진을 안 올렸으면 미리보기 줄이 아예 안 보여야 한다.
     photoRowHidden: document.getElementById('free-photo-wrap')?.offsetParent === null,
+    // 그림이 없으면 움직이기 칸도 숨어 있어야 한다.
+    moveRowHidden: document.getElementById('free-move-wrap')?.offsetParent === null,
+    hasMoveRun: Boolean(document.getElementById('free-move-run')),
     title: document.getElementById('app-title')?.textContent?.trim() || '',
     tabActive: document.getElementById('app-area-free')?.classList.contains('app__area-btn--active'),
   }))
@@ -82,6 +85,8 @@ const report = {
     panel.hasRun === true &&
     panel.tabActive === true &&
     panel.photoRowHidden === true &&
+    panel.moveRowHidden === true &&
+    panel.hasMoveRun === true &&
     /적어/.test(panel.emptyGuard || '') &&
     pageerrors.length === 0,
 }

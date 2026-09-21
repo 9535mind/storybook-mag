@@ -55,6 +55,21 @@
     const img = $('free-result')
     if (img) img.src = state.result
     if (wrap) wrap.hidden = !state.result
+    // 움직이기는 만들어진 그림이 있어야 시작점이 생긴다.
+    const move = $('free-move-wrap')
+    if (move) move.hidden = !state.result
+    if (!state.result) {
+      const video = $('free-video-wrap')
+      if (video) video.hidden = true
+    }
+  }
+
+  const setMoveStatus = (text, bad) => {
+    const el = $('free-move-status')
+    if (!el) return
+    el.textContent = text || ''
+    el.hidden = !text
+    el.classList.toggle('form__status--error', Boolean(bad))
   }
 
   const run = async () => {
@@ -105,6 +120,89 @@
     }
   }
 
+  /**
+   * 쇼츠. 엔진·길이·머지는 동결된 쇼츠 파이프라인을 그대로 쓴다
+   * (Wan `wan-2.2-i2v-fast`, /api/animate → /api/animate-status).
+   * Desk 의 걸음·CAST·게이트만 빼고 지금 그림을 시작 프레임으로 보낸다.
+   */
+  const runMove = async () => {
+    if (state.busy) return
+    if (!state.result) {
+      setMoveStatus('먼저 그림을 한 장 만드세요.', true)
+      return
+    }
+    const motion = String($('free-move-text')?.value || '').trim()
+    if (!motion) {
+      setMoveStatus('어떤 움직임인지 적어 주세요.', true)
+      return
+    }
+    const durationSec = Number($('free-move-sec')?.value) || 15
+    const headers = typeof authHeaders === 'function' ? authHeaders() : { 'Content-Type': 'application/json' }
+    state.busy = true
+    const button = $('free-move-run')
+    if (button) button.disabled = true
+    setMoveStatus(`영상 만드는 중… 1~2분 걸립니다 (약 ${durationSec}초)`, false)
+    try {
+      const response = await fetch('/api/animate', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          imageUrl: state.result,
+          prompt: '',
+          motion,
+          durationSec,
+          clipRole: 'single',
+          genMode: 'fashion',
+        }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (response.status === 401) {
+        setMoveStatus('다시 로그인해 주세요.', true)
+        return
+      }
+      if (!data.ok) {
+        setMoveStatus(`실패: ${data.message || data.error || response.status}`, true)
+        return
+      }
+      let videoUrl = data.videoUrl || ''
+      if (!videoUrl && data.pending && data.predictionId) {
+        const started = Date.now()
+        while (Date.now() - started < 8 * 60 * 1000) {
+          await new Promise((done) => setTimeout(done, 5000))
+          const poll = await fetch('/api/animate-status', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ predictionId: data.predictionId, durationSec }),
+          })
+          const step = await poll.json().catch(() => ({}))
+          if (step.status === 'failed') {
+            setMoveStatus(`실패: ${step.message || '영상 생성 실패'}`, true)
+            return
+          }
+          if (step.videoUrl) {
+            videoUrl = step.videoUrl
+            break
+          }
+          setMoveStatus(`영상 만드는 중… ${Math.round((Date.now() - started) / 1000)}초 경과`, false)
+        }
+      }
+      if (!videoUrl) {
+        setMoveStatus('시간 안에 결과를 받지 못했습니다. 다시 눌러 주세요.', true)
+        return
+      }
+      const video = $('free-video')
+      const wrap = $('free-video-wrap')
+      if (video) video.src = videoUrl
+      if (wrap) wrap.hidden = false
+      setMoveStatus('나왔습니다.', false)
+    } catch (error) {
+      setMoveStatus(`실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`, true)
+    } finally {
+      state.busy = false
+      if (button) button.disabled = false
+    }
+  }
+
   const download = () => {
     if (!state.result) return
     const a = document.createElement('a')
@@ -139,6 +237,7 @@
       setStatus('사진을 뺐습니다. 이제 글만으로 그립니다.', false)
     })
     $('free-run')?.addEventListener('click', run)
+    $('free-move-run')?.addEventListener('click', runMove)
     $('free-download')?.addEventListener('click', download)
     $('free-reset')?.addEventListener('click', () => {
       state.photo = ''
@@ -146,9 +245,12 @@
       if (input) input.value = ''
       const text = $('free-text')
       if (text) text.value = ''
+      const move = $('free-move-text')
+      if (move) move.value = ''
       showPhoto()
       showResult('')
       setStatus('', false)
+      setMoveStatus('', false)
     })
   }
 

@@ -1868,6 +1868,37 @@
             마음에 들면 내려받으세요. 다시 고치려면 이 그림을 위 사진 칸에 올리고 고칠 말을 적으면 됩니다.
           </p>
         </div>
+
+        <!-- 움직이기: 쇼츠 파이프라인(Wan wan-2.2-i2v-fast)은 그대로 쓰고 Desk 걸음만 뺀다. -->
+        <div id="free-move-wrap" class="essay-output-wrap" hidden>
+          <div class="field-head">
+            <h3 class="essay-output__heading">이 그림으로 움직이기</h3>
+          </div>
+          <label class="form__label" for="free-move-text">어떤 움직임</label>
+          <textarea
+            id="free-move-text"
+            class="form__textarea"
+            rows="3"
+            placeholder="예: 옷을 벗어 완전 나체가 된다"
+          ></textarea>
+
+          <label class="form__label" for="free-move-sec">길이</label>
+          <select id="free-move-sec" class="form__select">
+            <option value="10">10초 (가장 안정)</option>
+            <option value="12">12초</option>
+            <option value="15" selected>15초</option>
+          </select>
+
+          <div class="essay-actions">
+            <button id="free-move-run" class="form__submit" type="button">움직이기</button>
+          </div>
+          <p id="free-move-status" class="form__status" hidden></p>
+
+          <div id="free-video-wrap" hidden>
+            <video id="free-video" class="free-result" controls playsinline></video>
+            <p class="form__hint">18초는 같은 장수를 느리게 트는 것이라 뒷부분이 흐트러집니다. 10~15초를 권합니다.</p>
+          </div>
+        </div>
       </section>
     </div>
   </main>
@@ -1886,6 +1917,6 @@
   <script src="/desk-look-runtime.js?v=20260917vis"></script>
   <script src="/app.js?v=20260921free"></script>
   <script src="/desk-pipeline.js?v=20260914pixel-pipe2"></script>
-  <script src="/free-studio.js?v=20260921free"></script>
+  <script src="/free-studio.js?v=20260921move"></script>
 </body>
 </html>
