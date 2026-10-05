@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw170'
+window.__DESK_BUILD = '20261005mw171'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12007,13 +12007,13 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
       const legs = (soles - crotch) / Hc
       log.legs = Number(legs.toFixed(3))
-      if (legs >= 0.4) {
+      if (legs >= 0.43) {
         log.skip = 'already_ok'
         return src
       }
-      const strength = Math.max(0.4, Math.min(1, (0.44 - legs) / 0.14))
+      const strength = Math.max(0.5, Math.min(1, (0.455 - legs) / 0.12))
       const sTop = 1 - 0.2 * strength
-      const sBot = 1 + 0.45 * strength
+      const sBot = 1 + 0.48 * strength
       const neckY = top + 0.185 * Hc
       const shoeY = top + 0.955 * Hc
       const ys = new Float64Array(H)
@@ -12470,6 +12470,45 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const pAx = pgx - cx * scale2
       const pAy = pgy - chinY * scale2
       log.shrink = shrink
+      {
+        // 얹은 목의 살색이 생성된 검은 깃 위에 겹치면 갈색 띠가 된다. 깃이 시작하는 줄에서 얹은 머리를 서서히 끊는다
+        const sx0 = Math.max(0, Math.round(pgx - headW * scale2 * 0.15))
+        const sx1 = Math.min(gw - 1, Math.round(pgx + headW * scale2 * 0.15))
+        const gdata = octx.getImageData(0, 0, gw, gh).data
+        const yStart = Math.max(0, Math.round(pgy - headW * scale2 * 0.08))
+        const yEnd = Math.min(gh - 8, Math.round(pgy + headW * scale2 * 0.75))
+        const rowLuma = (y) => {
+          let sum = 0
+          for (let x = sx0; x <= sx1; x += 1) {
+            const i = (y * gw + x) * 4
+            sum += gdata[i] * 0.299 + gdata[i + 1] * 0.587 + gdata[i + 2] * 0.114
+          }
+          return sum / Math.max(1, sx1 - sx0 + 1)
+        }
+        let collarY = -1
+        for (let y = yStart; y < yEnd && collarY < 0; y += 1) {
+          if (rowLuma(y) < 70) {
+            let ok = 0
+            for (let k = 0; k < 6; k += 1) if (rowLuma(y + k) < 70) ok += 1
+            if (ok >= 6) collarY = y
+          }
+        }
+        if (collarY > 0) {
+          const yc = (collarY - 1 - pAy) / scale2
+          const fadeRows = Math.max(4, headW * 0.05)
+          const cdd = cctx.getImageData(0, 0, sw, sh)
+          const cdat = cdd.data
+          for (let y = Math.max(0, Math.floor(yc - fadeRows)); y < sh; y += 1) {
+            const f = y >= yc ? 0 : (yc - y) / fadeRows
+            for (let x = 0; x < sw; x += 1) {
+              const i = (y * sw + x) * 4 + 3
+              cdat[i] = Math.round(cdat[i] * f)
+            }
+          }
+          cctx.putImageData(cdd, 0, 0)
+          log.collarY = collarY
+        }
+      }
       octx.save()
       octx.translate(pAx, pAy)
       octx.scale(scale2, scale2)
