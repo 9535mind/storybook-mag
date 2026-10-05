@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw219'
+window.__DESK_BUILD = '20261005mw220'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -17343,7 +17343,7 @@ function initAdultDesk() {
       else if (needBody) hint.textContent = '증명·상반신은 1 몸 잇기 또는 옷 녹이기를 누르면 같은 사람으로 몸을 이은 뒤 녹입니다. 몸 보기도 잇은 뒤에 합니다.'
       else if (coupleScene) hint.textContent = '이미 한 장에 두 사람입니다. 옷 녹이기·몸 보기는 여자만입니다. 벗기 찍기는 그 다음입니다.'
       else if (bothReady && !coupleScene) hint.textContent = '두 칸에 따로 넣은 사진이면 먼저 2 한 장면을 누른 뒤 옷 녹이기입니다. 몸 보기는 여 칸만 봅니다.'
-      else hint.textContent = '옷 녹이기는 여자만 나체입니다. 몸 보기는 아이보리 운동복입니다.'
+      else hint.textContent = '옷 녹이기는 여자만 나체입니다. 몸 보기는 증명·반신·전신 어느 사진이든 아이보리 운동복으로 팔·몸 비율을 봅니다.'
     }
   }
 
@@ -19615,7 +19615,10 @@ function initAdultDesk() {
     let src = work.woman
     if (scene && (await deskLooksStandingFull(scene))) src = scene
     const alreadyFull = Boolean(work.womanFull) || (await deskLooksStandingFull(src))
+    // 경로: 전신 사진(직접) / 증명·반신·상반신(먼저 몸 잇기 — 잠금된 이어 그리기 — 그 결과로 몸 보기)
+    window.__deskShapeRoute = alreadyFull ? 'direct' : 'extend'
     if (!alreadyFull && lookId && (await deskPhotoNeedsBodyExtend(src))) {
+      setFormStatus(`${spec.noun}: 전신이 아니라서 먼저 몸을 잇습니다…`, false)
       // 몸 잇기가 먼저 필요하면 몸 잇기 한도(360초)를 쓴다
       window.__deskBodyDeadline = Math.max(window.__deskBodyDeadline || 0, Date.now() + 360000)
       const extended = await ensureDeskLeadBody(lookId, 'female', '여', false, lookId, {

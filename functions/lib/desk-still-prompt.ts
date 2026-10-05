@@ -89,7 +89,7 @@ export function buildDeskShapePrompt(strict = false): string {
     ...(strict
       ? ['Keep the exact same pose, the exact same head position, the same head size and the same body position as the source. Do not move, tilt or resize the head.']
       : []),
-    'Same exact woman, same face, same hair, same standing pose, same studio.',
+    'Same exact woman, same face, same hair, same body size, same background and scene.',
     'Keep the exact same full-body camera. Head to shoes in frame. Same distance. Do not crop or zoom.',
     strict
       ? 'Change EVERY garment she wears. The new outfit is entirely ivory cream: a fitted short-sleeve athletic t-shirt and matching slim knee-length leggings that show the leg line. No other color remains on her clothes.'
