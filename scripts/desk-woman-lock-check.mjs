@@ -32,8 +32,7 @@ const checks = [
   ['이어 그리기 최대 2번, 실패하면 가짜 얼굴로 대신하지 않고 멈춘다', /attempt < 2/.test(app) && /가짜 얼굴로 대신하지 않습니다/.test(app) && /__deskWomanContinueFallback/.test(app)],
   ['멈춘 이유를 일반 실패 문구가 덮어쓰지 않는다(deskBodyFail)', /function deskBodyFail\(defaultText\)/.test(app) && /window\.__deskBodyStop = \{ at: Date\.now\(\), text: stop \}/.test(app) && (app.match(/deskBodyFail\(/g) || []).length >= 6],
   ['이어 그리기 복원 탐색 범위(확대 0.4~1.7, 이동 ±150px)', /\[0\.4, 0\.48, 0\.56, 0\.64, 0\.72, 0\.8, 0\.88, 0\.94, 1, 1\.07, 1\.15, 1\.25, 1\.36, 1\.5, 1\.7\]/.test(app) && /oy = -50; oy <= 50; oy \+= 3/.test(app)],
-  ['Kontext Multi 요청이 안전 필터를 끈다(검은 1024x768 오탐 방지)', /function buildKontextMultiBody[sS]*?enable_safety_checker: false[sS]*?
-}/.test(fal)],
+  ['Kontext Multi 요청이 안전 필터를 끈다(검은 1024x768 오탐 방지)', /function buildKontextMultiBody[\s\S]*?enable_safety_checker: false/.test(fal)],
   ['이어 그리기: 검은·단색 결과를 복원 전에 알아본다', /tryLog.flat < 2/.test(app) && /'black' : 'flat'/.test(app)],
   ['이어 그리기 결과가 그려졌는지(unpainted) 검사', /tryLog\.paint < 4/.test(app) && /'unpainted'/.test(app)],
   ['여자 서서 전신: 증명사진의 옷 그대로(검정 정장 강제 없음)', !/Black office blazer/.test(tale) && /Keep EXACTLY the clothes visible in the identity image: the same top and the same jacket if she wears one/.test(tale)],
