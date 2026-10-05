@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw201'
+window.__DESK_BUILD = '20261005mw202'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -13742,6 +13742,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
                   ? '옷이나 얼굴이 원본과 달라 저장하지 않습니다.'
                   : '조건에 맞지 않아 저장하지 않습니다.'
       const fail = `${index}/${total} ${whyText} CAST 그 얼굴만 잇습니다.${why ? ` [거절: ${why}]` : ''}`
+      window.__deskBodyStop = { at: Date.now(), text: `${fail} ${JSON.stringify(window.__deskHoldLog || []).slice(0, 400)}` }
       if (typeof setFormStatus === 'function') setFormStatus(fail, true)
       else setStatus(fail, true)
       timingDone()
@@ -13774,10 +13775,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         if (!held || (await debrisBlocks(held))) {
           if (
             !result.display ||
+            (window.__deskFaceCutMode === true && !held) ||
             (!standingHasLegs && standingZoomed) ||
             (await debrisBlocks(result.display))
           ) {
             const fail = `${index}/${total} CAST 얼굴을 붙이지 못해 저장하지 않습니다. 다른 사람은 잇지 않습니다.`
+            window.__deskBodyStop = { at: Date.now(), text: `${fail} ${JSON.stringify(window.__deskHoldLog || []).slice(0, 400)}` }
             if (typeof setFormStatus === 'function') setFormStatus(fail, true)
             else setStatus(fail, true)
             return null
@@ -13788,6 +13791,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (zoomed) {
             if (standingZoomed || (await debrisBlocks(result.display))) {
               const fail = `${index}/${total} 전신이 아닌 얼굴을 저장하지 않습니다. CAST 그 얼굴만 잇습니다.`
+              window.__deskBodyStop = { at: Date.now(), text: `${fail} ${JSON.stringify(window.__deskHoldLog || []).slice(0, 400)}` }
               if (typeof setFormStatus === 'function') setFormStatus(fail, true)
               else setStatus(fail, true)
               return null
@@ -13798,6 +13802,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
       } catch (_) {
         const fail = `${index}/${total} CAST 얼굴을 붙이지 못해 저장하지 않습니다. 다른 사람은 잇지 않습니다.`
+        window.__deskBodyStop = { at: Date.now(), text: `${fail} ${JSON.stringify(window.__deskHoldLog || []).slice(0, 400)}` }
         if (typeof setFormStatus === 'function') setFormStatus(fail, true)
         else setStatus(fail, true)
         return null
