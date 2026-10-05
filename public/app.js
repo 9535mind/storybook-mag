@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw191'
+window.__DESK_BUILD = '20261005mw192'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -10428,6 +10428,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
         if (data.status === 'succeeded' && data.imageUrl) {
           setStatus(`${label || '장면'} 받았습니다. 확인하는 중…`, false)
+          window.__deskLastNsfw = data.nsfw ? 1 : 0
           return data.imageUrl
         }
         const engineFailed =
@@ -13265,6 +13266,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           }
           // 먼저 모델이 돌려준 결과의 상태를 기록한다 (크기·평균 밝기·그려짐·결과 주소). 복원이 실패해도 이유를 볼 수 있게
           tryLog.url = typeof alt.remoteUrl === 'string' ? alt.remoteUrl : ''
+          tryLog.nsfw = window.__deskLastNsfw
           try {
             const outImg = await loadHtmlImage(alt.display)
             tryLog.size = `${outImg.naturalWidth}x${outImg.naturalHeight}`
@@ -13321,7 +13323,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       contLog.reason = contLog.tries
         .map(
           (t) =>
-            `${t.reason}${t.restore && t.restore.coarse != null ? ` 일치${t.restore.coarse}` : ''}${t.paint != null ? ` 그림${t.paint}` : ''}${t.paint0 != null ? ` 그림0 ${t.paint0}` : ''}${t.avg != null ? ` 밝기${t.avg}/편차${t.flat}` : ''}${t.size ? ` ${t.size}` : ''}${t.sec != null ? ` ${t.sec}초` : ''}${t.url ? ` [${t.url}]` : ''}`,
+            `${t.reason}${t.restore && t.restore.coarse != null ? ` 일치${t.restore.coarse}` : ''}${t.paint != null ? ` 그림${t.paint}` : ''}${t.paint0 != null ? ` 그림0 ${t.paint0}` : ''}${t.avg != null ? ` 밝기${t.avg}/편차${t.flat}` : ''}${t.size ? ` ${t.size}` : ''}${t.nsfw != null ? ` 필터${t.nsfw}` : ''}${t.sec != null ? ` ${t.sec}초` : ''}${t.url ? ` [${t.url}]` : ''}`,
         )
         .join(' + ')
       if (window.__deskWomanContinueFallback === true) {

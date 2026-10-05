@@ -71,6 +71,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           pending: false,
           status: 'succeeded',
           imageUrl: result.imageUrl,
+          nsfw: Boolean(result.nsfwFlagged),
         },
         200,
       )
