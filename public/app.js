@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw211'
+window.__DESK_BUILD = '20261005mw212'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -13493,6 +13493,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       timing.continue = contLog
       // 얼굴만 달라진(restore_miss) 그림 중 몸이 그려진 것: 실패 시 이 전신에 원본 얼굴을 오려 얹는 후보
       let cutCand = null
+      // 머리가 커서(big_head) 거절됐지만 원본 얼굴·장면은 그대로인 결과: 다른 시도가 모두 실패하면 이것을 쓴다(클로즈업 사진은 이 결과뿐, 사용자 지시)
+      let bigHeadCand = null
       // 이어 그린 결과가 정말 그려졌는지: 늘려 채운 빈 곳은 세로줄 무늬라 아래 영역에서 줄 사이 차이가 거의 없다
       const looksPainted = async (display) => {
         const img = await loadHtmlImage(display)
@@ -13638,6 +13640,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
               const shr = await shrinkContinuedHead(finalUrl, rr.log.rect, fbox)
               if (shr === 'too_big') {
                 tryLog.reason = 'big_head'
+                bigHeadCand = { display: finalUrl, url: alt.remoteUrl }
               } else if (shr) {
                 finalUrl = shr
                 tryLog.shrunk = 1
@@ -13661,6 +13664,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             `${t.reason}${t.restore && t.restore.coarse != null ? ` 일치${t.restore.coarse}` : ''}${t.paint != null ? ` 그림${t.paint}` : ''}${t.paint0 != null ? ` 그림0 ${t.paint0}` : ''}${t.avg != null ? ` 밝기${t.avg}/편차${t.flat}` : ''}${t.size ? ` ${t.size}` : ''}${t.nsfw != null ? ` 필터${t.nsfw}` : ''}${t.sec != null ? ` ${t.sec}초` : ''}${t.url ? ` [${t.url}]` : ''}`,
         )
         .join(' + ')
+      if (bigHeadCand && window.__deskWomanBigHeadOk !== false) {
+        contLog.reason = `${contLog.reason} → 머리가 큰 결과를 씀`
+        contLog.bigHead = true
+        timingDone()
+        return { display: bigHeadCand.display, remoteUrl: bigHeadCand.url, gender, isolated: false, continued: true }
+      }
       if (cutCand && window.__deskWomanContinueFallback !== true && window.__deskWomanFaceCut === true) {
         // 모델이 몸은 그렸지만 얼굴을 새로 그린 결과: 그 전신에 원본 사진의 얼굴(이마~턱)만 오려 얹는다 (새로 생성하지 않음)
         try {

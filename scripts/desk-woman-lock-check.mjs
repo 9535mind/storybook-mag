@@ -54,6 +54,7 @@ const checks = [
   ['얼굴이 크면(가분수) 머리를 최대 12% 줄이고, 줄여도 가분수면 big_head 로 거절', /async function shrinkContinuedHead\(/.test(app) && /Math\.max\(0\.88, Math\.min\(1, raw\)\)/.test(app) && /raw < 0\.8\) return 'too_big'/.test(app) && /tryLog\.reason = 'big_head'/.test(app)],
   ['검은 결과가 이어지면 3번째 시도는 단일 이미지 편집', /attempt >= 2 && attempt % 2 === 0 && tryLogs\[attempt - 1\]\?\.reason === 'black'/.test(app)],
   ['얼굴 오려 얹기(후보 전신)는 기본 꺼짐: __deskWomanFaceCut === true 일 때만', /window\.__deskWomanFaceCut === true\) \{/.test(app) && !/__deskFaceCutMode/.test(app)],
+  ['머리가 커서 거절된 결과도 다른 시도가 모두 실패하면 쓴다(bigHeadCand)', /let bigHeadCand = null/.test(app) && /bigHeadCand = \{ display: finalUrl/.test(app) && /__deskWomanBigHeadOk !== false/.test(app)],
   ['서버 필터 표시를 실패 문구에 기록(필터0/1)', /nsfw: Boolean\(result\.nsfwFlagged\)/.test(readFileSync(path.join(ROOT, 'functions', 'api', 'tale-scene-status.ts'), 'utf8')) && /필터\$\{t\.nsfw\}/.test(app)],
 ]
 
