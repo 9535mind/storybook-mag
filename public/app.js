@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw208'
+window.__DESK_BUILD = '20261005mw209'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -13694,14 +13694,14 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           contLog.faceCut = { skip: 'err', message: err instanceof Error ? err.message : String(err) }
         }
       }
-      if (window.__deskWomanContinueFallback === true || window.__deskWomanFaceCut !== false) {
+      if (window.__deskWomanContinueFallback === true) {
         contLog.fellBack = true
         // 이어 그리기가 안 되면(배경이 복잡하거나 화소가 작은 사진): 서서 전신을 만들고 원본 얼굴(이마~턱)만 오려 얹는다. 교체 엔진 얼굴은 쓰지 않는다
         if (window.__deskWomanContinueFallback !== true) window.__deskFaceCutMode = true
         setStatus(`${index}/${total} 장면 이어 그리기가 안 돼 서서 전신에 원본 얼굴을 얹는 방식으로 바꿉니다…`, false)
         console.warn('장면 이어 그리기를 쓰지 못해 서서 전신 방식으로 넘어갑니다:', JSON.stringify(contLog))
       } else {
-        const stop = `원본 사진의 장면을 살려 이어 그리지 못했습니다 (${contLog.reason}). 가짜 얼굴로 대신하지 않습니다. 다시 시도해 주세요.`
+        const stop = `원본 사진의 장면을 살려 이어 그리지 못했습니다 (${contLog.reason}). 가짜 얼굴로 대신하지 않습니다. 이 사진은 얼굴이 크게 찍힌 가슴 위 사진이라 전신 이어 그리기가 어렵습니다. 얼굴 아래 몸이 조금 더 나온 사진을 써 보세요.`
         if (typeof setFormStatus === 'function') setFormStatus(stop, true)
         else setStatus(stop, true)
         console.warn(stop, JSON.stringify(contLog))
