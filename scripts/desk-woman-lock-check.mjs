@@ -26,7 +26,7 @@ const checks = [
   ['팔 보정: 최대 20%까지만 줄이고 길지 않으면 그대로', /Math\.max\(0\.8, Math\.min\(1, \(L - delta\) \/ L\)\)/.test(app) && /log\.skip = 'arms_ok'/.test(app)],
   ['옛 열 띠 팔 보정(직사각형 이음새)이 없다', !/Math\.round\(iw \* 0\.292\)/.test(app)],
   ['여자는(단색 증명사진 포함) 장면 이어 그리기 경로를 탄다', /isWomanBody && !drawn && window\.__deskWomanContinue !== false/.test(app)],
-  ['이어 그리기: 3:4 캔버스 + 원본 화소 복원', /buildBodyContinueCanvas\(source, \[864, 1152\], \{ faceH, headTarget/.test(app) && /\(headTarget \* ch\) \/ headFrac \/ ih/.test(app) && /headTarget: \[0\.28, 0\.2, 0\.17, 0\.2, 0\.24\]\[attempt\]/.test(app) && /restoreOriginalPhotoOnContinued\(alt\.display, prepared, source\)/.test(app)],
+  ['이어 그리기: 3:4 캔버스 + 원본 화소 복원', /buildBodyContinueCanvas\(source, \[864, 1152\], \{ faceH, headTarget/.test(app) && /\(headTarget \* ch\) \/ headFrac \/ ih/.test(app) && /headTarget: \[0\.16, 0\.2, 0\.14, 0\.18, 0\.15\]\[attempt\]/.test(app) && /restoreOriginalPhotoOnContinued\(alt\.display, prepared, source\)/.test(app)],
   ['이어 그리기: 보호 마스크 90%·가장자리 부드럽게', /Math\.round\(dh \* 0\.9\)/.test(app) && /1 - md\[i\] \/ 255/.test(app)],
   ['이어 그리기 시간은 최대 110초', /'continue', undefined, 110, attempt >= 2/.test(app) && /Math\.min\(capSec \|\| 200, left\)/.test(app)],
   ['이어 그리기 최대 5번, 실패하면 가짜 얼굴로 대신하지 않고 멈춘다', /attempt < 5/.test(app) && /가짜 얼굴로 대신하지 않습니다/.test(app) && /__deskWomanContinueFallback/.test(app)],
