@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw166'
+window.__DESK_BUILD = '20261005mw167'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12073,8 +12073,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
       if (!headW) headW = Math.min(sw * 0.62, run || sw * 0.5)
       const cutY = Math.min(sh - 1, shoulder > 0 ? shoulder + headW * 0.06 : top + headW * 1.45)
-      const chinY = neckRow > 0 ? neckRow : top + headW * 1.15
-      const neckHalf = Math.max(headW * 0.34, (neckW < 1e8 ? neckW : headW * 0.6) * 0.56)
+      const chinY = Math.min(neckRow > 0 ? neckRow : top + headW * 1.15, cutY - headW * 0.25)
+      const neckHalf = Math.min(headW * 0.5, Math.max(headW * 0.34, (neckW < 1e8 ? neckW : headW * 0.6) * 0.56))
       log.head = { top, w: headW, neck: neckRow, cut: Math.round(cutY) }
       let cxSum = 0
       let cxN = 0
@@ -12269,7 +12269,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const ex0 = Math.max(6, Math.round(hx0))
       const ex1 = Math.min(gw - 7, Math.round(hx1))
       const ey0 = Math.max(0, Math.round(gAy + top * scale - headW * scale * 0.1))
-      const ey1 = Math.min(gh - 8, Math.round(gAy + chinY * scale))
+      // 지우는 범위는 얹은 머리가 완전히 불투명한 구간까지만 (그 아래는 생성된 목·옷깃을 살려 서서히 비칠 때 회색이 되지 않게)
+      const chinEdge = Math.min(chinY, cutY - headW * 0.16)
+      const ey1 = Math.min(gh - 8, Math.round(gAy + chinEdge * scale))
       if (ex1 - ex0 > 8 && ey1 - ey0 > 8) {
         const od = octx.getImageData(0, 0, gw, gh)
         const g = od.data
