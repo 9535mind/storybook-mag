@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw181'
+window.__DESK_BUILD = '20261005mw182'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12942,7 +12942,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     window.__deskTiming = timing
     const timingDone = () => {
       timing.totalSec = Math.round((Date.now() - timingT0) / 1000)
-      if (timing.continue && timing.continue.reason && timing.continue.reason !== 'ok') {
+      if (timing.continue && timing.continue.fellBack) {
         const why = `장면 이어 그리기를 쓰지 못해 서서 전신으로 이었습니다: ${timing.continue.reason}${timing.continue.message ? ` (${timing.continue.message})` : ''}`
         setTimeout(() => (typeof setFormStatus === 'function' ? setFormStatus(why, true) : null), 1500)
       }
@@ -13259,40 +13259,79 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return { display, remoteUrl: '', gender, isolated: false }
     }
     // 여자 + 일상 사진(배경이 단색이 아님): 그 장면을 살리고 아래만 이어 그린다. 원본 사진의 화소(얼굴·손·배경)는 그대로 복원한다.
-    // 사진이 안 된다고 판단되면(검은 화면·두 사람·다리 없음) 아래 서서 전신 방식으로 넘어간다. 끄기: window.__deskWomanContinue = false
+    // 사용자 지시: 가짜 얼굴로 대신하지 않는다. 최대 2번 시도하고, 그래도 안 되면 서서 전신(교체 엔진 얼굴)으로 넘어가지 않고 멈춘다.
+    // 끄기: window.__deskWomanContinue = false / 예전처럼 실패 시 서서 전신으로 넘기기: window.__deskWomanContinueFallback = true
     if (isWomanBody && !drawn && !plainSource && window.__deskWomanContinue !== false) {
-      const contLog = { engine: 'continue' }
+      const contLog = { engine: 'continue', tries: [] }
       timing.continue = contLog
-      try {
-        setStatus(`${index}/${total} 사진의 장면을 살려 아래로 이어 그리는 중…`, false)
-        const prepared = await buildBodyContinueCanvas(source, [864, 1152])
-        const contT0 = Date.now()
-        // 이어 그리기에 쓰는 시간은 최대 110초. 실패해도 아래 서서 전신 방식에 시간이 남게 한다
-        const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110)
-        contLog.sec = Math.round((Date.now() - contT0) / 1000)
-        if (alt?.auth) return alt
-        if (alt?.display) {
+      // 이어 그린 결과가 정말 그려졌는지: 늘려 채운 빈 곳은 세로줄 무늬라 아래 영역에서 줄 사이 차이가 거의 없다
+      const looksPainted = async (display) => {
+        const img = await loadHtmlImage(display)
+        const w = 160
+        const h = Math.max(80, Math.round((160 * img.naturalHeight) / Math.max(1, img.naturalWidth)))
+        const c = document.createElement('canvas')
+        c.width = w
+        c.height = h
+        const cx2 = c.getContext('2d', { willReadFrequently: true })
+        cx2.drawImage(img, 0, 0, w, h)
+        const d = cx2.getImageData(0, 0, w, h).data
+        let sum = 0
+        let n = 0
+        for (let y = Math.round(h * 0.72); y < Math.round(h * 0.93); y += 1) {
+          for (let x = Math.round(w * 0.25); x < Math.round(w * 0.75); x += 1) {
+            const i = (y * w + x) * 4
+            const j = ((y + 4) * w + x) * 4
+            sum += Math.abs(d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114 - (d[j] * 0.299 + d[j + 1] * 0.587 + d[j + 2] * 0.114))
+            n += 1
+          }
+        }
+        return sum / Math.max(1, n)
+      }
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const tryLog = { n: attempt + 1 }
+        contLog.tries.push(tryLog)
+        try {
+          setStatus(`${index}/${total} 사진의 장면을 살려 아래로 이어 그리는 중… (${attempt + 1}/2)`, false)
+          const prepared = await buildBodyContinueCanvas(source, [864, 1152])
+          const contT0 = Date.now()
+          // 한 번에 최대 110초
+          const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110)
+          tryLog.sec = Math.round((Date.now() - contT0) / 1000)
+          if (alt?.auth) return alt
+          if (!alt?.display) {
+            tryLog.reason = 'no_result'
+            continue
+          }
           const restored = await restoreProtectedExtendPixels(alt.display, prepared)
-          let reason = ''
-          contLog.black = await isSolidBlackPhoto(restored)
-          contLog.faces = typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(restored, 4000) : 1
-          contLog.legs = await hasStandingLegs(restored)
-          if (contLog.black) reason = 'black'
-          else if (contLog.faces >= 2) reason = 'two_people'
-          else if (!contLog.legs) reason = 'no_legs'
-          contLog.reason = reason || 'ok'
-          if (!reason) {
+          tryLog.black = await isSolidBlackPhoto(restored)
+          tryLog.faces = typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(restored, 4000) : 1
+          tryLog.paint = Number((await looksPainted(restored)).toFixed(2))
+          if (tryLog.black) tryLog.reason = 'black'
+          else if (tryLog.faces >= 2) tryLog.reason = 'two_people'
+          else if (tryLog.paint < 4) tryLog.reason = 'unpainted'
+          else {
+            tryLog.reason = 'ok'
+            contLog.reason = 'ok'
             timingDone()
             return { display: restored, remoteUrl: alt.remoteUrl, gender, isolated: false, continued: true }
           }
-        } else {
-          contLog.reason = 'no_result'
+        } catch (err) {
+          tryLog.reason = 'err'
+          tryLog.message = err instanceof Error ? err.message : String(err)
         }
-      } catch (err) {
-        contLog.reason = 'err'
-        contLog.message = err instanceof Error ? err.message : String(err)
       }
-      console.warn('장면 이어 그리기를 쓰지 못해 서서 전신 방식으로 넘어갑니다:', JSON.stringify(contLog))
+      contLog.reason = contLog.tries.map((t) => t.reason).join('+')
+      if (window.__deskWomanContinueFallback === true) {
+        contLog.fellBack = true
+        console.warn('장면 이어 그리기를 쓰지 못해 서서 전신 방식으로 넘어갑니다:', JSON.stringify(contLog))
+      } else {
+        const stop = `원본 사진의 장면을 살려 이어 그리지 못했습니다 (${contLog.reason}). 가짜 얼굴로 대신하지 않습니다. 다시 시도해 주세요.`
+        if (typeof setFormStatus === 'function') setFormStatus(stop, true)
+        else setStatus(stop, true)
+        console.warn(stop, JSON.stringify(contLog))
+        timing.totalSec = Math.round((Date.now() - timingT0) / 1000)
+        return null
+      }
     }
     let result = null
     let standing = null
