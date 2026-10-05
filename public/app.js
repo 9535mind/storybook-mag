@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw198'
+window.__DESK_BUILD = '20261005mw199'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8775,6 +8775,87 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
    * (모델이 사진을 조금 다른 크기·위치로 다시 그려도 얼굴이 이중으로 보이지 않게 한다)
    * 못 찾으면(일치도 0.75 미만) url 을 비워 돌려준다. 가짜 얼굴로 대신하지 않기 위해 호출한 쪽이 실패로 처리한다.
    */
+  // 이어 그린 결과의 머리(얼굴)가 몸에 비해 크면(가분수) 머리 쪽을 줄이고 몸을 그만큼 늘려 키·발 위치는 그대로 둔다.
+  // 얼굴 높이가 (머리 위~발) 길이의 1/9 이하가 되도록. 얼굴은 원본 화소 그대로 크기만 줄어든다. 줄일 필요가 없으면 '' 반환.
+  async function shrinkContinuedHead(url, rect, fbox) {
+    try {
+      if (!rect || !fbox || !(fbox.h > 0.02)) return ''
+      const img = await loadHtmlImage(url)
+      const w = img.naturalWidth
+      const h = img.naturalHeight
+      const kx = w / rect.rw
+      const ky = h / rect.rh
+      const faceTop = (rect.y + fbox.y * rect.h) * ky
+      const faceH = fbox.h * rect.h * ky
+      const cx = (rect.x + (fbox.x + fbox.w / 2) * rect.w) * kx
+      const yTop = Math.max(0, faceTop - faceH * 0.5)
+      const yFeet = h * 0.955
+      const total = yFeet - yTop
+      const sc = Math.max(0.78, Math.min(1, total / 9 / faceH))
+      if (sc > 0.97) return ''
+      const yN = Math.min(h * 0.5, faceTop + faceH * 1.25)
+      const dT = faceH * 0.9
+      const lenA = yN - yTop
+      const lenB = yFeet - (yN + dT)
+      if (lenA < 8 || lenB < 8) return ''
+      const vB = (total - sc * lenA - (dT * sc) / 2) / (dT / 2 + lenB)
+      // 원본 줄 y → 출력 줄 누적 위치
+      const cum = new Float32Array(h + 2)
+      let acc = 0
+      for (let y = 0; y <= h; y += 1) {
+        cum[y] = acc
+        let v = 1
+        if (y >= yTop && y < yN) v = sc
+        else if (y >= yN && y < yN + dT) v = sc + ((vB - sc) * (y - yN)) / dT
+        else if (y >= yN + dT && y < yFeet) v = vB
+        acc += v
+      }
+      const shift = yTop - cum[Math.max(0, Math.floor(yTop))]
+      for (let y = 0; y <= h; y += 1) cum[y] += shift
+      const c = document.createElement('canvas')
+      c.width = w
+      c.height = h
+      const cx2 = c.getContext('2d', { willReadFrequently: true })
+      cx2.drawImage(img, 0, 0, w, h)
+      const src = cx2.getImageData(0, 0, w, h)
+      const dst = cx2.createImageData(w, h)
+      const sd = src.data
+      const dd = dst.data
+      let sy = 0
+      for (let yo = 0; yo < h; yo += 1) {
+        while (sy < h - 1 && cum[sy + 1] <= yo) sy += 1
+        const t = cum[sy + 1] > cum[sy] ? (yo - cum[sy]) / (cum[sy + 1] - cum[sy]) : 0
+        const ys = Math.min(h - 1, sy + Math.max(0, Math.min(1, t)))
+        let hx = 1
+        const yRamp = Math.max(0, yTop - faceH)
+        if (ys >= yRamp && ys < yTop) hx = 1 + ((sc - 1) * (ys - yRamp)) / Math.max(1, yTop - yRamp)
+        else if (ys >= yTop && ys < yN) hx = sc
+        else if (ys >= yN && ys < yN + dT) hx = sc + ((1 - sc) * (ys - yN)) / dT
+        const y0 = Math.floor(ys)
+        const y1 = Math.min(h - 1, y0 + 1)
+        const fy = ys - y0
+        for (let xo = 0; xo < w; xo += 1) {
+          let xs = cx + (xo - cx) / hx
+          if (xs < 0) xs = -xs
+          if (xs > w - 1.001) xs = 2 * (w - 1.001) - xs
+          xs = Math.max(0, Math.min(w - 1.001, xs))
+          const x0 = Math.floor(xs)
+          const fx = xs - x0
+          for (let k = 0; k < 3; k += 1) {
+            const a = sd[(y0 * w + x0) * 4 + k] * (1 - fx) + sd[(y0 * w + x0 + 1) * 4 + k] * fx
+            const b = sd[(y1 * w + x0) * 4 + k] * (1 - fx) + sd[(y1 * w + x0 + 1) * 4 + k] * fx
+            dd[(yo * w + xo) * 4 + k] = a * (1 - fy) + b * fy
+          }
+          dd[(yo * w + xo) * 4 + 3] = 255
+        }
+      }
+      cx2.putImageData(dst, 0, 0)
+      return c.toDataURL('image/jpeg', 0.92)
+    } catch (_) {
+      return ''
+    }
+  }
+
   // 모델이 몸 가운데만 그리고 양옆을 늘려 채운 세로·가로 줄무늬로 남긴 경우: 사진 사각형과 그 아래 몸 기둥은 두고,
   // 나머지는 크게 흐려 줄무늬를 부드러운 배경 색 번짐으로 바꾼다 (줄무늬 그대로보다 낫다)
   async function softenStreakSides(url, rect) {
@@ -13356,9 +13437,11 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           setStatus(`${index}/${total} 사진의 장면을 살려 아래로 이어 그리는 중… (${attempt + 1}/5)`, false)
           // 얼굴 크기(사진 높이 대비)를 재서, 클로즈업이면 사진을 줄여 머리가 정상 크기가 되게 한다
           let faceH = 0
+          let fbox = null
           try {
             const fb = await detectFaceBox(source, 'id')
             faceH = fb && Number(fb.h) > 0.05 ? Number(fb.h) : 0
+            fbox = fb && Number(fb.h) > 0.05 ? fb : null
           } catch (_) {
             faceH = 0
           }
@@ -13428,6 +13511,13 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
                 tryLog.softened = 1
               } else {
                 tryLog.reason = 'unpainted'
+              }
+            }
+            if (!tryLog.reason && window.__deskWomanHeadShrink !== false) {
+              const shr = await shrinkContinuedHead(finalUrl, rr.log.rect, fbox)
+              if (shr) {
+                finalUrl = shr
+                tryLog.shrunk = 1
               }
             }
             if (!tryLog.reason) {
