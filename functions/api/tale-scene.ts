@@ -623,7 +623,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           : 'Keep the exact identity cloth color. Same fabric. Continue the missing lower body as trousers in that same light color family, not black slacks.'
         const clothesLock =
           gender === 'man'
-            ? 'Keep the exact same clothes from the identity image. Same jacket and trousers. Trousers stay one even color from waist to hem — same navy/black as the front. FORBIDDEN a brown, grey, faded, or shiny-white patch on the seat or back of the pants.'
+            ? 'Keep EXACTLY the clothes visible in the identity image: the same shirt or jacket, same color, same collar. Do NOT add a jacket, blazer, suit coat, or tie that is not in the identity image; if he wears only a shirt, he stays in only that shirt. Continue the lower body with plain dark neutral trousers, one even color from waist to hem, and dark leather shoes. FORBIDDEN a new jacket, blazer, tie, a brown, grey, faded, or shiny-white patch on the seat or back of the pants.'
             : continueMode
               ? `Keep the exact same clothes already in the photograph. Same top, same hair, same pose. ${colorLock} FORBIDDEN changing the cloth color, a black office suit, a new hairstyle, a catalog model, a new woman.`
               : 'Black office blazer. Same hair length and curl. Same CAST face. FORBIDDEN a new face, a catalog model, a new woman, an oval face sticker, a beige plate.'
@@ -632,7 +632,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           : 'Standing upright, full body, head to shoes. Two legs, shoes on the floor. Eye-level. EXACTLY ONE person. FORBIDDEN two people, two women, a couple, side-by-side portraits, desk, name-board, waist crop, ID headshot.'
         const proportionLock =
           gender === 'man'
-            ? 'Korean adult man, about 7 to 7.5 heads tall. Shoulders about 2.75 times the face width. ID photos crop the shoulders — reconstruct the missing shoulder, then continue the arms from that full shoulder. Shirt or jacket tucked at the hip. FORBIDDEN continuing arms from the left/right cut of the ID photo, narrow ID shoulders, cropped shirt at the navel, pear hips, new face.'
+            ? 'Korean adult man, about 7 to 7.5 heads tall. Shoulders about 2.75 times the face width. ID photos crop the shoulders — reconstruct the missing shoulder, then continue the arms from that full shoulder. Shirt or jacket tucked at the hip. Legs are long: crotch at the middle of the body, legs about 47 percent of total height, full natural thighs. Both shoes fully inside the frame with a little floor below them. FORBIDDEN continuing arms from the left/right cut of the ID photo, narrow ID shoulders, cropped shirt at the navel, pear hips, short legs, thin stick legs, cropped feet, new face.'
             : 'Korean adult woman, about 7 heads tall. Same CAST face. Shoulders about 2.65 times the face width. ID photos crop the shoulders — reconstruct the missing shoulder, then continue the arms from that full shoulder. Fingertips at mid-thigh, not below the skirt hem. Thick healthy thighs and calves. FORBIDDEN ape-long arms, continuing arms from the ID crop edge, 8-head catalog model, tiny head, stick legs, narrow ID shoulders, new face.'
         const prompt = drawn
           ? [
@@ -685,7 +685,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                   : 'Image 1 already shows ONE identity head and shoulders. Image 2 is that same person, not a second person.',
               continueMode
                 ? 'EXACTLY ONE adult. Keep every pixel of the existing photo. Same clothes, same pose, same raised hand if present, same background. Paint only the missing legs and shoes under the photo. FORBIDDEN studio restage, black office suit, new pose, new face, oval sticker, beige plate.'
-                : 'EXACTLY ONE adult. Continue the body down from the head already in image 1. Keep image 2 face, hair length, and hair color. Black office blazer, standing head to shoes. FORBIDDEN two people, a second woman, a couple, side-by-side portraits, a new hairstyle, an oval face sticker, leftover silhouette, a beige plate. Feet must reach the bottom of image 1.',
+                : `EXACTLY ONE adult. Continue the body down from the head already in image 1. Keep image 2 face, hair length, and hair color. ${gender === 'man' ? 'Same clothes as image 2, no added jacket or tie, standing head to shoes.' : 'Black office blazer, standing head to shoes.'} FORBIDDEN two people, a second woman, a couple, side-by-side portraits, a new hairstyle, an oval face sticker, leftover silhouette, a beige plate. Feet must reach the bottom of image 1.`,
               prompt,
             ].join(' '),
             aspectRatio: '3:4',

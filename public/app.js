@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261004mw161'
+window.__DESK_BUILD = '20261005mw162'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11757,6 +11757,178 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     }
   }
 
+  /**
+   * 원본 증명사진의 머리(얼굴·머리카락·목 윗부분) 화소를 이은 전신 위에 그대로 얹는다.
+   * 얼굴 교체 엔진처럼 새로 그리지 않는다. 눈 위치로 크기·기울기만 맞춘다.
+   * 실패하면 빈 문자열을 돌려주고 호출한 쪽이 기존 엔진으로 넘어간다.
+   */
+  async function pastePixelHeadOnStanding(standingUrl, sourceUrl) {
+    const t0 = Date.now()
+    const log = { engine: 'pixel' }
+    try {
+      const [sFace, gFace] = await Promise.all([
+        detectFaceBox(sourceUrl, 'id'),
+        detectFaceBox(standingUrl, 'id'),
+      ])
+      const [sImg, gImg] = await Promise.all([loadHtmlImage(sourceUrl), loadHtmlImage(standingUrl)])
+      const sw = sImg.naturalWidth
+      const sh = sImg.naturalHeight
+      const gw = gImg.naturalWidth
+      const gh = gImg.naturalHeight
+      const pt = (f, k, w, h) => (f?.[k] ? { x: f[k].x * w, y: f[k].y * h } : null)
+      const sL = pt(sFace, 'leftEye', sw, sh)
+      const sR = pt(sFace, 'rightEye', sw, sh)
+      const gL = pt(gFace, 'leftEye', gw, gh)
+      const gR = pt(gFace, 'rightEye', gw, gh)
+      if (!(sL && sR && gL && gR)) {
+        log.skip = 'no_eyes'
+        return { url: '', log }
+      }
+      const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
+      const sM = mid(sL, sR)
+      const gM = mid(gL, gR)
+      const sIoc = Math.hypot(sR.x - sL.x, sR.y - sL.y)
+      const gIoc = Math.hypot(gR.x - gL.x, gR.y - gL.y)
+      if (sIoc < 8 || gIoc < 8) {
+        log.skip = 'eyes_too_close'
+        return { url: '', log }
+      }
+      const scale = gIoc / sIoc
+      let rot = Math.atan2(gR.y - gL.y, gR.x - gL.x) - Math.atan2(sR.y - sL.y, sR.x - sL.x)
+      rot = Math.max(-0.14, Math.min(0.14, rot))
+      log.scale = Number(scale.toFixed(3))
+      log.rot = Number(rot.toFixed(3))
+      if (scale < 0.2 || scale > 3) {
+        log.skip = 'scale'
+        return { url: '', log }
+      }
+      // 눈~입 거리(없으면 얼굴 상자로 추정)로 목 아래 자르는 선과 머리 폭을 정한다
+      const sMouth = pt(sFace, 'mouth', sw, sh)
+      const sDem = sMouth && sMouth.y > sM.y ? sMouth.y - sM.y : Math.max(10, (sFace?.h || 0.3) * sh * 0.36)
+      // 원본: 배경만 투명하게 (원본과 같은 크기를 유지해야 눈 좌표가 맞는다)
+      const cut = document.createElement('canvas')
+      cut.width = sw
+      cut.height = sh
+      const cctx = cut.getContext('2d', { willReadFrequently: true })
+      cctx.drawImage(sImg, 0, 0)
+      const rawPx = cctx.getImageData(0, 0, sw, sh).data
+      if (!canvasHasTransparency(cut)) floodKeyStudio(cut)
+      dropStudioIslands(cut)
+      defringeCutout(cut)
+      const cd = cctx.getImageData(0, 0, sw, sh)
+      const d = cd.data
+      // 회색 머리가 배경색과 비슷해 깎인 곳을 메운다: 눈 높이 위 줄은 좌우 끝 사이가 모두 머리다
+      for (let y = 0; y <= Math.round(sM.y); y += 1) {
+        let a = -1
+        let b = -1
+        for (let x = 0; x < sw; x += 1) {
+          if (d[(y * sw + x) * 4 + 3] > 128) {
+            if (a < 0) a = x
+            b = x
+          }
+        }
+        if (a < 0 || b - a > sIoc * 4.2) continue
+        for (let x = a; x <= b; x += 1) {
+          const i = (y * sw + x) * 4
+          if (d[i + 3] <= 128) {
+            d[i] = rawPx[i]
+            d[i + 1] = rawPx[i + 1]
+            d[i + 2] = rawPx[i + 2]
+          }
+          d[i + 3] = 255
+        }
+      }
+      const cutY = sM.y + sDem * 2.1
+      const fadeH = Math.max(6, sDem * 0.4)
+      const chinY = sM.y + sDem * 1.75
+      for (let y = 0; y < sh; y += 1) {
+        const vy = y >= cutY ? 0 : y > cutY - fadeH ? (cutY - y) / fadeH : 1
+        // 목 아래로 갈수록 좌우를 좁혀 어깨 조각이 따라오지 않게 한다
+        const half =
+          y <= chinY ? sIoc * 1.75 : sIoc * (1.75 - 0.75 * Math.min(1, (y - chinY) / Math.max(1, cutY - chinY)))
+        for (let x = 0; x < sw; x += 1) {
+          const i = (y * sw + x) * 4
+          if (vy <= 0) {
+            d[i + 3] = 0
+            continue
+          }
+          const dx = Math.abs(x - sM.x)
+          const hx = dx <= half - 6 ? 1 : dx >= half ? 0 : (half - dx) / 6
+          d[i + 3] = Math.round(d[i + 3] * vy * hx)
+        }
+      }
+      cctx.putImageData(cd, 0, 0)
+      const opaque = (() => {
+        let n = 0
+        for (let i = 3; i < d.length; i += 16) if (d[i] > 128) n += 1
+        return n / (d.length / 16)
+      })()
+      log.opaque = Number(opaque.toFixed(3))
+      if (opaque < 0.03) {
+        log.skip = 'empty_cut'
+        return { url: '', log }
+      }
+      // 전신: 만들어진 머리를 배경색으로 지운다 (머리가 원본보다 크면 찌꺼기가 남지 않게)
+      const out = document.createElement('canvas')
+      out.width = gw
+      out.height = gh
+      const octx = out.getContext('2d', { willReadFrequently: true })
+      octx.drawImage(gImg, 0, 0)
+      const gMouth = pt(gFace, 'mouth', gw, gh)
+      const gDem = gMouth && gMouth.y > gM.y ? gMouth.y - gM.y : sDem * scale
+      const eraseY = Math.min(gh - 1, Math.round(gM.y + gDem * 1.55))
+      const ex0 = Math.max(0, Math.round(gM.x - gIoc * 2.1))
+      const ex1 = Math.min(gw - 1, Math.round(gM.x + gIoc * 2.1))
+      const bx0 = Math.max(0, Math.round(gM.x - gIoc * 2.7))
+      const bx1 = Math.min(gw - 5, Math.round(gM.x + gIoc * 2.7))
+      const od = octx.getImageData(0, 0, gw, gh)
+      const g = od.data
+      const avg = (y, x0) => {
+        let r = 0
+        let gg = 0
+        let b = 0
+        for (let k = 0; k < 5; k += 1) {
+          const i = (y * gw + x0 + k) * 4
+          r += g[i]
+          gg += g[i + 1]
+          b += g[i + 2]
+        }
+        return [r / 5, gg / 5, b / 5]
+      }
+      for (let y = 0; y < eraseY; y += 1) {
+        const L = avg(y, Math.max(0, bx0 - 5))
+        const R = avg(y, bx1)
+        const feather = y > eraseY - 8 ? (eraseY - y) / 8 : 1
+        for (let x = ex0; x <= ex1; x += 1) {
+          const t = (x - ex0) / Math.max(1, ex1 - ex0)
+          const edge = Math.min(1, (x - ex0) / 8, (ex1 - x) / 8) * feather
+          const i = (y * gw + x) * 4
+          for (let c = 0; c < 3; c += 1) {
+            const fill = L[c] * (1 - t) + R[c] * t
+            g[i + c] = g[i + c] * (1 - edge) + fill * edge
+          }
+        }
+      }
+      octx.putImageData(od, 0, 0)
+      // 원본 머리를 눈 위치 기준으로 얹는다
+      octx.save()
+      octx.translate(gM.x, gM.y)
+      octx.rotate(rot)
+      octx.scale(scale, scale)
+      octx.translate(-sM.x, -sM.y)
+      octx.imageSmoothingQuality = 'high'
+      octx.drawImage(cut, 0, 0)
+      octx.restore()
+      log.ok = true
+      log.ms = Date.now() - t0
+      return { url: out.toDataURL('image/png'), log }
+    } catch (err) {
+      log.skip = 'err'
+      log.message = err instanceof Error ? err.message : String(err)
+      return { url: '', log }
+    }
+  }
+
   async function holdIdFaceOnStanding(bodyDisplay, idDataUrl, gender) {
     const log = []
     window.__deskHoldLog = log
@@ -11764,6 +11936,14 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const face = await estimateFaceBoxFromImage(display)
       if (!face) return false
       return face.h >= 0.36 || face.y + face.h >= 0.58
+    }
+    const pixelHeadOn =
+      window.__deskPixelHead === true ||
+      (window.__deskPixelHead !== false && (gender === 'male' || gender === 'man'))
+    if (pixelHeadOn) {
+      const px = await pastePixelHeadOnStanding(bodyDisplay, idDataUrl)
+      log.push(px.log)
+      if (px.url) return px.url
     }
     const specs = [
       { engine: 'insight', gender },
@@ -11808,6 +11988,17 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   }
 
   async function extendOneIdBody(idDataUrl, gender, index, total, opts) {
+    const timingT0 = Date.now()
+    const timing = { jobs: [], holdSec: 0, totalSec: 0 }
+    window.__deskTiming = timing
+    const timingDone = () => {
+      timing.totalSec = Math.round((Date.now() - timingT0) / 1000)
+      try {
+        console.info('[desk-extend timing]', JSON.stringify(timing))
+      } catch (_) {
+        /* ignore */
+      }
+    }
     setStatus(`이어그리기 · ${index}/${total} 사진 붙이는 중…`, false)
     const source = opts?.faceSrc || idDataUrl
     const drawn = opts?.forcePhoto ? false : await sourceLooksIllustration(source)
@@ -11821,6 +12012,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         ? Math.max(8, Math.round((opts.deadline - Date.now()) / 1000))
         : 200
       if (left < 12) return null
+      const jobT0 = Date.now()
       const job = await postTaleSceneJob(
         {
           composeMode: 'extend-body',
@@ -11842,6 +12034,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         Math.min(200, left),
         quiet ? () => {} : undefined,
       )
+      timing.jobs.push({ label, sec: Math.round((Date.now() - jobT0) / 1000), ok: Boolean(job && !job.auth) })
       if (!job || job.auth) return job
       const display = await ensureStableDataUrl(job.imageUrl)
       return { display, remoteUrl: job.imageUrl }
@@ -12147,6 +12340,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const fail = `${index}/${total} 다른 사람이나 베이지 힌트 판이 남아 저장하지 않습니다. CAST 그 얼굴만 잇습니다.${why ? ` [거절: ${why}]` : ''}`
       if (typeof setFormStatus === 'function') setFormStatus(fail, true)
       else setStatus(fail, true)
+      timingDone()
       return null
     }
 
@@ -12154,7 +12348,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       try {
         setStatus(`${index}/${total} 증명 얼굴을 전신에 붙이는 중…`, false)
         window.__deskLastStanding = result.display
+        const holdT0 = Date.now()
         const held = await holdIdFaceOnStanding(result.display, source, gender)
+        timing.holdSec = Math.round((Date.now() - holdT0) / 1000)
+        timing.holdLog = window.__deskHoldLog
         const standingFace = await estimateFaceBoxFromImage(result.display)
         const standingZoomed = Boolean(
           standingFace && (standingFace.h >= 0.36 || standingFace.y + standingFace.h >= 0.58),
@@ -12210,6 +12407,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         /* 전신은 남긴다 */
       }
     }
+    timingDone()
     return {
       display: result.display,
       remoteUrl: result.remoteUrl,
