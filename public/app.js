@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw172'
+window.__DESK_BUILD = '20261005mw173'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12241,7 +12241,13 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (d[i + 3] > 128) continue
           const dl = Math.hypot(rawPx[i] - eL[0], rawPx[i + 1] - eL[1], rawPx[i + 2] - eL[2])
           const dr = Math.hypot(rawPx[i] - eR[0], rawPx[i + 1] - eR[1], rawPx[i + 2] - eR[2])
-          if (Math.min(dl, dr) > 28) {
+          // 머리카락은 배경보다 어둡다. 배경이 머리 둘레에서 더 밝아지는 부분(흰 얼룩)은 되살리지 않는다
+          const lumaPx = rawPx[i] * 0.299 + rawPx[i + 1] * 0.587 + rawPx[i + 2] * 0.114
+          const lumaBg = Math.min(
+            eL[0] * 0.299 + eL[1] * 0.587 + eL[2] * 0.114,
+            eR[0] * 0.299 + eR[1] * 0.587 + eR[2] * 0.114,
+          )
+          if (Math.min(dl, dr) > 28 && lumaPx < lumaBg - 12) {
             d[i] = rawPx[i]
             d[i + 1] = rawPx[i + 1]
             d[i + 2] = rawPx[i + 2]
@@ -12257,14 +12263,74 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         let filled = 0
         for (let x = sp[0]; x <= sp[1]; x += 1) if (d[(y * sw + x) * 4 + 3] > 128) filled += 1
         if (filled < (sp[1] - sp[0] + 1) * 0.6) continue
+        // 메우는 것은 머리카락(배경보다 어두움)과 피부색뿐이다. 관자놀이의 오목한 곳에 있는 배경은 채우지 않는다
+        let bgL = 0
+        for (let k = 0; k < 12; k += 1) {
+          const il = (y * sw + k) * 4
+          const ir = (y * sw + (sw - 1 - k)) * 4
+          bgL += (rawPx[il] * 0.299 + rawPx[il + 1] * 0.587 + rawPx[il + 2] * 0.114 + rawPx[ir] * 0.299 + rawPx[ir + 1] * 0.587 + rawPx[ir + 2] * 0.114) / 24
+        }
         for (let x = sp[0]; x <= sp[1]; x += 1) {
           const i = (y * sw + x) * 4
+          const lp = rawPx[i] * 0.299 + rawPx[i + 1] * 0.587 + rawPx[i + 2] * 0.114
+          const skinLike = rawPx[i] > rawPx[i + 2] + 14 && rawPx[i] > 110
+          if (d[i + 3] <= 128 && !(lp < bgL - 12 || skinLike)) continue
           if (d[i + 3] <= 128) {
             d[i] = rawPx[i]
             d[i + 1] = rawPx[i + 1]
             d[i + 2] = rawPx[i + 2]
           }
           d[i + 3] = 255
+        }
+      }
+      // 3-1) 흰머리 구레나룻처럼 배경색과 같아 지워진 부분: 관자놀이 높이까지는 머리의 바깥 윤곽(볼록 껍질) 안쪽을 모두 머리로 본다
+      {
+        const yA = top + Math.round(headW * 0.12)
+        const yB = Math.min(sh - 1, top + Math.round(headW * 0.62))
+        const pts = []
+        for (let y = yA; y <= yB; y += 3) {
+          const sp = rowSpan(y)
+          if (sp && sp[1] - sp[0] < headW * 1.15) {
+            pts.push([sp[0], y])
+            pts.push([sp[1], y])
+          }
+        }
+        if (pts.length >= 6) {
+          pts.sort((p, q) => p[0] - q[0] || p[1] - q[1])
+          const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+          const lower = []
+          for (const pt of pts) {
+            while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pt) <= 0) lower.pop()
+            lower.push(pt)
+          }
+          const upper = []
+          for (let k = pts.length - 1; k >= 0; k -= 1) {
+            const pt = pts[k]
+            while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pt) <= 0) upper.pop()
+            upper.push(pt)
+          }
+          const hull = lower.slice(0, -1).concat(upper.slice(0, -1))
+          const hm = document.createElement('canvas')
+          hm.width = sw
+          hm.height = sh
+          const hctx = hm.getContext('2d', { willReadFrequently: true })
+          hctx.fillStyle = '#fff'
+          hctx.beginPath()
+          hull.forEach((pt, k) => (k ? hctx.lineTo(pt[0], pt[1]) : hctx.moveTo(pt[0], pt[1])))
+          hctx.closePath()
+          hctx.fill()
+          const hd2 = hctx.getImageData(0, 0, sw, sh).data
+          for (let y = yA; y <= yB; y += 1) {
+            for (let x = 0; x < sw; x += 1) {
+              const i = (y * sw + x) * 4
+              if (hd2[i + 3] > 200 && d[i + 3] <= 128) {
+                d[i] = rawPx[i]
+                d[i + 1] = rawPx[i + 1]
+                d[i + 2] = rawPx[i + 2]
+                d[i + 3] = 255
+              }
+            }
+          }
         }
       }
       cctx.putImageData(cd, 0, 0)
