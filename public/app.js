@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw163'
+window.__DESK_BUILD = '20261005mw164'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11758,70 +11758,27 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   }
 
   /**
-   * 원본 증명사진의 머리(얼굴·머리카락·목 윗부분) 화소를 이은 전신 위에 그대로 얹는다.
-   * 얼굴 교체 엔진처럼 새로 그리지 않는다. 눈 위치로 크기·기울기만 맞춘다.
+   * 원본 증명사진의 머리(얼굴·머리카락·목) 화소를 이은 전신 위에 그대로 얹는다.
+   * 얼굴 교체 엔진처럼 새로 그리지 않는다. 좌표 추정(LLM)에 기대지 않고,
+   * 원본 머리와 생성된 머리를 크기·위치를 바꿔 가며 겹쳐 보아 가장 닮은 자리에 얹는다.
    * 실패하면 빈 문자열을 돌려주고 호출한 쪽이 기존 엔진으로 넘어간다.
    */
   async function pastePixelHeadOnStanding(standingUrl, sourceUrl) {
     const t0 = Date.now()
     const log = { engine: 'pixel' }
+    const fail = (why, extra) => {
+      log.skip = why
+      if (extra) Object.assign(log, extra)
+      return { url: '', log }
+    }
     try {
-      const [sFace, gFace] = await Promise.all([
-        detectFaceBox(sourceUrl, 'id'),
-        detectFaceBox(standingUrl, 'id'),
-      ])
       const [sImg, gImg] = await Promise.all([loadHtmlImage(sourceUrl), loadHtmlImage(standingUrl)])
       const sw = sImg.naturalWidth
       const sh = sImg.naturalHeight
       const gw = gImg.naturalWidth
       const gh = gImg.naturalHeight
-      const pt = (f, k, w, h) => (f?.[k] ? { x: f[k].x * w, y: f[k].y * h } : null)
-      // 눈 좌표가 없으면 얼굴 박스로 추정한다 (두 사진에 같은 감지기를 쓰므로 비율이 맞는다)
-      const eyesFrom = (f, w, h) => {
-        if (f?.leftEye && f?.rightEye) return { L: pt(f, 'leftEye', w, h), R: pt(f, 'rightEye', w, h), real: true }
-        if (!(f && f.w > 0.03 && f.h > 0.03)) return null
-        const ey = (f.y + f.h * 0.4) * h
-        return {
-          L: { x: (f.x + f.w * 0.3) * w, y: ey },
-          R: { x: (f.x + f.w * 0.7) * w, y: ey },
-          real: false,
-        }
-      }
-      const sE = eyesFrom(sFace, sw, sh)
-      const gE = eyesFrom(gFace, gw, gh)
-      if (!(sE && gE)) {
-        log.skip = 'no_face_box'
-        log.srcFace = Boolean(sFace)
-        log.dstFace = Boolean(gFace)
-        return { url: '', log }
-      }
-      const sL = sE.L
-      const sR = sE.R
-      const gL = gE.L
-      const gR = gE.R
-      log.eyes = sE.real && gE.real ? 'detected' : 'box'
-      const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
-      const sM = mid(sL, sR)
-      const gM = mid(gL, gR)
-      const sIoc = Math.hypot(sR.x - sL.x, sR.y - sL.y)
-      const gIoc = Math.hypot(gR.x - gL.x, gR.y - gL.y)
-      if (sIoc < 8 || gIoc < 8) {
-        log.skip = 'eyes_too_close'
-        return { url: '', log }
-      }
-      const scale = gIoc / sIoc
-      let rot = Math.atan2(gR.y - gL.y, gR.x - gL.x) - Math.atan2(sR.y - sL.y, sR.x - sL.x)
-      rot = sE.real && gE.real ? Math.max(-0.14, Math.min(0.14, rot)) : 0
-      log.scale = Number(scale.toFixed(3))
-      log.rot = Number(rot.toFixed(3))
-      if (scale < 0.2 || scale > 3) {
-        log.skip = 'scale'
-        return { url: '', log }
-      }
-      // 눈~입 거리(없으면 얼굴 상자로 추정)로 목 아래 자르는 선과 머리 폭을 정한다
-      const sMouth = sE.real ? pt(sFace, 'mouth', sw, sh) : null
-      const sDem = sMouth && sMouth.y > sM.y ? sMouth.y - sM.y : Math.max(10, (sFace?.h || 0.3) * sh * 0.36)
-      // 원본: 배경만 투명하게 (원본과 같은 크기를 유지해야 눈 좌표가 맞는다)
+      if (!(sw > 40 && sh > 40 && gw > 40 && gh > 40)) return fail('size')
+      // 1) 원본: 배경만 투명하게 (원본과 같은 크기를 유지)
       const cut = document.createElement('canvas')
       cut.width = sw
       cut.height = sh
@@ -11833,8 +11790,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       defringeCutout(cut)
       const cd = cctx.getImageData(0, 0, sw, sh)
       const d = cd.data
-      // 회색 머리가 배경색과 비슷해 깎인 곳을 메운다: 눈 높이 위 줄은 좌우 끝 사이가 모두 머리다
-      for (let y = 0; y <= Math.round(sM.y); y += 1) {
+      const rowSpan = (y) => {
         let a = -1
         let b = -1
         for (let x = 0; x < sw; x += 1) {
@@ -11843,8 +11799,66 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             b = x
           }
         }
-        if (a < 0 || b - a > sIoc * 4.2) continue
-        for (let x = a; x <= b; x += 1) {
+        return a < 0 ? null : [a, b]
+      }
+      let top = -1
+      for (let y = 0; y < sh && top < 0; y += 1) {
+        const sp = rowSpan(y)
+        if (sp && sp[1] - sp[0] > sw * 0.05) top = y
+      }
+      if (top < 0) return fail('no_subject')
+      // 2) 머리 크기·어깨 시작·목 줄을 알파 폭으로 잰다
+      let run = 0
+      let runRow = top
+      let headW = 0
+      let neckRow = -1
+      let neckW = 1e9
+      let shoulder = -1
+      let phase = 0
+      for (let y = top; y < sh; y += 1) {
+        const sp = rowSpan(y)
+        const w = sp ? sp[1] - sp[0] : 0
+        if (phase === 0) {
+          if (w > run) {
+            run = w
+            runRow = y
+          }
+          if (run > sw * 0.22 && w < run * 0.88 && y > runRow + 4) {
+            headW = run
+            phase = 1
+          }
+        }
+        if (phase === 1) {
+          if (w < neckW) {
+            neckW = w
+            neckRow = y
+          }
+          if (w > headW * 1.12 && y > neckRow + 2) {
+            shoulder = y
+            break
+          }
+        }
+      }
+      if (!headW) headW = Math.min(sw * 0.62, run || sw * 0.5)
+      const cutY = Math.min(sh - 1, shoulder > 0 ? shoulder + headW * 0.06 : top + headW * 1.45)
+      const chinY = neckRow > 0 ? neckRow : top + headW * 1.15
+      const neckHalf = Math.max(headW * 0.34, (neckW < 1e8 ? neckW : headW * 0.6) * 0.56)
+      log.head = { top, w: headW, neck: neckRow, cut: Math.round(cutY) }
+      let cxSum = 0
+      let cxN = 0
+      for (let y = top + Math.round(headW * 0.15); y < top + Math.round(headW * 0.7) && y < sh; y += 2) {
+        const sp = rowSpan(y)
+        if (sp) {
+          cxSum += (sp[0] + sp[1]) / 2
+          cxN += 1
+        }
+      }
+      const cx = cxN ? cxSum / cxN : sw / 2
+      // 3) 회색 머리가 배경색과 비슷해 깎인 곳을 메운다 (머리 윗부분 줄은 좌우 끝 사이가 모두 머리)
+      for (let y = top; y < top + Math.round(headW * 0.55) && y < sh; y += 1) {
+        const sp = rowSpan(y)
+        if (!sp || sp[1] - sp[0] > headW * 1.15) continue
+        for (let x = sp[0]; x <= sp[1]; x += 1) {
           const i = (y * sw + x) * 4
           if (d[i + 3] <= 128) {
             d[i] = rawPx[i]
@@ -11854,84 +11868,196 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           d[i + 3] = 255
         }
       }
-      const cutY = sM.y + sDem * 2.1
-      const fadeH = Math.max(6, sDem * 0.4)
-      const chinY = sM.y + sDem * 1.75
+      cctx.putImageData(cd, 0, 0)
+      // 4) 생성된 전신의 머리와 겹쳐 보아 크기·위치를 찾는다
+      const K = Math.max(2, Math.round(gw / 176))
+      const lowW = Math.round(gw / K)
+      const lowH = Math.round(gh / K)
+      const lumaOf = (cv, w, h) => {
+        const dd = cv.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data
+        const out = new Float32Array(w * h)
+        for (let i = 0; i < w * h; i += 1) out[i] = dd[i * 4] * 0.299 + dd[i * 4 + 1] * 0.587 + dd[i * 4 + 2] * 0.114
+        return out
+      }
+      const scaled = (img, w, h) => {
+        const c = document.createElement('canvas')
+        c.width = w
+        c.height = h
+        const x = c.getContext('2d', { willReadFrequently: true })
+        x.imageSmoothingQuality = 'high'
+        x.drawImage(img, 0, 0, w, h)
+        return c
+      }
+      const tplX0 = Math.max(0, Math.round(cx - headW * 0.65))
+      const tplX1 = Math.min(sw, Math.round(cx + headW * 0.65))
+      const tplY0 = top
+      const tplY1 = Math.min(sh, Math.round(top + headW * 1.25))
+      const makeTpl = (s, k) => {
+        const tw = Math.max(6, Math.round(((tplX1 - tplX0) * s) / k))
+        const th = Math.max(6, Math.round(((tplY1 - tplY0) * s) / k))
+        const c = document.createElement('canvas')
+        c.width = tw
+        c.height = th
+        const x = c.getContext('2d', { willReadFrequently: true })
+        x.imageSmoothingQuality = 'high'
+        x.drawImage(cut, tplX0, tplY0, tplX1 - tplX0, tplY1 - tplY0, 0, 0, tw, th)
+        const dd = x.getImageData(0, 0, tw, th).data
+        const idx = []
+        const val = []
+        let sum = 0
+        let sum2 = 0
+        for (let i = 0; i < tw * th; i += 1) {
+          if (dd[i * 4 + 3] > 200) {
+            const l = dd[i * 4] * 0.299 + dd[i * 4 + 1] * 0.587 + dd[i * 4 + 2] * 0.114
+            idx.push(i)
+            val.push(l)
+            sum += l
+            sum2 += l * l
+          }
+        }
+        const n = idx.length
+        const mean = n ? sum / n : 0
+        const varT = Math.max(1e-6, sum2 - n * mean * mean)
+        return { tw, th, idx, val, n, mean, varT, cxOff: ((cx - tplX0) * s) / k }
+      }
+      const ncc = (tpl, G, gW, ox, oy) => {
+        let sg = 0
+        let sg2 = 0
+        let stg = 0
+        for (let j = 0; j < tpl.n; j += 1) {
+          const i = tpl.idx[j]
+          const x = ox + (i % tpl.tw)
+          const y = oy + Math.floor(i / tpl.tw)
+          const g = G[y * gW + x]
+          sg += g
+          sg2 += g * g
+          stg += tpl.val[j] * g
+        }
+        const covar = stg - tpl.mean * sg
+        const varG = sg2 - (sg * sg) / tpl.n
+        return covar / Math.sqrt(tpl.varT * Math.max(1e-6, varG))
+      }
+      const G1 = lumaOf(scaled(gImg, lowW, lowH), lowW, lowH)
+      let best = { score: -2, s: 1, ox: 0, oy: 0 }
+      const sLo = (0.1 * gw) / headW
+      const sHi = (0.3 * gw) / headW
+      for (let s = sLo; s <= sHi; s *= 1.045) {
+        const tpl = makeTpl(s, K)
+        if (tpl.n < 40) continue
+        const x0 = Math.max(0, Math.round(lowW * 0.3 - tpl.cxOff))
+        const x1 = Math.min(lowW - tpl.tw, Math.round(lowW * 0.7 - tpl.cxOff))
+        const y1 = Math.min(lowH - tpl.th, Math.round(lowH * 0.22))
+        for (let oy = 0; oy <= y1; oy += 1) {
+          for (let ox = x0; ox <= x1; ox += 1) {
+            const sc = ncc(tpl, G1, lowW, ox, oy)
+            if (sc > best.score) best = { score: sc, s, ox, oy }
+          }
+        }
+      }
+      if (best.score < 0.3) return fail('no_match', { score: Number(best.score.toFixed(3)) })
+      // 5) 더 촘촘한 격자에서 다듬는다
+      const K2 = Math.max(1, Math.round(K / 3))
+      const midW = Math.round(gw / K2)
+      const midH = Math.round(gh / K2)
+      const G2 = lumaOf(scaled(gImg, midW, midH), midW, midH)
+      const f = K / K2
+      let fine = { score: -2, s: best.s, ox: Math.round(best.ox * f), oy: Math.round(best.oy * f) }
+      for (const m of [0.955, 0.97, 0.985, 1, 1.015, 1.03, 1.045]) {
+        const s = best.s * m
+        const tpl = makeTpl(s, K2)
+        if (tpl.n < 40) continue
+        const bx = Math.round(best.ox * f)
+        const by = Math.round(best.oy * f)
+        for (let oy = by - 5; oy <= by + 5; oy += 1) {
+          for (let ox = bx - 5; ox <= bx + 5; ox += 1) {
+            if (ox < 0 || oy < 0 || ox + tpl.tw > midW || oy + tpl.th > midH) continue
+            const sc = ncc(tpl, G2, midW, ox, oy)
+            if (sc > fine.score) fine = { score: sc, s, ox, oy }
+          }
+        }
+      }
+      if (fine.score < 0.3) return fail('no_match_fine', { score: Number(fine.score.toFixed(3)) })
+      const scale = fine.s
+      // 템플릿 왼쪽 위 (tplX0, tplY0)가 생성 이미지의 (ox*K2, oy*K2)에 놓인다
+      const gAx = fine.ox * K2 - tplX0 * scale
+      const gAy = fine.oy * K2 - tplY0 * scale
+      log.scale = Number(scale.toFixed(3))
+      log.score = Number(fine.score.toFixed(3))
+      // 6) 목 아래로 자르는 선과 좌우 폭
       for (let y = 0; y < sh; y += 1) {
-        const vy = y >= cutY ? 0 : y > cutY - fadeH ? (cutY - y) / fadeH : 1
-        // 목 아래로 갈수록 좌우를 좁혀 어깨 조각이 따라오지 않게 한다
+        const vy = y >= cutY ? 0 : y > cutY - headW * 0.16 ? (cutY - y) / (headW * 0.16) : 1
         const half =
-          y <= chinY ? sIoc * 1.75 : sIoc * (1.75 - 0.75 * Math.min(1, (y - chinY) / Math.max(1, cutY - chinY)))
+          y <= chinY
+            ? headW * 0.58
+            : headW * 0.58 + (neckHalf - headW * 0.58) * Math.min(1, (y - chinY) / Math.max(1, cutY - chinY))
         for (let x = 0; x < sw; x += 1) {
           const i = (y * sw + x) * 4
           if (vy <= 0) {
             d[i + 3] = 0
             continue
           }
-          const dx = Math.abs(x - sM.x)
+          const dx = Math.abs(x - cx)
           const hx = dx <= half - 6 ? 1 : dx >= half ? 0 : (half - dx) / 6
           d[i + 3] = Math.round(d[i + 3] * vy * hx)
         }
       }
       cctx.putImageData(cd, 0, 0)
-      const opaque = (() => {
-        let n = 0
-        for (let i = 3; i < d.length; i += 16) if (d[i] > 128) n += 1
-        return n / (d.length / 16)
-      })()
-      log.opaque = Number(opaque.toFixed(3))
-      if (opaque < 0.03) {
-        log.skip = 'empty_cut'
-        return { url: '', log }
-      }
-      // 전신: 만들어진 머리를 배경색으로 지운다 (머리가 원본보다 크면 찌꺼기가 남지 않게)
+      // 7) 전신: 만들어진 머리를 주변 배경색으로 부드럽게 지운다 (원본 머리보다 큰 부분이 남지 않게)
       const out = document.createElement('canvas')
       out.width = gw
       out.height = gh
       const octx = out.getContext('2d', { willReadFrequently: true })
       octx.drawImage(gImg, 0, 0)
-      const gMouth = gE.real ? pt(gFace, 'mouth', gw, gh) : null
-      const gDem = gMouth && gMouth.y > gM.y ? gMouth.y - gM.y : sDem * scale
-      const eraseY = Math.min(gh - 1, Math.round(gM.y + gDem * 1.55))
-      const ex0 = Math.max(0, Math.round(gM.x - gIoc * 2.1))
-      const ex1 = Math.min(gw - 1, Math.round(gM.x + gIoc * 2.1))
-      const bx0 = Math.max(0, Math.round(gM.x - gIoc * 2.7))
-      const bx1 = Math.min(gw - 5, Math.round(gM.x + gIoc * 2.7))
-      const od = octx.getImageData(0, 0, gw, gh)
-      const g = od.data
-      const avg = (y, x0) => {
-        let r = 0
-        let gg = 0
-        let b = 0
-        for (let k = 0; k < 5; k += 1) {
-          const i = (y * gw + x0 + k) * 4
-          r += g[i]
-          gg += g[i + 1]
-          b += g[i + 2]
+      const hx0 = gAx + (cx - headW * 0.78) * scale
+      const hx1 = gAx + (cx + headW * 0.78) * scale
+      const ex0 = Math.max(6, Math.round(hx0))
+      const ex1 = Math.min(gw - 7, Math.round(hx1))
+      const ey0 = 0
+      const ey1 = Math.min(gh - 8, Math.round(gAy + chinY * scale))
+      if (ex1 - ex0 > 8 && ey1 - ey0 > 8) {
+        const od = octx.getImageData(0, 0, gw, gh)
+        const g = od.data
+        const at = (x, y, c) => g[(Math.min(gh - 1, Math.max(0, y)) * gw + Math.min(gw - 1, Math.max(0, x))) * 4 + c]
+        const edgeAvg = (x, y, c, dx, dy) => {
+          let s = 0
+          for (let k = 0; k < 4; k += 1) s += at(x + dx * (5 + k), y + dy * (5 + k), c)
+          return s / 4
         }
-        return [r / 5, gg / 5, b / 5]
-      }
-      for (let y = 0; y < eraseY; y += 1) {
-        const L = avg(y, Math.max(0, bx0 - 5))
-        const R = avg(y, bx1)
-        const feather = y > eraseY - 8 ? (eraseY - y) / 8 : 1
-        for (let x = ex0; x <= ex1; x += 1) {
-          const t = (x - ex0) / Math.max(1, ex1 - ex0)
-          const edge = Math.min(1, (x - ex0) / 8, (ex1 - x) / 8) * feather
-          const i = (y * gw + x) * 4
-          for (let c = 0; c < 3; c += 1) {
-            const fill = L[c] * (1 - t) + R[c] * t
-            g[i + c] = g[i + c] * (1 - edge) + fill * edge
+        const W = ex1 - ex0
+        const H = ey1 - ey0
+        const fill = new Float32Array(W * H * 3)
+        for (let yy = 0; yy < H; yy += 1) {
+          const u = yy / Math.max(1, H - 1)
+          for (let xx = 0; xx < W; xx += 1) {
+            const t = xx / Math.max(1, W - 1)
+            for (let c = 0; c < 3; c += 1) {
+              const Lc = edgeAvg(ex0, ey0 + yy, c, -1, 0)
+              const Rc = edgeAvg(ex1, ey0 + yy, c, 1, 0)
+              const Tc = ey0 === 0 ? at(ex0 + xx, 0, c) : edgeAvg(ex0 + xx, ey0, c, 0, -1)
+              const Bc = edgeAvg(ex0 + xx, ey1, c, 0, 1)
+              const corner =
+                (1 - t) * (1 - u) * (ey0 === 0 ? at(ex0, 0, c) : edgeAvg(ex0, ey0, c, 0, -1)) +
+                t * (1 - u) * (ey0 === 0 ? at(ex1, 0, c) : edgeAvg(ex1, ey0, c, 0, -1)) +
+                (1 - t) * u * edgeAvg(ex0, ey1, c, 0, 1) +
+                t * u * edgeAvg(ex1, ey1, c, 0, 1)
+              fill[(yy * W + xx) * 3 + c] = (1 - t) * Lc + t * Rc + (1 - u) * Tc + u * Bc - corner
+            }
           }
         }
+        const ramp = Math.max(14, Math.round((ex1 - ex0) * 0.22))
+        for (let yy = 0; yy < H; yy += 1) {
+          for (let xx = 0; xx < W; xx += 1) {
+            const a = Math.min(1, xx / ramp, (W - 1 - xx) / ramp, (H - 1 - yy) / ramp)
+            const i = ((ey0 + yy) * gw + ex0 + xx) * 4
+            for (let c = 0; c < 3; c += 1) g[i + c] = g[i + c] * (1 - a) + fill[(yy * W + xx) * 3 + c] * a
+          }
+        }
+        octx.putImageData(od, 0, 0)
       }
-      octx.putImageData(od, 0, 0)
-      // 원본 머리를 눈 위치 기준으로 얹는다
+      // 8) 원본 머리를 얹는다
       octx.save()
-      octx.translate(gM.x, gM.y)
-      octx.rotate(rot)
+      octx.translate(gAx, gAy)
       octx.scale(scale, scale)
-      octx.translate(-sM.x, -sM.y)
       octx.imageSmoothingQuality = 'high'
       octx.drawImage(cut, 0, 0)
       octx.restore()
@@ -11939,9 +12065,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       log.ms = Date.now() - t0
       return { url: out.toDataURL('image/png'), log }
     } catch (err) {
-      log.skip = 'err'
-      log.message = err instanceof Error ? err.message : String(err)
-      return { url: '', log }
+      return fail('err', { message: err instanceof Error ? err.message : String(err) })
     }
   }
 
