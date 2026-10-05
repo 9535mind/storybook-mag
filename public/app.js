@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw183'
+window.__DESK_BUILD = '20261005mw184'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8685,33 +8685,47 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return [Math.round(r / n), Math.round(g / n), Math.round(b / n)]
   }
 
-  async function buildBodyContinueCanvas(src, size) {
+  async function buildBodyContinueCanvas(src, size, opts) {
     const [cw, ch] = Array.isArray(size) ? size : [768, 1152]
     const img = await loadHtmlImage(src)
+    const iw = Math.max(1, img.naturalWidth)
+    const ih = Math.max(1, img.naturalHeight)
     const canvas = document.createElement('canvas')
     canvas.width = cw
     canvas.height = ch
     const ctx = canvas.getContext('2d')
     const [br, bg, bb] = samplePhotoBottomRgb(img)
-    ctx.fillStyle = `rgb(${br},${bg},${bb})`
-    ctx.fillRect(0, 0, cw, ch)
+    // 사진 크기: 기본은 캔버스 높이의 62%. 가슴 위 클로즈업이면 머리가 거대해지므로, 머리(머리카락 포함)가
+    // 키의 약 14.5% 가 되도록 사진을 줄여 놓는다. 나머지 몸과 장면은 모델이 이어 그린다.
     const maxPhotoH = Math.round(ch * 0.62)
-    const scale = Math.min(cw / Math.max(img.naturalWidth, 1), maxPhotoH / Math.max(img.naturalHeight, 1))
-    const dw = Math.max(8, Math.round(img.naturalWidth * scale))
-    const dh = Math.max(8, Math.round(img.naturalHeight * scale))
+    let scale = Math.min(cw / iw, maxPhotoH / ih)
+    const faceH = Number(opts?.faceH)
+    if (faceH > 0.05) {
+      const headFrac = Math.min(0.9, faceH * 1.35)
+      scale = Math.min(scale, (0.145 * ch) / headFrac / ih)
+    }
+    const dw = Math.max(8, Math.round(iw * scale))
+    const dh = Math.max(8, Math.round(ih * scale))
     const dx = Math.round((cw - dw) / 2)
-    const dy = 0
-    ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh)
-    // 좌우 여백: 사진 가장자리 4px 를 옆으로 늘려 채운다 (아래쪽 빈 곳과 같은 방식. 거울로 이으면 옆 사람·소품이 복제되어 모델이 따라 그린다)
-    const margin = dx
-    if (margin > 4) {
-      ctx.drawImage(img, 0, 0, 4, img.naturalHeight, 0, dy, margin + 2, dh)
-      ctx.drawImage(img, img.naturalWidth - 4, 0, 4, img.naturalHeight, dx + dw - 2, dy, margin + 2, dh)
-      ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh)
+    const dy = faceH > 0.05 ? Math.round(ch * 0.02) : 0
+    // 빈 곳은 사진 가장자리 4px 를 늘려 채운 뒤 크게 번지게 한다 (세로줄 무늬를 그대로 두면 모델이 줄무늬를 따라 그리고, 사진이 액자처럼 떠 보인다)
+    const fill = document.createElement('canvas')
+    fill.width = cw
+    fill.height = ch
+    const fctx = fill.getContext('2d')
+    fctx.fillStyle = `rgb(${br},${bg},${bb})`
+    fctx.fillRect(0, 0, cw, ch)
+    if (dx > 2) {
+      fctx.drawImage(img, 0, 0, 4, ih, 0, dy, dx + 2, dh)
+      fctx.drawImage(img, iw - 4, 0, 4, ih, dx + dw - 2, dy, cw - dx - dw + 2, dh)
     }
-    if (dh < ch) {
-      ctx.drawImage(img, 0, img.naturalHeight - 6, img.naturalWidth, 6, 0, dh - 2, cw, ch - dh + 2)
-    }
+    if (dy > 2) fctx.drawImage(img, 0, 0, iw, 4, dx, 0, dw, dy + 2)
+    if (dy + dh < ch) fctx.drawImage(img, 0, ih - 6, iw, 6, 0, dy + dh - 2, cw, ch - dy - dh + 2)
+    ctx.save()
+    ctx.filter = `blur(${Math.max(14, Math.round(cw * 0.03))}px)`
+    ctx.drawImage(fill, -20, -20, cw + 40, ch + 40)
+    ctx.restore()
+    ctx.drawImage(img, 0, 0, iw, ih, dx, dy, dw, dh)
     // 보호 마스크: 검정 = 원본 화소를 그대로 둔다. 사진 거의 전체(90%)를 지키고 가장자리는 부드럽게
     const mask = document.createElement('canvas')
     mask.width = cw
@@ -8723,7 +8737,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     const blend = Math.max(16, Math.round(dh * 0.1))
     mctx.fillStyle = '#000'
     mctx.fillRect(dx, dy, dw, keepH)
-    const fade = mctx.getImageData(dx, dy + keepH, dw, Math.min(blend, ch - keepH))
+    const fade = mctx.getImageData(dx, dy + keepH, dw, Math.max(1, Math.min(blend, ch - dy - keepH)))
     for (let y = 0; y < fade.height; y += 1) {
       const t = y / Math.max(fade.height - 1, 1)
       const v = Math.round(255 * t)
@@ -8736,12 +8750,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
     }
     mctx.putImageData(fade, dx, dy + keepH)
-    // 좌우·위 가장자리를 부드럽게 (복원할 때 경계선이 보이지 않게)
+    // 좌우·위 가장자리를 부드럽게 (복원할 때 경계선이 보이지 않게). 사진이 작을수록 더 넓게 번지게 한다
     const soft = document.createElement('canvas')
     soft.width = cw
     soft.height = ch
     const sctx = soft.getContext('2d')
-    sctx.filter = `blur(${Math.max(3, Math.round(dw * 0.012))}px)`
+    sctx.filter = `blur(${Math.max(5, Math.round(dw * 0.03))}px)`
     sctx.drawImage(mask, 0, 0)
     return {
       image: canvas.toDataURL('image/jpeg', 0.92),
@@ -8754,6 +8768,135 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       dy,
       dw,
       dh,
+    }
+  }
+
+  /**
+   * 이어 그린 결과 안에서 원본 사진이 놓인 위치·크기를 겹쳐 맞춰 찾은 뒤, 그 자리에 원본 화소를 그대로 복원한다.
+   * (모델이 사진을 조금 다른 크기·위치로 다시 그려도 얼굴이 이중으로 보이지 않게 한다)
+   * 못 찾으면(일치도 0.75 미만) url 을 비워 돌려준다. 가짜 얼굴로 대신하지 않기 위해 호출한 쪽이 실패로 처리한다.
+   */
+  async function restoreOriginalPhotoOnContinued(resultUrl, prepared, sourceUrl) {
+    const log = {}
+    try {
+      const [out, src] = await Promise.all([loadHtmlImage(resultUrl), loadHtmlImage(sourceUrl)])
+      const rw = out.naturalWidth
+      const rh = out.naturalHeight
+      const kx = rw / prepared.cw
+      const ky = rh / prepared.ch
+      const x0 = prepared.dx * kx
+      const y0 = prepared.dy * ky
+      const w0 = prepared.dw * kx
+      const h0 = prepared.dh * ky
+      const grayOf = (img, w, h) => {
+        const c = document.createElement('canvas')
+        c.width = Math.max(2, w)
+        c.height = Math.max(2, h)
+        const x = c.getContext('2d', { willReadFrequently: true })
+        x.imageSmoothingQuality = 'high'
+        x.drawImage(img, 0, 0, c.width, c.height)
+        const d = x.getImageData(0, 0, c.width, c.height).data
+        const g = new Float32Array(c.width * c.height)
+        for (let i = 0; i < g.length; i += 1) g[i] = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114
+        return { g, w: c.width, h: c.height }
+      }
+      const ncc = (T, G, ox, oy, stride) => {
+        let st = 0
+        let sg = 0
+        let st2 = 0
+        let sg2 = 0
+        let stg = 0
+        let n = 0
+        for (let y = 0; y < T.h; y += stride) {
+          const gy = oy + y
+          if (gy < 0 || gy >= G.h) return -2
+          for (let x = 0; x < T.w; x += stride) {
+            const gx = ox + x
+            if (gx < 0 || gx >= G.w) return -2
+            const t = T.g[y * T.w + x]
+            const g = G.g[gy * G.w + gx]
+            st += t
+            sg += g
+            st2 += t * t
+            sg2 += g * g
+            stg += t * g
+            n += 1
+          }
+        }
+        const vt = st2 - (st * st) / n
+        const vg = sg2 - (sg * sg) / n
+        return (stg - (st * sg) / n) / Math.sqrt(Math.max(1e-6, vt) * Math.max(1e-6, vg))
+      }
+      const D = 2
+      const G1 = grayOf(out, Math.round(rw / D), Math.round(rh / D))
+      let best = { score: -2, s: 1, ox: 0, oy: 0 }
+      for (const s of [0.8, 0.88, 0.94, 1, 1.06, 1.13, 1.22, 1.32, 1.45]) {
+        const T = grayOf(src, Math.round((w0 * s) / D), Math.round((h0 * s) / D))
+        const baseX = Math.round((x0 + w0 / 2) / D - T.w / 2)
+        const baseY = Math.round(y0 / D)
+        for (let oy = -20; oy <= 20; oy += 2) {
+          for (let ox = -20; ox <= 20; ox += 2) {
+            const sc = ncc(T, G1, baseX + ox, baseY + oy, 2)
+            if (sc > best.score) best = { score: sc, s, ox: baseX + ox, oy: baseY + oy }
+          }
+        }
+      }
+      log.coarse = Number(best.score.toFixed(3))
+      log.scale = best.s
+      if (best.score < 0.6) {
+        log.skip = 'no_match'
+        return { url: '', log }
+      }
+      // 전 해상도에서 다듬기
+      const G2 = grayOf(out, rw, rh)
+      let fine = { score: -2, s: best.s, ox: best.ox * D, oy: best.oy * D }
+      for (const m of [0.97, 1, 1.03]) {
+        const s = best.s * m
+        const T = grayOf(src, Math.round(w0 * s), Math.round(h0 * s))
+        for (let oy = -3; oy <= 3; oy += 1) {
+          for (let ox = -3; ox <= 3; ox += 1) {
+            const sc = ncc(T, G2, best.ox * D + ox, best.oy * D + oy, 3)
+            if (sc > fine.score) fine = { score: sc, s, ox: best.ox * D + ox, oy: best.oy * D + oy, tw: T.w, th: T.h }
+          }
+        }
+      }
+      log.score = Number(fine.score.toFixed(3))
+      log.final = { s: Number(fine.s.toFixed(3)), x: fine.ox, y: fine.oy }
+      if (fine.score < 0.75) {
+        log.skip = 'low_match'
+        return { url: '', log }
+      }
+      const px = fine.ox
+      const py = fine.oy
+      const pw = fine.tw
+      const ph = fine.th
+      const layer = document.createElement('canvas')
+      layer.width = rw
+      layer.height = rh
+      const lctx = layer.getContext('2d')
+      lctx.imageSmoothingQuality = 'high'
+      lctx.drawImage(src, px, py, pw, ph)
+      const feather = Math.max(6, Math.round(pw * 0.03))
+      const mk = document.createElement('canvas')
+      mk.width = rw
+      mk.height = rh
+      const mctx = mk.getContext('2d')
+      mctx.filter = `blur(${feather}px)`
+      mctx.fillStyle = '#fff'
+      mctx.fillRect(px + feather, py + feather, pw - feather * 2, Math.round(ph * 0.9) - feather)
+      lctx.globalCompositeOperation = 'destination-in'
+      lctx.drawImage(mk, 0, 0)
+      const res = document.createElement('canvas')
+      res.width = rw
+      res.height = rh
+      const rctx = res.getContext('2d')
+      rctx.drawImage(out, 0, 0, rw, rh)
+      rctx.drawImage(layer, 0, 0)
+      return { url: res.toDataURL('image/jpeg', 0.92), log }
+    } catch (err) {
+      log.skip = 'err'
+      log.message = err instanceof Error ? err.message : String(err)
+      return { url: '', log }
     }
   }
 
@@ -13099,7 +13242,16 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         contLog.tries.push(tryLog)
         try {
           setStatus(`${index}/${total} 사진의 장면을 살려 아래로 이어 그리는 중… (${attempt + 1}/2)`, false)
-          const prepared = await buildBodyContinueCanvas(source, [864, 1152])
+          // 얼굴 크기(사진 높이 대비)를 재서, 클로즈업이면 사진을 줄여 머리가 정상 크기가 되게 한다
+          let faceH = 0
+          try {
+            const fb = await detectFaceBox(source, 'id')
+            faceH = fb && Number(fb.h) > 0.05 ? Number(fb.h) : 0
+          } catch (_) {
+            faceH = 0
+          }
+          tryLog.faceH = Number(faceH.toFixed(3))
+          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH })
           const contT0 = Date.now()
           // 한 번에 최대 110초
           const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110)
@@ -13109,7 +13261,14 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             tryLog.reason = 'no_result'
             continue
           }
-          const restored = await restoreProtectedExtendPixels(alt.display, prepared)
+          // 모델이 사진을 다른 크기·위치로 다시 그렸을 수 있어, 결과 안에서 원본 위치를 찾아 그 자리에 복원한다
+          const rr = await restoreOriginalPhotoOnContinued(alt.display, prepared, source)
+          tryLog.restore = rr.log
+          if (!rr.url) {
+            tryLog.reason = 'restore_miss'
+            continue
+          }
+          const restored = rr.url
           tryLog.black = await isSolidBlackPhoto(restored)
           tryLog.faces = typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(restored, 4000) : 1
           tryLog.paint = Number((await looksPainted(restored)).toFixed(2))

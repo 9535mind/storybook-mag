@@ -184,7 +184,7 @@ const loadHtmlCrash = /loadHtmlImage is not defined/i.test(allText)
 const stepFail = /걸음 실패/i.test(`${final.status} ${final.form}`)
 const bodyOn = (afterCast.womanSrc || afterCast.manSrc) && !afterCast.bodyDisabled
 const extended = /이었습니다/.test(`${final.status} ${final.form}`)
-const ok = /20261005mw183/.test(afterCast.build) && bodyOn && clicked && !loadHtmlCrash && !stepFail && extended
+const ok = /20261005mw184/.test(afterCast.build) && bodyOn && clicked && !loadHtmlCrash && !stepFail && extended
 const report = {
   base: BASE,
   ok,

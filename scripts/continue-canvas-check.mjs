@@ -20,7 +20,7 @@ const br = await chromium.launch({ executablePath: 'C:/Program Files (x86)/Micro
 const page = await br.newPage(); await page.setContent('<html></html>')
 const res = await page.evaluate(async ({ src, u }) => {
   const f = new Function(src + '; return { buildBodyContinueCanvas, restoreProtectedExtendPixels, loadHtmlImage }')()
-  const prepared = await f.buildBodyContinueCanvas(u, [864, 1152])
+  const prepared = await f.buildBodyContinueCanvas(u, [864, 1152], { faceH: 0.45 })
   // 모델 출력 대신: 캔버스를 880x1184 로 늘려 전체를 어둡게(= 원본 영역도 바뀐 것처럼)
   const img = await f.loadHtmlImage(prepared.image)
   const c = document.createElement('canvas'); c.width = 880; c.height = 1184
