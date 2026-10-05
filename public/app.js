@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw204'
+window.__DESK_BUILD = '20261005mw205'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12987,10 +12987,19 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     const log = { engine: 'facecut' }
     try {
       const [dstImg, srcImg] = await Promise.all([loadHtmlImage(standingUrl), loadHtmlImage(sourceUrl)])
-      const sbn = boxes?.src || (await detectFaceBox(sourceUrl))
-      const dbn = boxes?.dst || (await detectFaceBox(standingUrl))
+      const sbn = boxes?.src || (await detectFaceBox(sourceUrl, 'id'))
+      let dbn = boxes?.dst || (await detectFaceBox(standingUrl, 'target'))
+      const r3 = (v) => (v ? { x: Number(v.x.toFixed(3)), y: Number(v.y.toFixed(3)), w: Number(v.w.toFixed(3)), h: Number(v.h.toFixed(3)) } : null)
+      log.srcBox = r3(sbn)
+      log.dstBox = r3(dbn)
+      // 서서 전신의 얼굴은 폭이 작다(0.25 이하). 크게 나오면 상자를 잘못 잡은 것이니 피부색 탐지로 다시 잡는다
+      if (dbn && (dbn.w > 0.25 || dbn.h > 0.22)) {
+        const est = await estimateFaceBoxFromImage(standingUrl, { centerOnly: true, scanTop: 0.3 })
+        log.dstEst = r3(est)
+        dbn = est && est.w <= 0.25 && est.h <= 0.22 ? est : null
+      }
       if (!sbn || !dbn || !(sbn.w > 0.05) || !(dbn.w > 0.02)) {
-        log.skip = 'no_face_box'
+        log.skip = dbn ? 'no_face_box' : 'dst_face_big'
         return { url: '', log }
       }
       const W = dstImg.naturalWidth
