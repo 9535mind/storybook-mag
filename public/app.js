@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw171'
+window.__DESK_BUILD = '20261005mw172'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12470,51 +12470,56 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const pAx = pgx - cx * scale2
       const pAy = pgy - chinY * scale2
       log.shrink = shrink
+      // 얹은 머리를 생성 크기의 임시 판에 그려 두고, 열마다 생성된 검은 깃(터틀넥·재킷)이 시작하는 높이에서 끊는다.
+      // (깃 윗선은 곡선이라 한 줄로 끊으면 양옆에서 살색이 검은 깃 위에 겹쳐 갈색 띠가 된다)
+      const pc = document.createElement('canvas')
+      pc.width = gw
+      pc.height = gh
+      const pctx = pc.getContext('2d', { willReadFrequently: true })
+      pctx.save()
+      pctx.translate(pAx, pAy)
+      pctx.scale(scale2, scale2)
+      pctx.imageSmoothingQuality = 'high'
+      pctx.drawImage(cut, 0, 0)
+      pctx.restore()
       {
-        // 얹은 목의 살색이 생성된 검은 깃 위에 겹치면 갈색 띠가 된다. 깃이 시작하는 줄에서 얹은 머리를 서서히 끊는다
-        const sx0 = Math.max(0, Math.round(pgx - headW * scale2 * 0.15))
-        const sx1 = Math.min(gw - 1, Math.round(pgx + headW * scale2 * 0.15))
         const gdata = octx.getImageData(0, 0, gw, gh).data
+        const pimg = pctx.getImageData(0, 0, gw, gh)
+        const pd = pimg.data
         const yStart = Math.max(0, Math.round(pgy - headW * scale2 * 0.08))
-        const yEnd = Math.min(gh - 8, Math.round(pgy + headW * scale2 * 0.75))
-        const rowLuma = (y) => {
+        const yEnd = Math.min(gh - 6, Math.round(pgy + headW * scale2 * 0.8))
+        const xa = Math.max(1, Math.round(pgx - headW * scale2 * 0.75))
+        const xb = Math.min(gw - 2, Math.round(pgx + headW * scale2 * 0.75))
+        const lumaAt = (x, y) => {
           let sum = 0
-          for (let x = sx0; x <= sx1; x += 1) {
-            const i = (y * gw + x) * 4
+          for (let dx = -1; dx <= 1; dx += 1) {
+            const i = (y * gw + x + dx) * 4
             sum += gdata[i] * 0.299 + gdata[i + 1] * 0.587 + gdata[i + 2] * 0.114
           }
-          return sum / Math.max(1, sx1 - sx0 + 1)
+          return sum / 3
         }
-        let collarY = -1
-        for (let y = yStart; y < yEnd && collarY < 0; y += 1) {
-          if (rowLuma(y) < 70) {
-            let ok = 0
-            for (let k = 0; k < 6; k += 1) if (rowLuma(y + k) < 70) ok += 1
-            if (ok >= 6) collarY = y
-          }
-        }
-        if (collarY > 0) {
-          const yc = (collarY - 1 - pAy) / scale2
-          const fadeRows = Math.max(4, headW * 0.05)
-          const cdd = cctx.getImageData(0, 0, sw, sh)
-          const cdat = cdd.data
-          for (let y = Math.max(0, Math.floor(yc - fadeRows)); y < sh; y += 1) {
-            const f = y >= yc ? 0 : (yc - y) / fadeRows
-            for (let x = 0; x < sw; x += 1) {
-              const i = (y * sw + x) * 4 + 3
-              cdat[i] = Math.round(cdat[i] * f)
+        let clipped = 0
+        for (let x = xa; x <= xb; x += 1) {
+          let cy = -1
+          for (let y = yStart; y < yEnd && cy < 0; y += 1) {
+            if (lumaAt(x, y) < 100) {
+              let ok = 0
+              for (let k = 1; k <= 4; k += 1) if (lumaAt(x, y + k) < 85) ok += 1
+              if (ok >= 4) cy = y - 1
             }
           }
-          cctx.putImageData(cdd, 0, 0)
-          log.collarY = collarY
+          if (cy < 0) continue
+          clipped += 1
+          for (let y = Math.max(0, cy - 2); y < gh; y += 1) {
+            const f = y >= cy ? 0 : (cy - y) / 2
+            const i = (y * gw + x) * 4 + 3
+            pd[i] = Math.round(pd[i] * f)
+          }
         }
+        pctx.putImageData(pimg, 0, 0)
+        log.collarCols = clipped
       }
-      octx.save()
-      octx.translate(pAx, pAy)
-      octx.scale(scale2, scale2)
-      octx.imageSmoothingQuality = 'high'
-      octx.drawImage(cut, 0, 0)
-      octx.restore()
+      octx.drawImage(pc, 0, 0)
       log.ok = true
       log.ms = Date.now() - t0
       return { url: out.toDataURL('image/png'), log }
