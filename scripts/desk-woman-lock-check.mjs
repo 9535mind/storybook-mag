@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * 여자 몸 잇기 잠금 점검(2026-10-05 수정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw189)
+ * 여자 몸 잇기 잠금 점검(2026-10-05 확정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
+ * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-final)
  * 사용: node scripts/desk-woman-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'
@@ -50,6 +50,11 @@ const checks = [
   ['종아리를 굵게 그리라는 문구가 없다', !/Thick healthy thighs and calves/.test(tale) && /slim calves that taper to slim ankles/.test(tale)],
   ['서버 이어 그리기 모드 문구(좌우 여백·자연스러운 비율)', /stretched empty space below it and at both sides/.test(tale) && /head is about one seventh of the full body height/.test(tale)],
   ['남자 경로는 엄격 조건 없이 그대로', /isManHold \? undefined/.test(app)],
+  ['양옆 줄무늬는 거절하지 않고 부드러운 배경으로 정리한다(sidesStreaky·softenStreakSides)', /const sidesStreaky = async/.test(app) && /async function softenStreakSides\(/.test(app) && /tryLog\.softened = 1/.test(app)],
+  ['얼굴이 크면(가분수) 머리를 최대 12% 줄이고, 줄여도 가분수면 big_head 로 거절', /async function shrinkContinuedHead\(/.test(app) && /Math\.max\(0\.88, Math\.min\(1, raw\)\)/.test(app) && /raw < 0\.8\) return 'too_big'/.test(app) && /tryLog\.reason = 'big_head'/.test(app)],
+  ['검은 결과가 이어지면 3번째 시도는 단일 이미지 편집', /attempt >= 2 && attempt % 2 === 0 && tryLogs\[attempt - 1\]\?\.reason === 'black'/.test(app)],
+  ['얼굴 오려 얹기(후보 전신)는 기본 꺼짐: __deskWomanFaceCut === true 일 때만', /window\.__deskWomanFaceCut === true\) \{/.test(app) && !/__deskFaceCutMode/.test(app)],
+  ['서버 필터 표시를 실패 문구에 기록(필터0/1)', /nsfw: Boolean\(result\.nsfwFlagged\)/.test(readFileSync(path.join(ROOT, 'functions', 'api', 'tale-scene-status.ts'), 'utf8')) && /필터\$\{t\.nsfw\}/.test(app)],
 ]
 
 let failed = 0

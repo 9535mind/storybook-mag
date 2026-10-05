@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw209'
+window.__DESK_BUILD = '20261005mw210'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -13106,12 +13106,6 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return face.h >= 0.36 || face.y + face.h >= 0.58
     }
     const isManHold = gender === 'male' || gender === 'man'
-    if (!isManHold && window.__deskFaceCutMode === true) {
-      const fc = await pasteFaceCutoutOnStanding(bodyDisplay, idDataUrl)
-      log.push(fc.log)
-      if (fc.url) return fc.url
-      return ''
-    }
     const pixelHeadOn =
       window.__deskPixelHead === true ||
       (window.__deskPixelHead !== false && (isManHold || window.__deskPixelHeadWoman !== false))
@@ -13170,12 +13164,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   async function extendOneIdBody(idDataUrl, gender, index, total, opts) {
     const timingT0 = Date.now()
     window.__deskBodyStop = null
-    window.__deskFaceCutMode = false
     const timing = { jobs: [], holdSec: 0, totalSec: 0 }
     window.__deskTiming = timing
     const timingDone = () => {
       timing.totalSec = Math.round((Date.now() - timingT0) / 1000)
-      window.__deskFaceCutMode = false
       if (timing.continue && timing.continue.fellBack) {
         const why = `장면 이어 그리기를 쓰지 못해 서서 전신으로 이었습니다: ${timing.continue.reason}${timing.continue.message ? ` (${timing.continue.message})` : ''}`
         setTimeout(() => (typeof setFormStatus === 'function' ? setFormStatus(why, true) : null), 1500)
@@ -13395,8 +13387,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       if (opts?.jacket !== false && (await deskChestSplit(result.display))) return rejectBody('chestSplit')
       const pixelWillRun =
         window.__deskPixelHead === true ||
-        (window.__deskPixelHead !== false && (gender === 'male' || gender === 'man' || plainSource)) ||
-        window.__deskFaceCutMode === true
+        (window.__deskPixelHead !== false && (gender === 'male' || gender === 'man' || plainSource))
       if (opts?.face !== false && !pixelWillRun) {
         const hold = await deskFacesHold(source, result.display)
         if (!hold.ok) return rejectBody('faceHold')
@@ -13670,7 +13661,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             `${t.reason}${t.restore && t.restore.coarse != null ? ` 일치${t.restore.coarse}` : ''}${t.paint != null ? ` 그림${t.paint}` : ''}${t.paint0 != null ? ` 그림0 ${t.paint0}` : ''}${t.avg != null ? ` 밝기${t.avg}/편차${t.flat}` : ''}${t.size ? ` ${t.size}` : ''}${t.nsfw != null ? ` 필터${t.nsfw}` : ''}${t.sec != null ? ` ${t.sec}초` : ''}${t.url ? ` [${t.url}]` : ''}`,
         )
         .join(' + ')
-      if (cutCand && window.__deskWomanContinueFallback !== true && window.__deskWomanFaceCut !== false) {
+      if (cutCand && window.__deskWomanContinueFallback !== true && window.__deskWomanFaceCut === true) {
         // 모델이 몸은 그렸지만 얼굴을 새로 그린 결과: 그 전신에 원본 사진의 얼굴(이마~턱)만 오려 얹는다 (새로 생성하지 않음)
         try {
           setStatus(`${index}/${total} 그려진 전신에 원본 얼굴을 얹는 중…`, false)
@@ -13696,9 +13687,6 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
       if (window.__deskWomanContinueFallback === true) {
         contLog.fellBack = true
-        // 이어 그리기가 안 되면(배경이 복잡하거나 화소가 작은 사진): 서서 전신을 만들고 원본 얼굴(이마~턱)만 오려 얹는다. 교체 엔진 얼굴은 쓰지 않는다
-        if (window.__deskWomanContinueFallback !== true) window.__deskFaceCutMode = true
-        setStatus(`${index}/${total} 장면 이어 그리기가 안 돼 서서 전신에 원본 얼굴을 얹는 방식으로 바꿉니다…`, false)
         console.warn('장면 이어 그리기를 쓰지 못해 서서 전신 방식으로 넘어갑니다:', JSON.stringify(contLog))
       } else {
         const stop = `원본 사진의 장면을 살려 이어 그리지 못했습니다 (${contLog.reason}). 가짜 얼굴로 대신하지 않습니다. 이 사진은 얼굴이 크게 찍힌 가슴 위 사진이라 전신 이어 그리기가 어렵습니다. 얼굴 아래 몸이 조금 더 나온 사진을 써 보세요.`
@@ -13819,7 +13807,6 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         if (!held || (await debrisBlocks(held))) {
           if (
             !result.display ||
-            (window.__deskFaceCutMode === true && !held) ||
             (!standingHasLegs && standingZoomed) ||
             (await debrisBlocks(result.display))
           ) {
