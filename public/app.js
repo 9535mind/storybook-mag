@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw167'
+window.__DESK_BUILD = '20261005mw168'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12239,6 +12239,11 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const gAy = fine.oy * K2 - tplY0 * scale
       log.scale = Number(scale.toFixed(3))
       log.score = Number(fine.score.toFixed(3))
+      // 생성된 머리가 놓인 모양: 맞춘 위치·크기에 놓은 원본 머리 윤곽 (나중에 이 모양대로 배경을 채운다)
+      const silh = document.createElement('canvas')
+      silh.width = sw
+      silh.height = sh
+      silh.getContext('2d').drawImage(cut, 0, 0)
       // 6) 목 아래로 자르는 선과 좌우 폭
       for (let y = 0; y < sh; y += 1) {
         const vy = y >= cutY ? 0 : y > cutY - headW * 0.16 ? (cutY - y) / (headW * 0.16) : 1
@@ -12258,56 +12263,73 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
       }
       cctx.putImageData(cd, 0, 0)
-      // 7) 전신: 만들어진 머리를 주변 배경색으로 부드럽게 지운다 (원본 머리보다 큰 부분이 남지 않게)
+      // 7) 전신: 생성된 머리를 그 모양대로 주변 배경색으로 지운다 (얹은 머리가 더 작아도 잔상이 남지 않게)
       const out = document.createElement('canvas')
       out.width = gw
       out.height = gh
       const octx = out.getContext('2d', { willReadFrequently: true })
       octx.drawImage(gImg, 0, 0)
-      const hx0 = gAx + (cx - headW * 0.78) * scale
-      const hx1 = gAx + (cx + headW * 0.78) * scale
-      const ex0 = Math.max(6, Math.round(hx0))
-      const ex1 = Math.min(gw - 7, Math.round(hx1))
-      const ey0 = Math.max(0, Math.round(gAy + top * scale - headW * scale * 0.1))
-      // 지우는 범위는 얹은 머리가 완전히 불투명한 구간까지만 (그 아래는 생성된 목·옷깃을 살려 서서히 비칠 때 회색이 되지 않게)
-      const chinEdge = Math.min(chinY, cutY - headW * 0.16)
-      const ey1 = Math.min(gh - 8, Math.round(gAy + chinEdge * scale))
-      if (ex1 - ex0 > 8 && ey1 - ey0 > 8) {
+      {
+        const eraseBottom = Math.min(gh - 2, Math.round(gAy + Math.min(chinY, cutY - headW * 0.16) * scale))
+        const mk = document.createElement('canvas')
+        mk.width = gw
+        mk.height = gh
+        const mctx = mk.getContext('2d', { willReadFrequently: true })
+        const grow = Math.max(5, Math.round(headW * scale * 0.1))
+        mctx.filter = `blur(${grow}px)`
+        mctx.save()
+        mctx.translate(gAx, gAy)
+        mctx.scale(scale, scale)
+        mctx.drawImage(silh, 0, 0)
+        mctx.restore()
+        const md = mctx.getImageData(0, 0, gw, gh).data
         const od = octx.getImageData(0, 0, gw, gh)
         const g = od.data
-        const at = (x, y, c) => g[(Math.min(gh - 1, Math.max(0, y)) * gw + Math.min(gw - 1, Math.max(0, x))) * 4 + c]
-        const edgeAvg = (x, y, c, dx, dy) => {
-          let s = 0
-          for (let k = 0; k < 4; k += 1) s += at(x + dx * (5 + k), y + dy * (5 + k), c)
-          return s / 4
-        }
-        const W = ex1 - ex0
-        const H = ey1 - ey0
-        const fill = new Float32Array(W * H * 3)
-        for (let yy = 0; yy < H; yy += 1) {
-          for (let c = 0; c < 3; c += 1) {
-            const Lc = edgeAvg(ex0, ey0 + yy, c, -1, 0)
-            const Rc = edgeAvg(ex1, ey0 + yy, c, 1, 0)
-            for (let xx = 0; xx < W; xx += 1) {
-              const t = xx / Math.max(1, W - 1)
-              fill[(yy * W + xx) * 3 + c] = (1 - t) * Lc + t * Rc
+        const cover = (x, y) => Math.min(1, (md[(y * gw + x) * 4 + 3] / 255) * 2.6)
+        const ramp = 10
+        for (let y = 0; y <= eraseBottom; y += 1) {
+          let x0 = -1
+          let x1 = -1
+          for (let x = 0; x < gw; x += 1) {
+            if (cover(x, y) > 0.5) {
+              if (x0 < 0) x0 = x
+              x1 = x
             }
           }
-        }
-        const ramp = Math.max(14, Math.round((ex1 - ex0) * 0.22))
-        for (let yy = 0; yy < H; yy += 1) {
-          for (let xx = 0; xx < W; xx += 1) {
-            const a = Math.min(1, xx / ramp, (W - 1 - xx) / ramp, (H - 1 - yy) / ramp, ey0 > 0 ? yy / ramp : 1)
-            const i = ((ey0 + yy) * gw + ex0 + xx) * 4
-            for (let c = 0; c < 3; c += 1) g[i + c] = g[i + c] * (1 - a) + fill[(yy * W + xx) * 3 + c] * a
+          if (x0 < 0) continue
+          const sample = (xc, c) => {
+            let sum = 0
+            for (let k = 0; k < 4; k += 1) sum += g[(y * gw + Math.max(0, Math.min(gw - 1, xc + k))) * 4 + c]
+            return sum / 4
+          }
+          const lx = Math.max(0, x0 - 10)
+          const rx = Math.min(gw - 4, x1 + 7)
+          const bottomFade = y > eraseBottom - ramp ? (eraseBottom - y) / ramp : 1
+          for (let x = x0 - 2; x <= x1 + 2; x += 1) {
+            if (x < 0 || x >= gw) continue
+            const a = cover(x, y) * bottomFade
+            if (a <= 0) continue
+            const t = (x - x0) / Math.max(1, x1 - x0)
+            const i = (y * gw + x) * 4
+            for (let c = 0; c < 3; c += 1) {
+              const fill = sample(lx, c) * (1 - t) + sample(rx, c) * t
+              g[i + c] = g[i + c] * (1 - a) + fill * a
+            }
           }
         }
         octx.putImageData(od, 0, 0)
       }
-      // 8) 원본 머리를 얹는다
+      // 8) 원본 머리를 얹는다. 생성된 몸은 머리가 큰 편(약 6등신)이라, 목 자리를 기준으로 머리만 조금 줄인다
+      const shrink = Number(window.__deskHeadShrink) > 0 ? Number(window.__deskHeadShrink) : 0.88
+      const pgx = gAx + cx * scale
+      const pgy = gAy + chinY * scale
+      const scale2 = scale * shrink
+      const pAx = pgx - cx * scale2
+      const pAy = pgy - chinY * scale2
+      log.shrink = shrink
       octx.save()
-      octx.translate(gAx, gAy)
-      octx.scale(scale, scale)
+      octx.translate(pAx, pAy)
+      octx.scale(scale2, scale2)
       octx.imageSmoothingQuality = 'high'
       octx.drawImage(cut, 0, 0)
       octx.restore()
