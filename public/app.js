@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw186'
+window.__DESK_BUILD = '20261005mw187'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8702,7 +8702,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     const faceH = Number(opts?.faceH)
     if (faceH > 0.05) {
       const headFrac = Math.min(0.9, faceH * 1.35)
-      scale = Math.min(scale, (0.18 * ch) / headFrac / ih)
+      const headTarget = Number(opts?.headTarget) > 0 ? Number(opts.headTarget) : 0.18
+      scale = Math.min(scale, (headTarget * ch) / headFrac / ih)
     }
     const dw = Math.max(8, Math.round(iw * scale))
     const dh = Math.max(8, Math.round(ih * scale))
@@ -13250,7 +13251,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             faceH = 0
           }
           tryLog.faceH = Number(faceH.toFixed(3))
-          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH })
+          // 1번째는 머리 18%(정상 비율 목표), 2번째는 28%(사진을 더 크게 두어 모델이 알아보기 쉬운 구도)로 달리 시도한다
+          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH, headTarget: attempt === 0 ? 0.18 : 0.28 })
           const contT0 = Date.now()
           // 한 번에 최대 110초
           const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110)
@@ -13259,6 +13261,31 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (!alt?.display) {
             tryLog.reason = 'no_result'
             continue
+          }
+          // 먼저 모델이 돌려준 결과의 상태를 기록한다 (크기·평균 밝기·그려짐·결과 주소). 복원이 실패해도 이유를 볼 수 있게
+          tryLog.url = typeof alt.remoteUrl === 'string' ? alt.remoteUrl : ''
+          try {
+            const outImg = await loadHtmlImage(alt.display)
+            tryLog.size = `${outImg.naturalWidth}x${outImg.naturalHeight}`
+            const sc = document.createElement('canvas')
+            sc.width = 32
+            sc.height = 32
+            const sx = sc.getContext('2d', { willReadFrequently: true })
+            sx.drawImage(outImg, 0, 0, 32, 32)
+            const sd = sx.getImageData(0, 0, 32, 32).data
+            let lum = 0
+            let lum2 = 0
+            for (let i = 0; i < sd.length; i += 4) {
+              const l = sd[i] * 0.299 + sd[i + 1] * 0.587 + sd[i + 2] * 0.114
+              lum += l
+              lum2 += l * l
+            }
+            const nPx = sd.length / 4
+            tryLog.avg = Math.round(lum / nPx)
+            tryLog.flat = Number(Math.sqrt(Math.max(0, lum2 / nPx - (lum / nPx) * (lum / nPx))).toFixed(1))
+            tryLog.paint0 = Number((await looksPainted(alt.display)).toFixed(2))
+          } catch (_) {
+            /* 상태 기록 실패는 무시 */
           }
           // 모델이 사진을 다른 크기·위치로 다시 그렸을 수 있어, 결과 안에서 원본 위치를 찾아 그 자리에 복원한다
           const rr = await restoreOriginalPhotoOnContinued(alt.display, prepared, source)
@@ -13286,7 +13313,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
       }
       contLog.reason = contLog.tries
-        .map((t) => `${t.reason}${t.restore && t.restore.coarse != null ? ` 일치${t.restore.coarse}` : ''}${t.paint != null ? ` 그림${t.paint}` : ''}${t.sec != null ? ` ${t.sec}초` : ''}`)
+        .map(
+          (t) =>
+            `${t.reason}${t.restore && t.restore.coarse != null ? ` 일치${t.restore.coarse}` : ''}${t.paint != null ? ` 그림${t.paint}` : ''}${t.paint0 != null ? ` 그림0 ${t.paint0}` : ''}${t.avg != null ? ` 밝기${t.avg}/편차${t.flat}` : ''}${t.size ? ` ${t.size}` : ''}${t.sec != null ? ` ${t.sec}초` : ''}${t.url ? ` [${t.url}]` : ''}`,
+        )
         .join(' + ')
       if (window.__deskWomanContinueFallback === true) {
         contLog.fellBack = true

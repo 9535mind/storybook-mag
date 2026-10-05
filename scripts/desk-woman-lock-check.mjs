@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 여자 몸 잇기 잠금 점검(2026-10-05 수정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw186)
+ * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw187)
  * 사용: node scripts/desk-woman-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'
@@ -25,7 +25,7 @@ const checks = [
   ['팔 보정: 최대 20%까지만 줄이고 길지 않으면 그대로', /Math\.max\(0\.8, Math\.min\(1, \(L - delta\) \/ L\)\)/.test(app) && /log\.skip = 'arms_ok'/.test(app)],
   ['옛 열 띠 팔 보정(직사각형 이음새)이 없다', !/Math\.round\(iw \* 0\.292\)/.test(app)],
   ['일상 사진 여자는 장면 이어 그리기 경로를 탄다', /isWomanBody && !drawn && !plainSource && window\.__deskWomanContinue !== false/.test(app)],
-  ['이어 그리기: 3:4 캔버스 + 원본 화소 복원', /buildBodyContinueCanvas\(source, \[864, 1152\], \{ faceH \}\)/.test(app) && /\(0\.18 \* ch\) \/ headFrac \/ ih/.test(app) && /restoreOriginalPhotoOnContinued\(alt\.display, prepared, source\)/.test(app)],
+  ['이어 그리기: 3:4 캔버스 + 원본 화소 복원', /buildBodyContinueCanvas\(source, \[864, 1152\], \{ faceH, headTarget/.test(app) && /\(headTarget \* ch\) \/ headFrac \/ ih/.test(app) && /headTarget: attempt === 0 \? 0\.18 : 0\.28/.test(app) && /restoreOriginalPhotoOnContinued\(alt\.display, prepared, source\)/.test(app)],
   ['이어 그리기: 보호 마스크 90%·가장자리 부드럽게', /Math\.round\(dh \* 0\.9\)/.test(app) && /1 - md\[i\] \/ 255/.test(app)],
   ['이어 그리기 시간은 최대 110초', /'continue', undefined, 110\)/.test(app) && /Math\.min\(capSec \|\| 200, left\)/.test(app)],
   ['이어 그리기 최대 2번, 실패하면 가짜 얼굴로 대신하지 않고 멈춘다', /attempt < 2/.test(app) && /가짜 얼굴로 대신하지 않습니다/.test(app) && /__deskWomanContinueFallback/.test(app)],
