@@ -1259,7 +1259,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         const freeLook = String(body.deskLook || '')
         const editPrompt =
           freeLook === 'shape'
-              ? buildDeskShapePrompt()
+              ? buildDeskShapePrompt(Boolean(body.shapeStrict))
               : freeLook === 'extend-jacket'
                 ? buildDeskExtendJacketPrompt()
                 : freeLook === 'extend-skirt'

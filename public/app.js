@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw212'
+window.__DESK_BUILD = '20261005mw213'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8856,6 +8856,125 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return c.toDataURL('image/jpeg', 0.92)
     } catch (_) {
       return ''
+    }
+  }
+
+  // 몸 보기: 모델이 사진 전체를 다시 그려 얼굴이 새로 그려지므로, 같은 카메라로 그린 직전 사진(src)의 머리(얼굴+머리카락)를
+  // 결과 안에서 겹쳐 맞춰(일치도 0.7 이상) 그 자리에 원본 화소로 되돌린다. 포즈가 많이 바뀌어 안 맞으면 url '' (호출한 쪽이 다시 그리게 함).
+  async function restoreHeadFromSource(resultUrl, srcUrl, boxes) {
+    const log = {}
+    try {
+      const [out, src] = await Promise.all([loadHtmlImage(resultUrl), loadHtmlImage(srcUrl)])
+      const rw = out.naturalWidth
+      const rh = out.naturalHeight
+      const fbn = boxes || (await detectFaceBox(srcUrl, 'target'))
+      if (!fbn || !(fbn.w > 0.02)) {
+        log.skip = 'no_face_box'
+        return { url: '', log }
+      }
+      const base = document.createElement('canvas')
+      base.width = rw
+      base.height = rh
+      const bctx = base.getContext('2d', { willReadFrequently: true })
+      bctx.imageSmoothingQuality = 'high'
+      bctx.drawImage(src, 0, 0, rw, rh)
+      const f = { x: fbn.x * rw, y: fbn.y * rh, w: fbn.w * rw, h: fbn.h * rh }
+      const T = {
+        x: Math.max(0, Math.round(f.x - f.w * 0.45)),
+        y: Math.max(0, Math.round(f.y - f.h * 0.7)),
+      }
+      T.w = Math.min(rw - T.x, Math.round(f.w * 1.9))
+      T.h = Math.min(rh - T.y, Math.round(f.h * 2.0))
+      const D = 2
+      const gray = (img, x, y, w, h) => {
+        const c = document.createElement('canvas')
+        c.width = Math.max(2, Math.round(w / D))
+        c.height = Math.max(2, Math.round(h / D))
+        const cx = c.getContext('2d', { willReadFrequently: true })
+        cx.imageSmoothingQuality = 'high'
+        cx.drawImage(img, x, y, w, h, 0, 0, c.width, c.height)
+        const d = cx.getImageData(0, 0, c.width, c.height).data
+        const g = new Float32Array(c.width * c.height)
+        for (let i = 0; i < g.length; i += 1) g[i] = d[i * 4] * 0.299 + d[i * 4 + 1] * 0.587 + d[i * 4 + 2] * 0.114
+        return { g, w: c.width, h: c.height }
+      }
+      const tpl = gray(base, T.x, T.y, T.w, T.h)
+      const ncc = (A, B) => {
+        let sa = 0
+        let sb = 0
+        let saa = 0
+        let sbb = 0
+        let sab = 0
+        const n = A.w * A.h
+        for (let i = 0; i < n; i += 1) {
+          const a = A.g[i]
+          const b = B.g[i]
+          sa += a
+          sb += b
+          saa += a * a
+          sbb += b * b
+          sab += a * b
+        }
+        const va = saa - (sa * sa) / n
+        const vb = sbb - (sb * sb) / n
+        return (sab - (sa * sb) / n) / Math.sqrt(Math.max(1e-6, va) * Math.max(1e-6, vb))
+      }
+      const reach = Math.round(rw * 0.07)
+      let best = { score: -2, s: 1, dx: 0, dy: 0 }
+      for (const s of [0.92, 0.96, 1, 1.04, 1.08]) {
+        for (let dy = -reach; dy <= reach; dy += 3) {
+          for (let dx = -reach; dx <= reach; dx += 3) {
+            const cw = Math.round(T.w * s)
+            const ch = Math.round(T.h * s)
+            const cx0 = Math.round(T.x + T.w / 2 - cw / 2 + dx)
+            const cy0 = Math.round(T.y + T.h / 2 - ch / 2 + dy)
+            if (cx0 < 0 || cy0 < 0 || cx0 + cw > rw || cy0 + ch > rh) continue
+            const cand = gray(out, cx0, cy0, cw, ch)
+            if (cand.w !== tpl.w || cand.h !== tpl.h) continue
+            const sc = ncc(tpl, cand)
+            if (sc > best.score) best = { score: sc, s, dx, dy }
+          }
+        }
+      }
+      log.score = Number(best.score.toFixed(3))
+      log.s = best.s
+      if (best.score < 0.7) {
+        log.skip = 'low_match'
+        return { url: '', log }
+      }
+      const cw = Math.round(T.w * best.s)
+      const ch = Math.round(T.h * best.s)
+      const px = Math.round(T.x + T.w / 2 - cw / 2 + best.dx)
+      const py = Math.round(T.y + T.h / 2 - ch / 2 + best.dy)
+      const layer = document.createElement('canvas')
+      layer.width = cw
+      layer.height = ch
+      const lctx = layer.getContext('2d')
+      lctx.imageSmoothingQuality = 'high'
+      lctx.drawImage(base, T.x, T.y, T.w, T.h, 0, 0, cw, ch)
+      const mk = document.createElement('canvas')
+      mk.width = cw
+      mk.height = ch
+      const mctx = mk.getContext('2d')
+      mctx.filter = `blur(${Math.max(4, Math.round(cw * 0.06))}px)`
+      mctx.fillStyle = '#fff'
+      mctx.beginPath()
+      mctx.ellipse(cw / 2, ch * 0.46, cw * 0.4, ch * 0.42, 0, 0, Math.PI * 2)
+      mctx.fill()
+      lctx.globalCompositeOperation = 'destination-in'
+      lctx.drawImage(mk, 0, 0)
+      const res = document.createElement('canvas')
+      res.width = rw
+      res.height = rh
+      const rctx = res.getContext('2d')
+      rctx.drawImage(out, 0, 0, rw, rh)
+      rctx.drawImage(layer, px, py)
+      log.ok = true
+      return { url: res.toDataURL('image/jpeg', 0.93), log }
+    } catch (err) {
+      log.skip = 'err'
+      log.message = err instanceof Error ? err.message : String(err)
+      return { url: '', log }
     }
   }
 
@@ -19496,6 +19615,8 @@ function initAdultDesk() {
     if (scene && (await deskLooksStandingFull(scene))) src = scene
     const alreadyFull = Boolean(work.womanFull) || (await deskLooksStandingFull(src))
     if (!alreadyFull && lookId && (await deskPhotoNeedsBodyExtend(src))) {
+      // 몸 잇기가 먼저 필요하면 몸 잇기 한도(360초)를 쓴다
+      window.__deskBodyDeadline = Math.max(window.__deskBodyDeadline || 0, Date.now() + 360000)
       const extended = await ensureDeskLeadBody(lookId, 'female', '여', false, lookId, {
         deadline: window.__deskBodyDeadline,
       })
@@ -19534,26 +19655,41 @@ function initAdultDesk() {
       setFormStatus('장면 엔진을 불러오지 못했습니다.', true)
       return
     }
-    const job = await globalThis.postTaleSceneJob(
-      {
-        composeMode: 'free-still',
-        deskLook: spec.deskLook,
-        images: [src],
-        description: spec.description,
-        photoreal: true,
-        aspectRatio: '3:4',
-        gender0: 'female',
-        sourcePeople: 1,
-      },
-      spec.poll,
-      180,
-    )
-    if (!job || job.auth || !job.imageUrl) return
-    const stable = await stabilizeDeskStill(job.imageUrl)
-    if (!stable) {
-      setFormStatus('그림이 안 붙었습니다. 같은 버튼을 다시 누르세요.', true)
-      return
+    let stable = null
+    let headLog = null
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const job = await globalThis.postTaleSceneJob(
+        {
+          composeMode: 'free-still',
+          deskLook: spec.deskLook,
+          images: [src],
+          description: attempt === 0 ? spec.description : `${spec.description} 같은 포즈, 같은 머리 위치와 크기 그대로.`,
+          shapeStrict: attempt > 0,
+          photoreal: true,
+          aspectRatio: '3:4',
+          gender0: 'female',
+          sourcePeople: 1,
+        },
+        spec.poll,
+        180,
+      )
+      if (!job || job.auth || !job.imageUrl) return
+      const cand = await stabilizeDeskStill(job.imageUrl)
+      if (!cand) {
+        setFormStatus('그림이 안 붙었습니다. 같은 버튼을 다시 누르세요.', true)
+        return
+      }
+      const head = await restoreHeadFromSource(cand, src)
+      headLog = head.log
+      if (head.url) {
+        stable = head.url
+        break
+      }
+      stable = cand
+      // 얼굴 상자를 못 찾았거나 이미 두 번째면 그대로 쓴다. 포즈가 많이 바뀐 경우(low_match)만 한 번 더 그린다
+      if (head.log.skip !== 'low_match') break
     }
+    window.__deskShapeHeadLog = headLog
     if (typeof isNearlyBlackImage === 'function' && (await isNearlyBlackImage(stable))) {
       setFormStatus('엔진이 빈 장을 냈습니다. 가운데는 원본입니다.', true)
       return

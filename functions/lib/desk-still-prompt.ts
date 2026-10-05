@@ -84,8 +84,11 @@ export function buildDeskExtendSkirtPrompt(): string {
 }
 
 /** 팔 길이를 보게 — 아이보리 크롭+숏츠. 같은 얼굴·같은 자세. Kontext용이라 420자 CLIP 상한을 쓰지 않는다. */
-export function buildDeskShapePrompt(): string {
+export function buildDeskShapePrompt(strict = false): string {
   return [
+    ...(strict
+      ? ['Keep the exact same pose, the exact same head position, the same head size and the same body position as the source. Do not move, tilt or resize the head.']
+      : []),
     'Same exact woman, same face, same hair, same standing pose, same studio.',
     'Keep the exact same full-body camera. Head to shoes in frame. Same distance. Do not crop or zoom.',
     'Change her outfit to an ivory cream athletic crop top and matching ivory high-waist bike shorts.',
