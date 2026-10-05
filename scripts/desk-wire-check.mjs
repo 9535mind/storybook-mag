@@ -276,7 +276,7 @@ console.log('CAST lock — 미검증 mw 금지, 여여 금지')
     ['extend-keep-id', /deskJacketDrifted/.test(app) && /Keep EXACTLY the clothes visible in the identity image/.test(tale) && !/keepOriginalIdOnExtend/.test(app)],
     ['extend-jacket-restore', /deskLook: 'extend-jacket'/.test(app) && /buildDeskExtendJacketPrompt/.test(tale) && /restoreJacket/.test(app)],
     ['together-no-pixel-mini', !/fitWomanMini/.test(readFileSync(path.join(ROOT, 'public/desk-pipeline.js'), 'utf8')) && /composePlate/.test(readFileSync(path.join(ROOT, 'public/desk-pipeline.js'), 'utf8'))],
-    ['mini-run-shown', /id="desk-mini-run"/.test(html) && /data-desk-step="mini"/.test(html) && /미니/.test(html) && /runDeskStepMini/.test(app) && /deskLook: 'mini'/.test(app) && /buildDeskMiniPrompt/.test(tale) && /raise the hem 10%/.test(readFileSync(path.join(ROOT, 'functions/lib/desk-still-prompt.ts'), 'utf8'))],
+    ['mini-run-removed', !/id="desk-mini-run"/.test(html) && !/runDeskStepMini/.test(app) && !/buildDeskMiniPrompt/.test(tale)],
     ['look-pick-select-only', /desk pick selects only/.test(app) && !/void runDeskStillCard\(key\)/.test(app) && !/void runDeskStillCard\('look'\)/.test(app) && !/key === 'move' && id === 'undress'[\s\S]{0,120}runDeskMoveQueue/.test(app)],
     ['look-no-confirm-gate', !/look_button_required/.test(tale)],
     ['look-confirm-client', /deskLook,/.test(app) && /deskCouple:/.test(app)],

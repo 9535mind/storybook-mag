@@ -14,7 +14,6 @@ import {
 import {
   buildDeskStillPrompt,
   buildDeskShapePrompt,
-  buildDeskMiniPrompt,
   buildDeskExtendJacketPrompt,
   buildDeskExtendJacketLightPrompt,
   buildDeskExtendKeepLightPrompt,
@@ -1259,9 +1258,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           typeof body.aspectRatio === 'string' && body.aspectRatio.trim() ? body.aspectRatio.trim() : undefined
         const freeLook = String(body.deskLook || '')
         const editPrompt =
-          freeLook === 'mini'
-            ? buildDeskMiniPrompt()
-            : freeLook === 'shape'
+          freeLook === 'shape'
               ? buildDeskShapePrompt()
               : freeLook === 'extend-jacket'
                 ? buildDeskExtendJacketPrompt()
@@ -1307,7 +1304,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 freeLook === 'extend-jacket' ||
                 freeLook === 'extend-skirt' ||
                 freeLook === 'extend-keep-light' ||
-                freeLook === 'mini' ||
                 freeLook === 'shape'
                   ? 8.2
                   : 4.2,

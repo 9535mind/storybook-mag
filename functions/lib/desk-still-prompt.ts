@@ -19,18 +19,6 @@ export type DeskIntent = {
 export const DESK_NO_BLACK_UNDERWEAR =
   'Ivory or cream only for bra, panty, sports-bra, crop top, and bike shorts. FORBIDDEN black underwear, black panty, black bra, charcoal base-layer.'
 
-/** 42번 검정 미니를 기준으로 단을 10% 올리고 10% 더 붙인다. */
-export function buildDeskMiniPrompt(): string {
-  return [
-    'Same exact woman, same face, same hair, same standing pose, same studio, same jacket and top.',
-    'Keep the exact same full-body camera. Head to shoes in frame. Same distance. Do not crop or zoom.',
-    'Change only the skirt into a second-skin black bodycon mini.',
-    'Base length is a short tight office mini on the upper thigh. Then raise the hem 10% higher and cling 10% tighter.',
-    'Hem sits high on the upper thigh so both hands stay visible below the hem. Shoes stay visible. No flare, no A-line, no knee length.',
-    'Photoreal. FORBIDDEN a new face, a catalog model, a waist crop, a thigh crop, missing shoes, a zoom-in, leftover long skirt.',
-  ].join(' ')
-}
-
 /** 몸 잇기가 크림 재킷을 내면 검정만 되돌린다. */
 export function buildDeskExtendJacketPrompt(): string {
   return [

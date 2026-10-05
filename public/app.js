@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw210'
+window.__DESK_BUILD = '20261005mw211'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -17187,7 +17187,6 @@ function initAdultDesk() {
     setDeskStepOn('together', canTogether)
     setDeskStepOn('look', true)
     setDeskStepOn('shape', hasWoman)
-    setDeskStepOn('mini', hasWoman)
     setDeskStepOn('place', canOutfit)
     const togetherBtn = document.querySelector('[data-desk-step="together"]')
     if (togetherBtn) togetherBtn.hidden = !hasWoman || !hasMan
@@ -17212,10 +17211,10 @@ function initAdultDesk() {
     const hint = document.getElementById('desk-still-hint')
     if (hint) {
       if (!canOutfit) hint.textContent = '여 칸에 사진을 넣거나 장면 사진을 올리세요. 그다음 옷 녹이기입니다.'
-      else if (needBody) hint.textContent = '증명·상반신은 1 몸 잇기 또는 옷 녹이기를 누르면 같은 사람으로 몸을 이은 뒤 녹입니다. 미니·몸 보기도 잇은 뒤에 합니다.'
-      else if (coupleScene) hint.textContent = '이미 한 장에 두 사람입니다. 옷 녹이기·미니·몸 보기는 여자만입니다. 벗기 찍기는 그 다음입니다.'
-      else if (bothReady && !coupleScene) hint.textContent = '두 칸에 따로 넣은 사진이면 먼저 2 한 장면을 누른 뒤 옷 녹이기입니다. 미니·몸 보기는 여 칸만 봅니다.'
-      else hint.textContent = '옷 녹이기는 여자만 나체입니다. 미니는 42번보다 단과 타이트함을 10% 올립니다. 몸 보기는 아이보리 운동복입니다.'
+      else if (needBody) hint.textContent = '증명·상반신은 1 몸 잇기 또는 옷 녹이기를 누르면 같은 사람으로 몸을 이은 뒤 녹입니다. 몸 보기도 잇은 뒤에 합니다.'
+      else if (coupleScene) hint.textContent = '이미 한 장에 두 사람입니다. 옷 녹이기·몸 보기는 여자만입니다. 벗기 찍기는 그 다음입니다.'
+      else if (bothReady && !coupleScene) hint.textContent = '두 칸에 따로 넣은 사진이면 먼저 2 한 장면을 누른 뒤 옷 녹이기입니다. 몸 보기는 여 칸만 봅니다.'
+      else hint.textContent = '옷 녹이기는 여자만 나체입니다. 몸 보기는 아이보리 운동복입니다.'
     }
   }
 
@@ -19463,27 +19462,16 @@ function initAdultDesk() {
     return true
   }
 
-  const runDeskFreeOutfit = async (kind) => {
-    const spec =
-      kind === 'mini'
-        ? {
-            deskLook: 'mini',
-            noun: '미니',
-            description: '미니. 짧은 타이트 스커트를 10% 더 짧고 더 붙게. 같은 얼굴.',
-            poll: '미니를 줄이는 중',
-            title: '미니',
-            promptLabel: '42 기준 · 10% 짧고 타이트',
-            done: '42번보다 단과 타이트함을 10% 올렸습니다. 가운데가 그 장입니다.',
-          }
-        : {
-            deskLook: 'shape',
-            noun: '몸 보기',
-            description: '몸 보기. 아이보리 운동복. 같은 얼굴. 손이 보이게.',
-            poll: '팔·몸 비율을 보는 중',
-            title: '몸 보기',
-            promptLabel: '아이보리 운동복 · 팔 길이',
-            done: '아이보리 운동복입니다. 겉옷 검정은 되고 속옷 검정은 없습니다. 가운데가 그 장입니다.',
-          }
+  const runDeskFreeOutfit = async () => {
+    const spec = {
+      deskLook: 'shape',
+      noun: '몸 보기',
+      description: '몸 보기. 아이보리 운동복. 같은 얼굴. 손이 보이게.',
+      poll: '팔·몸 비율을 보는 중',
+      title: '몸 보기',
+      promptLabel: '아이보리 운동복 · 팔 길이',
+      done: '아이보리 운동복입니다. 겉옷 검정은 되고 속옷 검정은 없습니다. 가운데가 그 장입니다.',
+    }
     if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
       if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
       return
@@ -19585,8 +19573,7 @@ function initAdultDesk() {
     void syncDeskGates()
   }
 
-  const runDeskStepShape = async () => runDeskFreeOutfit('shape')
-  const runDeskStepMini = async () => runDeskFreeOutfit('mini')
+  const runDeskStepShape = async () => runDeskFreeOutfit()
 
   const runDeskStepLook = async () => {
     if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
@@ -20133,11 +20120,9 @@ function initAdultDesk() {
             ? '옷을 녹이는 중'
             : step === 'shape'
               ? '팔·몸 비율을 보는 중'
-              : step === 'mini'
-                ? '미니를 줄이는 중'
-                : step === 'place'
-                  ? '장소·자세를 그리는 중'
-                  : '작업 중'
+              : step === 'place'
+                ? '장소·자세를 그리는 중'
+                : '작업 중'
     const maxSec =
       step === 'body' ? (workNow?.woman && workNow?.man ? 420 : 360) : step === 'look' ? 240 : 180
     const abort = new AbortController()
@@ -20146,7 +20131,7 @@ function initAdultDesk() {
     window.__deskStepTimerOn = true
     const stopTimer = startProgressTimer(setFormStatus, waitText, {
       maxSec,
-      keepWaiting: step === 'body' || step === 'look' || step === 'shape' || step === 'mini',
+      keepWaiting: step === 'body' || step === 'look' || step === 'shape',
       onMax: (sec) => {
         setFormStatus(
           step === 'body'
@@ -20166,7 +20151,6 @@ function initAdultDesk() {
       else if (step === 'together') await runDeskStepTogether()
       else if (step === 'look') await runDeskStepLook()
       else if (step === 'shape') await runDeskStepShape()
-      else if (step === 'mini') await runDeskStepMini()
       else if (step === 'place') await runDeskStepPlace()
     } catch (err) {
       if (typeof window.__deskStopStepTimer === 'function') window.__deskStopStepTimer()
