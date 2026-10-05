@@ -1,12 +1,12 @@
 ---
-description: Desk 남자 증명사진 몸 잇기 합격 확정(잠금). 2026-10-05 실측, 빌드 20261005mw177 (mw174 + 다리 양방향 보정, 목표 40%).
+description: Desk 남자 증명사진 몸 잇기 **최종 확정(잠금)**. 2026-10-05, 빌드 20261005mw177, 태그 desk-man-extend-final. 사용자가 명시 요청하기 전에는 바꾸지 않는다.
 alwaysApply: true
 ---
 
-# Desk 남자 몸 잇기 합격 (2026-10-05) — 잠금
+# Desk 남자 몸 잇기 최종 확정 (2026-10-05) — 잠금
 
-사용자가 **이대로 규정하고 잠그라**고 명시함.
-배포: `https://storymag.mindstory.kr/` · 빌드 `20261005mw177` · 태그 `desk-man-extend-mw177` (이전 `mw174`·`mw175`·`mw176`)
+사용자가 **이대로 규정하고 잠그라**(10-05), 이어서 **남자는 이쯤 마무리하고 확정지어라**고 명시함. 이후 변경은 사용자가 직접 요청할 때만 한다.
+배포: `https://storymag.mindstory.kr/` · 빌드 `20261005mw177` · 태그 `desk-man-extend-final` = `desk-man-extend-mw177` (이전 `mw174`·`mw175`·`mw176`)
 합격 이미지: 그림2 폴더 **18.png**(재킷 노인), **21.png**(셔츠 젊은 남자, 다리 37.6% 현실적). 19·22번은 다리를 늘려 길어진 불합격 사례
 
 ## 정상 (합격 기준)
@@ -39,7 +39,7 @@ alwaysApply: true
 ## 잠금 점검 (배포 전 필수)
 
 - `node scripts/desk-man-lock-check.mjs` — 합격 상태가 코드에 유지되는지 15개 항목 검사. **실패하면 배포하지 않는다**
-- 합격 시점으로 비교·복구: `git diff desk-man-extend-mw177 -- public/app.js functions/api/tale-scene.ts`
+- 합격 시점으로 비교·복구: `git diff desk-man-extend-final -- public/app.js functions/api/tale-scene.ts`
 
 ## 시험 도구 (API 비용 없음, Edge 필요)
 
