@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw187'
+window.__DESK_BUILD = '20261005mw188'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8829,7 +8829,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const D = 2
       const G1 = grayOf(out, Math.round(rw / D), Math.round(rh / D))
       let best = { score: -2, s: 1, ox: 0, oy: 0 }
-      for (const s of [0.7, 0.78, 0.86, 0.94, 1, 1.07, 1.15, 1.25, 1.36, 1.5, 1.7]) {
+      for (const s of [0.4, 0.48, 0.56, 0.64, 0.72, 0.8, 0.88, 0.94, 1, 1.07, 1.15, 1.25, 1.36, 1.5, 1.7]) {
         const T = grayOf(src, Math.round((w0 * s) / D), Math.round((h0 * s) / D))
         const baseX = Math.round((x0 + w0 / 2) / D - T.w / 2)
         const baseY = Math.round(y0 / D)
@@ -13211,7 +13211,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     // 여자 + 일상 사진(배경이 단색이 아님): 그 장면을 살리고 아래만 이어 그린다. 원본 사진의 화소(얼굴·손·배경)는 그대로 복원한다.
     // 사용자 지시: 가짜 얼굴로 대신하지 않는다. 최대 2번 시도하고, 그래도 안 되면 서서 전신(교체 엔진 얼굴)으로 넘어가지 않고 멈춘다.
     // 끄기: window.__deskWomanContinue = false / 예전처럼 실패 시 서서 전신으로 넘기기: window.__deskWomanContinueFallback = true
-    if (isWomanBody && !drawn && !plainSource && window.__deskWomanContinue !== false) {
+    // 단색 증명사진도 같은 경로: 서서 전신 방식은 옷을 바꾸고 얼굴을 교체 엔진으로 새로 그려 가짜 얼굴(24 (2).jpg → 79번)이 되었다
+    if (isWomanBody && !drawn && window.__deskWomanContinue !== false) {
       const contLog = { engine: 'continue', tries: [] }
       timing.continue = contLog
       // 이어 그린 결과가 정말 그려졌는지: 늘려 채운 빈 곳은 세로줄 무늬라 아래 영역에서 줄 사이 차이가 거의 없다
@@ -13251,8 +13252,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             faceH = 0
           }
           tryLog.faceH = Number(faceH.toFixed(3))
-          // 1번째는 머리 18%(정상 비율 목표), 2번째는 28%(사진을 더 크게 두어 모델이 알아보기 쉬운 구도)로 달리 시도한다
-          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH, headTarget: attempt === 0 ? 0.18 : 0.28 })
+          // 1번째는 머리 28%(mw187 실측: 이 구도는 모델이 그려 준다), 2번째는 20%로 달리 시도한다. 비율은 프롬프트로 모델에게 자연스럽게 그리라고 지시한다
+          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH, headTarget: attempt === 0 ? 0.28 : 0.2 })
           const contT0 = Date.now()
           // 한 번에 최대 110초
           const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110)

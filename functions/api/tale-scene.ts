@@ -628,7 +628,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               ? `Keep the exact same clothes already in the photograph. Same top, same hair, same pose. ${colorLock} Do not change the cloth color or the hairstyle.`
               : 'Keep EXACTLY the clothes visible in the identity image: the same top and the same jacket if she wears one, same colors and collar. Do NOT add a jacket or blazer that is not in the identity image. Continue the lower body naturally (skirt or trousers) in a color that goes with the top. Same hair length and curl. Same face as the identity image.'
         const standLock = continueMode
-          ? 'Continue only the empty area under the existing photograph. Keep every pixel of the existing photo. Same raised hand if present. Feet and shoes only in the empty lower area. EXACTLY ONE person. FORBIDDEN restaging into a studio, a new pose, redrawing the head or torso, two people.'
+          ? 'Continue the existing photograph downward as one full-body photo. Same raised hand if present. The whole body from head to shoes is visible with natural proportions. EXACTLY ONE person. FORBIDDEN restaging into a studio, a new pose, a changed face, two people.'
           : 'Standing upright, full body, head to shoes. Two legs, shoes on the floor. Eye-level. EXACTLY ONE person. FORBIDDEN two people, two women, a couple, side-by-side portraits, desk, name-board, waist crop, ID headshot.'
         const proportionLock =
           gender === 'man'
@@ -681,10 +681,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               drawn
                 ? 'Image 1 is the standing full-body layout. Image 2 is the exact identity drawing of the SAME one person. Keep image 2 art style.'
                 : continueMode
-                  ? 'Image 1 is the original photograph already placed at the top, with stretched empty space below it and at both sides. Image 2 is that same original photo. Continue ONLY the empty stretched area: paint the missing body, the lower scene, and extend the same place (sky, wall, ground) naturally to both sides. Do not redraw the existing photograph.'
+                  ? 'Image 1 is the original photograph already placed at the top, with stretched empty space below it and at both sides. Image 2 is that same original photo. Continue the empty stretched area: paint the full standing body with natural adult proportions (the head is about one seventh of the full body height, with realistic long legs), the lower scene, and extend the same place (wall, floor) naturally to both sides. Keep the same face, hair, clothes, and background as image 1. The person may be drawn smaller than in image 1 so that the whole body fits in the frame.'
                   : 'Image 1 already shows ONE identity head and shoulders. Image 2 is that same person, not a second person.',
               continueMode
-                ? 'EXACTLY ONE adult. Keep every pixel of the existing photo. Same clothes, same pose, same raised hand if present, same background. Paint only the missing legs and shoes under the photo. Do not restage into a studio, do not change the pose or the face.'
+                ? 'EXACTLY ONE adult. Same face, same clothes, same pose, same raised hand if present, same background. Paint the missing body, legs, and shoes at a natural full-body scale. Do not restage into a studio, do not change the pose or the face.'
                 : `EXACTLY ONE adult. Continue the body down from the head already in image 1. Keep image 2 face, hair length, and hair color. ${gender === 'man' ? 'Same clothes as image 2, no added jacket or tie, standing head to shoes.' : 'Same clothes as image 2, no added jacket, standing head to shoes.'} FORBIDDEN two people, a second woman, a couple, side-by-side portraits, a new hairstyle, an oval face sticker, leftover silhouette, a beige plate. Feet must reach the bottom of image 1.`,
               prompt,
             ].join(' '),
