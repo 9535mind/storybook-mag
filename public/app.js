@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw193'
+window.__DESK_BUILD = '20261005mw194'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12913,7 +12913,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       ? zipCloth
       : await deskClothRgb(source, 0.58, 0.92).catch(() => null)
     const clothHex = sourceCloth?.hex || ''
-    const runJob = async (image, label, quiet, style, mask, capSec) => {
+    const runJob = async (image, label, quiet, style, mask, capSec, single) => {
       const left = opts?.deadline
         ? Math.max(8, Math.round((opts.deadline - Date.now()) / 1000))
         : 200
@@ -12922,7 +12922,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const job = await postTaleSceneJob(
         {
           composeMode: 'extend-body',
-          images: image === source ? [source] : [image, source],
+          images: image === source || single ? [single ? image : source] : [image, source],
           description:
             gender === 'male' || gender === 'man'
               ? '같은 셔츠·재킷. 증명사진 잘린 어깨를 얼굴 너비의 2.75배로 잇고, 그 어깨에서 팔을 내린다. 잘린 끝에서 팔 금지.'
@@ -13273,6 +13273,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const tryLog = { n: attempt + 1 }
         contLog.tries.push(tryLog)
+        const tryLogs = contLog.tries
         try {
           setStatus(`${index}/${total} 사진의 장면을 살려 아래로 이어 그리는 중… (${attempt + 1}/5)`, false)
           // 얼굴 크기(사진 높이 대비)를 재서, 클로즈업이면 사진을 줄여 머리가 정상 크기가 되게 한다
@@ -13285,10 +13286,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           }
           tryLog.faceH = Number(faceH.toFixed(3))
           // 1번째는 머리 28%(mw187 실측: 이 구도는 모델이 그려 준다), 2번째는 20%로 달리 시도한다. 비율은 프롬프트로 모델에게 자연스럽게 그리라고 지시한다
-          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH, headTarget: [0.28, 0.2, 0.36, 0.28, 0.24][attempt] })
+          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH, headTarget: [0.28, 0.2, 0.17, 0.2, 0.24][attempt] })
           const contT0 = Date.now()
           // 한 번에 최대 110초
-          const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110)
+          const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110, attempt >= 2 && attempt % 2 === 0 && tryLogs[attempt - 1]?.reason === 'black')
           tryLog.sec = Math.round((Date.now() - contT0) / 1000)
           if (alt?.auth) return alt
           if (!alt?.display) {

@@ -695,7 +695,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           submitted = await submitFalKontextEdit({
             falKey: env.FAL_KEY,
             imageUrl: images[0],
-            prompt,
+            prompt: continueMode
+              ? `The image is an original photograph placed at the top with stretched empty space below it and at both sides. Paint the full standing body with natural adult proportions (head about one seventh of body height, realistic long legs), the shoes, and the lower scene into the empty area. ${prompt}`
+              : prompt,
             guidanceScale: 6.5,
             aspectRatio: '3:4',
           })
