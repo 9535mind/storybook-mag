@@ -1,12 +1,12 @@
 ---
-description: Desk 여자 1 몸 잇기 최종 확정(잠금). 2026-10-05, 빌드 20261005mw215, 태그 desk-woman-extend-final. 사용자가 명시 요청하기 전에는 바꾸지 않는다.
+description: Desk 여자 1 몸 잇기 최종 확정(잠금). 2026-10-05, 빌드 20261005mw216, 태그 desk-woman-extend-final. 사용자가 명시 요청하기 전에는 바꾸지 않는다.
 alwaysApply: true
 ---
 
 # Desk 여자 몸 잇기 최종 확정 (2026-10-05) — 잠금
 
 사용자가 **여자도 남자처럼 잠금하자**(10-05)고 하여, 점검 후 확정함. 이후 변경은 사용자가 직접 요청할 때만 한다.
-빌드 `20261005mw215` · 태그 `desk-woman-extend-final` (직전 `mw189`…`mw209`)
+빌드 `20261005mw216` · 태그 `desk-woman-extend-final` (직전 `mw189`…`mw209`)
 남자 규칙: `desk-man-body-extend.mdc` (별도 확정). **남자 동작은 이 문서의 어떤 수정으로도 바꾸지 않는다.**
 
 ## 정상 (합격 기준)

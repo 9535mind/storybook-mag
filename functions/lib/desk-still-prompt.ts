@@ -91,7 +91,9 @@ export function buildDeskShapePrompt(strict = false): string {
       : []),
     'Same exact woman, same face, same hair, same standing pose, same studio.',
     'Keep the exact same full-body camera. Head to shoes in frame. Same distance. Do not crop or zoom.',
-    'Change her outfit to an ivory cream athletic crop top and matching ivory high-waist bike shorts.',
+    strict
+      ? 'Change her outfit to an ivory cream fitted short-sleeve athletic top that covers the midriff and matching ivory knee-length leggings.'
+      : 'Change her outfit to an ivory cream athletic crop top and matching ivory high-waist bike shorts.',
     DESK_NO_BLACK_UNDERWEAR,
     'Arms hang at her sides. Both hands stay fully visible beside the thighs so arm length can be judged. Fingertips near mid-thigh. Shoes stay visible.',
     'Photoreal. FORBIDDEN a new face, a catalog model, a waist crop, missing shoes, a zoom-in, a beige plate, black underwear.',

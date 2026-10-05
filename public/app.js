@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw215'
+window.__DESK_BUILD = '20261005mw216'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -19679,6 +19679,13 @@ function initAdultDesk() {
       if (!cand) {
         setFormStatus('그림이 안 붙었습니다. 같은 버튼을 다시 누르세요.', true)
         return
+      }
+      // 엔진이 검은 장(필터)을 냈으면 머리 복원 없이 바로 다시 그린다. 두 번째는 배를 덮는 반팔·무릎 길이 레깅스(shapeStrict)
+      if (typeof isNearlyBlackImage === 'function' && (await isNearlyBlackImage(cand))) {
+        stable = cand
+        headLog = { skip: 'black' }
+        if (attempt === 0) continue
+        break
       }
       const head =
         typeof globalThis.restoreHeadFromSource === 'function'
