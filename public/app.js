@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw174'
+window.__DESK_BUILD = '20261005mw175'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11981,17 +11981,87 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
       }
       const midX = figR > figL ? (figL + figR) / 2 : W / 2
-      const centerGap = (y) => {
-        let runStart = -1
-        for (let x = Math.round(midX - W * 0.1); x <= Math.round(midX + W * 0.1); x += 1) {
-          const gapPx = !isPerson(x, y)
-          if (gapPx && runStart < 0) runStart = x
-          if ((!gapPx || x === Math.round(midX + W * 0.1)) && runStart >= 0) {
-            const w = x - runStart
-            const mid = runStart + w / 2
-            if (w >= 5 && w < W * 0.2 && Math.abs(mid - midX) < W * 0.07) return true
-            runStart = -1
+      // 다리 사이 틈: 배경색에 기대지 않고 '같은 색 다리 - 다른 색 틈 - 같은 색 다리' 패턴을 몸 중심선 근처에서 찾는다
+      // (배경이 가운데는 어둡고 가장자리는 밝은 사진, 어두운 바지 모두 대응)
+      // 몸통 좌우 끝(가슴 높이): 틈이 '배경과 비슷한 색'인지 보려고 몸 바로 바깥 배경색을 잰다 (지퍼·단추 줄 같은 솔기를 거르기 위해)
+      const torsoRow = Math.round(top + Hc * 0.3)
+      let torsoL = W
+      let torsoR = 0
+      for (let x = 0; x < W; x += 1) {
+        if (isPerson(x, torsoRow)) {
+          if (x < torsoL) torsoL = x
+          if (x > torsoR) torsoR = x
+        }
+      }
+      const nearBg = (y) => {
+        const out = [0, 0, 0, 0, 0, 0]
+        const xs = [Math.max(0, torsoL - 40), Math.min(W - 1, torsoR + 12)]
+        for (let side = 0; side < 2; side += 1) {
+          let cnt = 0
+          for (let x = xs[side]; x < xs[side] + 28 && x < W; x += 1) {
+            const i = (y * W + x) * 4
+            out[side * 3] += px[i]
+            out[side * 3 + 1] += px[i + 1]
+            out[side * 3 + 2] += px[i + 2]
+            cnt += 1
           }
+          for (let c = 0; c < 3; c += 1) out[side * 3 + c] /= Math.max(1, cnt)
+        }
+        return out
+      }
+      const centerGap = (y) => {
+        const eBg = nearBg(y)
+        const lo = Math.max(1, Math.round(midX - W * 0.13))
+        const hi = Math.min(W - 2, Math.round(midX + W * 0.13))
+        const segs = []
+        let sx = lo
+        let cr = px[(y * W + lo) * 4]
+        let cg = px[(y * W + lo) * 4 + 1]
+        let cb = px[(y * W + lo) * 4 + 2]
+        let n = 1
+        let sr = cr
+        let sg = cg
+        let sb2 = cb
+        const flush = (x) => {
+          segs.push({ a: sx, b: x - 1, r: sr / n, g: sg / n, b2: sb2 / n })
+        }
+        for (let x = lo + 1; x <= hi; x += 1) {
+          const i = (y * W + x) * 4
+          const prev = i - 4
+          const jump = Math.hypot(px[i] - px[prev], px[i + 1] - px[prev + 1], px[i + 2] - px[prev + 2])
+          if (jump > 28) {
+            flush(x)
+            sx = x
+            sr = 0
+            sg = 0
+            sb2 = 0
+            n = 0
+          }
+          sr += px[i]
+          sg += px[i + 1]
+          sb2 += px[i + 2]
+          n += 1
+        }
+        flush(hi + 1)
+        const cd = (p, q) => Math.hypot(p.r - q.r, p.g - q.g, p.b2 - q.b2)
+        // 경계 픽셀(1~3px 조각)은 건너뛰고, 틈 양쪽의 넓은 구간(다리)끼리 비교한다
+        for (let k = 0; k < segs.length; k += 1) {
+          const G = segs[k]
+          const gw2 = G.b - G.a + 1
+          const mid = (G.a + G.b) / 2
+          if (gw2 < 2 || gw2 >= W * 0.2 || Math.abs(mid - midX) >= W * 0.07) continue
+          let kl = k - 1
+          while (kl >= 0 && segs[kl].b - segs[kl].a + 1 < 4) kl -= 1
+          let kr = k + 1
+          while (kr < segs.length && segs[kr].b - segs[kr].a + 1 < 4) kr += 1
+          if (kl < 0 || kr >= segs.length) continue
+          const A = segs[kl]
+          const B = segs[kr]
+          const dBg = Math.min(
+            Math.hypot(G.r - eBg[0], G.g - eBg[1], G.b2 - eBg[2]),
+            Math.hypot(G.r - eBg[3], G.g - eBg[4], G.b2 - eBg[5]),
+          )
+          if (cd(A, B) < 45 && cd(G, A) > 38 && cd(G, B) > 38 && dBg < 95) return true
         }
         return false
       }
@@ -12000,13 +12070,19 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const y1g = Math.round(soles - Hc * 0.1)
       const gapRows = []
       for (let y = y0g; y <= y1g; y += 1) gapRows.push(centerGap(y) ? 1 : 0)
+      // 발 쪽에서부터 위로 올라가며 틈이 이어지는 곳까지 (4줄 이하의 끊김은 허용). 그 맨 위가 사타구니
       let crotch = -1
-      let suffix = 0
+      let misses = 0
       for (let k = gapRows.length - 1; k >= 0; k -= 1) {
-        suffix += gapRows[k]
-        const len = gapRows.length - k
-        if (len >= 30 && suffix / len >= 0.8) crotch = y0g + k
+        if (gapRows[k]) {
+          crotch = y0g + k
+          misses = 0
+        } else {
+          misses += 1
+          if (misses > 4 && crotch >= 0) break
+        }
       }
+      if (crotch >= 0 && y1g - crotch < 30) crotch = -1
       if (crotch < 0) {
         // 바지가 붙어 다리 사이 틈이 안 보이면 생성 결과의 전형값(다리 약 35%)으로 가정한다
         crotch = Math.round(soles - Hc * 0.35)
@@ -12014,7 +12090,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
       const legs = (soles - crotch) / Hc
       log.legs = Number(legs.toFixed(3))
-      if (legs >= 0.43) {
+      // 사타구니가 실제로 보였는데(가정값 아님) 다리가 45.5% 보다 길면 서양식 하체다: 목표 44% 로 줄인다
+      const longLegs = !log.assumed && legs > 0.455
+      if (legs >= 0.43 && !longLegs) {
         log.skip = 'already_ok'
         return src
       }
@@ -12023,13 +12101,35 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const sBot = 1 + 0.48 * strength
       const neckY = top + 0.185 * Hc
       const shoeY = top + 0.955 * Hc
+      let cLegs = 1
+      if (longLegs) {
+        const L1 = Math.max(10, shoeY - crotch)
+        const shoeLen = soles - shoeY
+        cLegs = Math.max(0.82, Math.min(1, (0.44 * (Hc - L1) - shoeLen) / (0.56 * L1)))
+        log.compress = Number(cLegs.toFixed(3))
+      }
+      const smoothS = (v) => {
+        const q = Math.max(0, Math.min(1, v))
+        return q * q * (3 - 2 * q)
+      }
       const ys = new Float64Array(H)
       const nw = new Float64Array(H)
       let acc = 0
       for (let y = 0; y < H; y += 1) {
         ys[y] = y
         const f = (y - top) / Hc
-        const sc = y >= neckY && y < shoeY ? sTop + (sBot - sTop) / (1 + Math.exp(-14 * (f - 0.66))) : 1
+        let sc
+        if (longLegs) {
+          const t1 = crotch - 0.03 * Hc
+          const t2 = crotch + 0.03 * Hc
+          if (y < t1) sc = 1
+          else if (y < t2) sc = 1 + (cLegs - 1) * smoothS((y - t1) / (t2 - t1))
+          else if (y < shoeY - 0.02 * Hc) sc = cLegs
+          else if (y < shoeY) sc = cLegs + (1 - cLegs) * smoothS((y - (shoeY - 0.02 * Hc)) / (0.02 * Hc))
+          else sc = 1
+        } else {
+          sc = y >= neckY && y < shoeY ? sTop + (sBot - sTop) / (1 + Math.exp(-14 * (f - 0.66))) : 1
+        }
         nw[y] = acc
         acc += sc
       }
