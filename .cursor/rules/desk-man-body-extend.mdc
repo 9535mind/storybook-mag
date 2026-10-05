@@ -36,6 +36,11 @@ alwaysApply: true
 - 남자 프롬프트에 "Black office blazer" 같은 옷 고정 문구를 다시 넣기
 - 이 수정으로 **여자 몸 잇기**(`desk-woman-body-extend.mdc`, 합격 확정)와 쇼츠 엔진을 바꾸기
 
+## 잠금 점검 (배포 전 필수)
+
+- `node scripts/desk-man-lock-check.mjs` — 합격 상태가 코드에 유지되는지 15개 항목 검사. **실패하면 배포하지 않는다**
+- 합격 시점으로 비교·복구: `git diff desk-man-extend-mw174 -- public/app.js functions/api/tale-scene.ts`
+
 ## 시험 도구 (API 비용 없음, Edge 필요)
 
 - `scripts/pixel-head-check.mjs 원본 생성전신 결과.png [머리배율]`
