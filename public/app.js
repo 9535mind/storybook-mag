@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw192'
+window.__DESK_BUILD = '20261005mw193'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -13239,6 +13239,37 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
         return sum / Math.max(1, n)
       }
+      // 양옆 아래 영역이 세로줄 무늬 그대로면(옆으로는 변하고 위아래로는 거의 안 변함) 모델이 몸 가운데만 그리고 나머지는 안 그린 것
+      const sidesStreaky = async (display) => {
+        const img = await loadHtmlImage(display)
+        const w = 160
+        const h = Math.max(80, Math.round((160 * img.naturalHeight) / Math.max(1, img.naturalWidth)))
+        const c = document.createElement('canvas')
+        c.width = w
+        c.height = h
+        const cx2 = c.getContext('2d', { willReadFrequently: true })
+        cx2.drawImage(img, 0, 0, w, h)
+        const d = cx2.getImageData(0, 0, w, h).data
+        const lum = (x, y) => d[(y * w + x) * 4] * 0.299 + d[(y * w + x) * 4 + 1] * 0.587 + d[(y * w + x) * 4 + 2] * 0.114
+        const y0 = Math.round(h * 0.72)
+        const y1 = Math.round(h * 0.93)
+        const band = (x0, x1) => {
+          let hs = 0
+          let vs = 0
+          let n = 0
+          for (let y = y0; y < y1 - 4; y += 1) {
+            for (let x = x0; x < x1 - 4; x += 1) {
+              hs += Math.abs(lum(x, y) - lum(x + 4, y))
+              vs += Math.abs(lum(x, y) - lum(x, y + 4))
+              n += 1
+            }
+          }
+          return { h: hs / Math.max(1, n), v: vs / Math.max(1, n) }
+        }
+        const l = band(0, Math.round(w * 0.25))
+        const r = band(Math.round(w * 0.75), w)
+        return l.v < 2.5 && l.h > 3 && r.v < 2.5 && r.h > 3
+      }
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const tryLog = { n: attempt + 1 }
         contLog.tries.push(tryLog)
@@ -13309,6 +13340,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (tryLog.black) tryLog.reason = 'black'
           else if (tryLog.faces >= 2) tryLog.reason = 'two_people'
           else if (tryLog.paint < 4) tryLog.reason = 'unpainted'
+          else if (await sidesStreaky(restored)) tryLog.reason = 'unpainted'
           else {
             tryLog.reason = 'ok'
             contLog.reason = 'ok'
