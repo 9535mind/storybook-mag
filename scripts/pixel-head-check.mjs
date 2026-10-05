@@ -31,7 +31,7 @@ await page.setContent('<html><body></body></html>')
 const [s, g] = [eyes(srcEyes), eyes(gEyes)]
 const res = await page.evaluate(
   async ({ src, o, st, s, g }) => {
-    const mk = (a) => ({ leftEye: { x: a[0], y: a[1] }, rightEye: { x: a[2], y: a[3] }, mouth: { x: a[4], y: a[5] }, h: 0.3 })
+    const mk = (a) => a.length === 4 ? { x: a[0], y: a[1], w: a[2], h: a[3] } : { leftEye: { x: a[0], y: a[1] }, rightEye: { x: a[2], y: a[3] }, mouth: { x: a[4], y: a[5] }, h: 0.3 }
     window.detectFaceBox = async (url) => (url === o ? mk(s) : mk(g))
     const run = new Function(`${src}; return pastePixelHeadOnStanding`)
     const fn = run()

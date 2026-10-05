@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw162'
+window.__DESK_BUILD = '20261005mw163'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11776,14 +11776,30 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const gw = gImg.naturalWidth
       const gh = gImg.naturalHeight
       const pt = (f, k, w, h) => (f?.[k] ? { x: f[k].x * w, y: f[k].y * h } : null)
-      const sL = pt(sFace, 'leftEye', sw, sh)
-      const sR = pt(sFace, 'rightEye', sw, sh)
-      const gL = pt(gFace, 'leftEye', gw, gh)
-      const gR = pt(gFace, 'rightEye', gw, gh)
-      if (!(sL && sR && gL && gR)) {
-        log.skip = 'no_eyes'
+      // 눈 좌표가 없으면 얼굴 박스로 추정한다 (두 사진에 같은 감지기를 쓰므로 비율이 맞는다)
+      const eyesFrom = (f, w, h) => {
+        if (f?.leftEye && f?.rightEye) return { L: pt(f, 'leftEye', w, h), R: pt(f, 'rightEye', w, h), real: true }
+        if (!(f && f.w > 0.03 && f.h > 0.03)) return null
+        const ey = (f.y + f.h * 0.4) * h
+        return {
+          L: { x: (f.x + f.w * 0.3) * w, y: ey },
+          R: { x: (f.x + f.w * 0.7) * w, y: ey },
+          real: false,
+        }
+      }
+      const sE = eyesFrom(sFace, sw, sh)
+      const gE = eyesFrom(gFace, gw, gh)
+      if (!(sE && gE)) {
+        log.skip = 'no_face_box'
+        log.srcFace = Boolean(sFace)
+        log.dstFace = Boolean(gFace)
         return { url: '', log }
       }
+      const sL = sE.L
+      const sR = sE.R
+      const gL = gE.L
+      const gR = gE.R
+      log.eyes = sE.real && gE.real ? 'detected' : 'box'
       const mid = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
       const sM = mid(sL, sR)
       const gM = mid(gL, gR)
@@ -11795,7 +11811,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
       const scale = gIoc / sIoc
       let rot = Math.atan2(gR.y - gL.y, gR.x - gL.x) - Math.atan2(sR.y - sL.y, sR.x - sL.x)
-      rot = Math.max(-0.14, Math.min(0.14, rot))
+      rot = sE.real && gE.real ? Math.max(-0.14, Math.min(0.14, rot)) : 0
       log.scale = Number(scale.toFixed(3))
       log.rot = Number(rot.toFixed(3))
       if (scale < 0.2 || scale > 3) {
@@ -11803,7 +11819,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         return { url: '', log }
       }
       // 눈~입 거리(없으면 얼굴 상자로 추정)로 목 아래 자르는 선과 머리 폭을 정한다
-      const sMouth = pt(sFace, 'mouth', sw, sh)
+      const sMouth = sE.real ? pt(sFace, 'mouth', sw, sh) : null
       const sDem = sMouth && sMouth.y > sM.y ? sMouth.y - sM.y : Math.max(10, (sFace?.h || 0.3) * sh * 0.36)
       // 원본: 배경만 투명하게 (원본과 같은 크기를 유지해야 눈 좌표가 맞는다)
       const cut = document.createElement('canvas')
@@ -11874,7 +11890,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       out.height = gh
       const octx = out.getContext('2d', { willReadFrequently: true })
       octx.drawImage(gImg, 0, 0)
-      const gMouth = pt(gFace, 'mouth', gw, gh)
+      const gMouth = gE.real ? pt(gFace, 'mouth', gw, gh) : null
       const gDem = gMouth && gMouth.y > gM.y ? gMouth.y - gM.y : sDem * scale
       const eraseY = Math.min(gh - 1, Math.round(gM.y + gDem * 1.55))
       const ex0 = Math.max(0, Math.round(gM.x - gIoc * 2.1))
@@ -12351,6 +12367,16 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         const holdT0 = Date.now()
         const held = await holdIdFaceOnStanding(result.display, source, gender)
         timing.holdSec = Math.round((Date.now() - holdT0) / 1000)
+        {
+          const px = (window.__deskHoldLog || []).find((l) => l.engine === 'pixel')
+          if (px && !px.ok) {
+            const why = `원본 얼굴 얹기 건너뜀: ${px.skip}${px.message ? ` (${px.message})` : ''}`
+            console.warn(why, JSON.stringify(px))
+            setTimeout(() => (typeof setFormStatus === 'function' ? setFormStatus(why, true) : null), 1500)
+          } else if (px?.ok) {
+            timing.pixelHead = px
+          }
+        }
         timing.holdLog = window.__deskHoldLog
         const standingFace = await estimateFaceBoxFromImage(result.display)
         const standingZoomed = Boolean(
