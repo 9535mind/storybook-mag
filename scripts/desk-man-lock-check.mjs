@@ -14,8 +14,8 @@ const tale = readFileSync(path.join(ROOT, 'functions', 'api', 'tale-scene.ts'), 
 
 const checks = [
   ['원본 얼굴 얹기 함수가 있다', /async function pastePixelHeadOnStanding\(/.test(app)],
-  ['얼굴 얹기가 남자 기본 켜짐', /window\.__deskPixelHead !== false && \(gender === 'male' \|\| gender === 'man'\)/.test(app)],
-  ['머리 배율 기본 0.95', /window\.__deskHeadShrink\) > 0 \? Number\(window\.__deskHeadShrink\) : 0\.95/.test(app)],
+  ['얼굴 얹기가 남자 기본 켜짐(엄격 조건 없음)', /const isManHold = gender === 'male' \|\| gender === 'man'/.test(app) && /window\.__deskPixelHead !== false && \(isManHold \|\|/.test(app) && /isManHold \? undefined/.test(app)],
+  ['머리 배율 기본 0.95', /Number\(window\.__deskHeadShrink\) > 0\s*\?\s*Number\(window\.__deskHeadShrink\)\s*:\s*0\.95/.test(app)],
   ['어깨 배율 기본 0.95', /window\.__deskShoulderScale\) > 0 \? Number\(window\.__deskShoulderScale\) : 0\.95/.test(app)],
   ['옛 어깨 넓히기 캐논은 꺼져 있다', /if \(window\.__deskManCanon === true\) \{\s*const fitted = await fitKoreanManCanon/.test(app)],
   ['남자는 비율 보정을 거친다', /result\.display = await fixManProportions\(result\.display\)/.test(app)],

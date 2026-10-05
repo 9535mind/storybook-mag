@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw177'
+window.__DESK_BUILD = '20261005mw178'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11488,87 +11488,186 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return out.toDataURL('image/jpeg', 0.92)
   }
 
+  /**
+   * 여자 팔 길이 보정. 손끝(몸 옆 피부색 덩어리의 맨 아래)이 바닥에서 키의 0.36 보다 낮으면(팔이 길면) 세로로 줄인다.
+   * 옛 방식(고정 위치 열 띠를 옮김)은 손 주변에 직사각형 이음새를 남겨 버렸다. 이제 줄 단위로 부드럽게 줄인다.
+   * 좌우 손 높이가 다르면 더 낮은 쪽 기준. 손끝이 허벅지 중간(바닥에서 약 0.385)에 오도록 한다. 길지 않으면 그대로 둔다.
+   * window.__deskWomanArmsLog 에 측정값이 남는다.
+   */
   async function shortenWomanArmsInPlace(src) {
-    if (!src) return src
-    const face = await deskFaceBoxForExtend(src)
-    if (!face || !(face.h > 0.04)) return src
-    const img = await loadHtmlImage(src)
-    const iw = img.naturalWidth
-    const ih = img.naturalHeight
-    const c = document.createElement('canvas')
-    c.width = iw
-    c.height = ih
-    const ctx = c.getContext('2d', { willReadFrequently: true })
-    ctx.drawImage(img, 0, 0)
-    const { data } = ctx.getImageData(0, 0, iw, ih)
-    const px = (x, y) => {
-      const i = (Math.max(0, Math.min(ih - 1, y)) * iw + Math.max(0, Math.min(iw - 1, x))) * 4
-      return [data[i], data[i + 1], data[i + 2]]
-    }
-    const luma = (p) => p[0] * 0.299 + p[1] * 0.587 + p[2] * 0.114
-    const sat = (p) => Math.max(p[0], p[1], p[2]) - Math.min(p[0], p[1], p[2])
-    const studio = (p) => sat(p) < 22 && luma(p) > 150
-    const skin = (p) => p[0] > 95 && p[1] > 60 && p[2] > 45 && p[0] > p[1] + 8 && p[0] > p[2]
-    const elbow = Math.max(8, Math.round(ih * 0.4))
-    const bands = [
-      [Math.round(iw * 0.292), Math.round(iw * 0.338)],
-      [Math.round(iw * 0.61), Math.round(iw * 0.648)],
-    ]
-    const handBottom = (x0, x1) => {
-      let y1 = 0
-      for (let y = Math.round(ih * 0.48); y < Math.round(ih * 0.64); y += 1) {
-        for (let x = x0; x < x1; x += 1) {
-          if (skin(px(x, y))) y1 = Math.max(y1, y)
-        }
-      }
-      return y1
-    }
-    const handL = handBottom(bands[0][0], bands[0][1])
-    const handR = handBottom(bands[1][0], bands[1][1])
-    if (!handL || !handR) return src
-    if (Math.min(handL, handR) / ih < 0.575) return src
-    const target = Math.round(elbow + (Math.min(handL, handR) - elbow) * 0.9)
-    const bg = px(8, 8)
-    const out = ctx.getImageData(0, 0, iw, ih)
-    const set = (x, y, p) => {
-      const i = (y * iw + x) * 4
-      out.data[i] = p[0]
-      out.data[i + 1] = p[1]
-      out.data[i + 2] = p[2]
-    }
-    const skirtL = Math.round(iw * 0.336)
-    const skirtR = Math.round(iw * 0.612)
-    for (const [x0, x1] of bands) {
-      const hand = x0 < iw / 2 ? handL : handR
-      const scale = (target - elbow) / Math.max(8, hand - elbow)
-      for (let x = x0; x < x1; x += 1) {
-        if (x >= skirtL && x <= skirtR) continue
-        for (let y = elbow; y <= hand + 14 && y < ih; y += 1) {
-          if (x >= skirtL && x <= skirtR) continue
-          if (y <= target) {
-            const srcY = elbow + (y - elbow) / scale
-            const y0 = Math.floor(srcY)
-            const t = srcY - y0
-            const a = px(x, y0)
-            const b = px(x, y0 + 1)
-            if (studio(a) && studio(b)) continue
-            set(x, y, [
-              Math.round(a[0] + (b[0] - a[0]) * t),
-              Math.round(a[1] + (b[1] - a[1]) * t),
-              Math.round(a[2] + (b[2] - a[2]) * t),
-            ])
-          } else {
-            const toward = x < iw / 2 ? px(x + 6, y) : px(x - 6, y)
-            if (luma(toward) < 80) continue
-            const cur = px(x, y)
-            if (studio(cur)) continue
-            if (skin(cur) || luma(cur) < 70) set(x, y, bg)
+    const log = { engine: 'woman-arms' }
+    window.__deskWomanArmsLog = log
+    try {
+      const img = await loadHtmlImage(src)
+      const W = img.naturalWidth
+      const H = img.naturalHeight
+      if (!(W > 80 && H > 160)) return src
+      const c0 = document.createElement('canvas')
+      c0.width = W
+      c0.height = H
+      const x0 = c0.getContext('2d', { willReadFrequently: true })
+      x0.drawImage(img, 0, 0)
+      const px = x0.getImageData(0, 0, W, H).data
+      const rowEdge = (y) => {
+        const e = [0, 0, 0, 0, 0, 0]
+        for (let k = 0; k < 24; k += 1) {
+          const il = (y * W + k) * 4
+          const ir = (y * W + (W - 1 - k)) * 4
+          for (let c = 0; c < 3; c += 1) {
+            e[c] += px[il + c] / 24
+            e[3 + c] += px[ir + c] / 24
           }
         }
+        return e
       }
+      const personAt = (x, y, e) => {
+        const i = (y * W + x) * 4
+        return (
+          Math.min(
+            Math.hypot(px[i] - e[0], px[i + 1] - e[1], px[i + 2] - e[2]),
+            Math.hypot(px[i] - e[3], px[i + 1] - e[4], px[i + 2] - e[5]),
+          ) > 38
+        )
+      }
+      const rowHas = (y) => {
+        const e = rowEdge(y)
+        let n = 0
+        for (let x = Math.round(W * 0.28); x < Math.round(W * 0.72); x += 1) {
+          if (personAt(x, y, e)) {
+            n += 1
+            if (n >= 6) return true
+          }
+        }
+        return false
+      }
+      let top = -1
+      for (let y = 0; y < H * 0.4 && top < 0; y += 1) if (rowHas(y)) top = y
+      let soles = -1
+      for (let y = H - 1; y > H * 0.6 && soles < 0; y -= 1) if (rowHas(y)) soles = y
+      if (top < 0 || soles < 0 || soles - top < H * 0.5) {
+        log.skip = 'no_figure'
+        return src
+      }
+      const Hc = soles - top
+      const cx = W / 2
+      // 손: 몸 옆(가운데에서 좌우 8~34%)의 피부색 덩어리. 격자 2px 로 연결 요소를 센다
+      const y0 = Math.round(top + Hc * 0.42)
+      const y1 = Math.round(top + Hc * 0.74)
+      const step = 2
+      const gw = Math.floor(W / step)
+      const gh = Math.floor((y1 - y0) / step)
+      const skin = new Uint8Array(gw * gh)
+      for (let gy = 0; gy < gh; gy += 1) {
+        for (let gx = 0; gx < gw; gx += 1) {
+          const x = gx * step
+          const y = y0 + gy * step
+          const dx = Math.abs(x - cx)
+          if (dx < W * 0.08 || dx > W * 0.34) continue
+          const i = (y * W + x) * 4
+          const r = px[i]
+          const g = px[i + 1]
+          const b = px[i + 2]
+          const luma = r * 0.299 + g * 0.587 + b * 0.114
+          if (r > 140 && r > b + 22 && r > g + 6 && luma > 100) skin[gy * gw + gx] = 1
+        }
+      }
+      const seen = new Uint8Array(gw * gh)
+      const blobs = []
+      for (let s0 = 0; s0 < skin.length; s0 += 1) {
+        if (!skin[s0] || seen[s0]) continue
+        const stack = [s0]
+        seen[s0] = 1
+        let area = 0
+        let maxY = 0
+        let sumX = 0
+        while (stack.length) {
+          const v = stack.pop()
+          area += 1
+          const vy = Math.floor(v / gw)
+          const vx = v % gw
+          if (vy > maxY) maxY = vy
+          sumX += vx
+          for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+            const nx = vx + ox
+            const ny = vy + oy
+            if (nx < 0 || ny < 0 || nx >= gw || ny >= gh) continue
+            const ni = ny * gw + nx
+            if (skin[ni] && !seen[ni]) {
+              seen[ni] = 1
+              stack.push(ni)
+            }
+          }
+        }
+        if (area >= 60) blobs.push({ area, y: y0 + maxY * step, x: (sumX / area) * step })
+      }
+      const left = blobs.filter((b) => b.x < cx).sort((a, b) => b.area - a.area)[0]
+      const right = blobs.filter((b) => b.x >= cx).sort((a, b) => b.area - a.area)[0]
+      if (!left && !right) {
+        log.skip = 'no_hands'
+        return src
+      }
+      const tipY = Math.max(left ? left.y : 0, right ? right.y : 0)
+      const floorH = (soles - tipY) / Hc
+      log.floorH = Number(floorH.toFixed(3))
+      log.hands = { left: left ? left.y : null, right: right ? right.y : null }
+      if (floorH >= 0.36) {
+        log.skip = 'arms_ok'
+        return src
+      }
+      // 손끝이 바닥에서 0.385 가 되도록, 팔꿈치 높이~손끝 사이 줄을 줄인다
+      const delta = (0.385 - floorH) * Hc
+      const yA = top + 0.45 * Hc
+      const yB = tipY + 0.05 * Hc
+      const L = yB - yA
+      const cArm = Math.max(0.8, Math.min(1, (L - delta) / L))
+      log.compress = Number(cArm.toFixed(3))
+      const smooth = (v) => {
+        const q = Math.max(0, Math.min(1, v))
+        return q * q * (3 - 2 * q)
+      }
+      const ramp = 0.03 * Hc
+      const nw = new Float64Array(H)
+      let acc = 0
+      for (let y = 0; y < H; y += 1) {
+        let sc = 1
+        if (y >= yA - ramp && y < yA) sc = 1 + (cArm - 1) * smooth((y - (yA - ramp)) / ramp)
+        else if (y >= yA && y < yB) sc = cArm
+        else if (y >= yB && y < yB + ramp) sc = cArm + (1 - cArm) * smooth((y - yB) / ramp)
+        nw[y] = acc
+        acc += sc
+      }
+      const newH = Math.ceil(acc)
+      const out = document.createElement('canvas')
+      out.width = W
+      out.height = newH
+      const octx = out.getContext('2d', { willReadFrequently: true })
+      const od = octx.createImageData(W, newH)
+      const o = od.data
+      let j = 0
+      for (let yn = 0; yn < newH; yn += 1) {
+        while (j < H - 2 && nw[j + 1] <= yn) j += 1
+        const span = Math.max(1e-6, nw[j + 1] - nw[j])
+        const ysrc = Math.min(H - 1.001, j + Math.max(0, Math.min(1, (yn - nw[j]) / span)))
+        const ya = Math.floor(ysrc)
+        const t = ysrc - ya
+        for (let x = 0; x < W; x += 1) {
+          const a = (ya * W + x) * 4
+          const b = ((ya + 1) * W + x) * 4
+          const d = (yn * W + x) * 4
+          o[d] = px[a] * (1 - t) + px[b] * t
+          o[d + 1] = px[a + 1] * (1 - t) + px[b + 1] * t
+          o[d + 2] = px[a + 2] * (1 - t) + px[b + 2] * t
+          o[d + 3] = 255
+        }
+      }
+      octx.putImageData(od, 0, 0)
+      log.size = [W, newH]
+      return out.toDataURL('image/png')
+    } catch (err) {
+      log.skip = 'err'
+      log.message = err instanceof Error ? err.message : String(err)
+      return src
     }
-    ctx.putImageData(out, 0, 0)
-    return c.toDataURL('image/jpeg', 0.94)
   }
 
   /** 36. 2·9 CAST 얼굴. 화보 8등신·가는 다리 금지. 어깨는 얼굴에 맞춘다. */
@@ -12176,7 +12275,53 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
    * 원본 머리와 생성된 머리를 크기·위치를 바꿔 가며 겹쳐 보아 가장 닮은 자리에 얹는다.
    * 실패하면 빈 문자열을 돌려주고 호출한 쪽이 기존 엔진으로 넘어간다.
    */
-  async function pastePixelHeadOnStanding(standingUrl, sourceUrl) {
+  /** 얼굴 사진의 배경이 단색(증명사진 같은 판)인지. 일상 사진(실외·복잡한 배경)은 false */
+  async function idPhotoLooksPlain(src) {
+    try {
+      const img = await loadHtmlImage(src)
+      const w = 120
+      const h = Math.max(40, Math.round((120 * img.naturalHeight) / Math.max(1, img.naturalWidth)))
+      const c = document.createElement('canvas')
+      c.width = w
+      c.height = h
+      const ctx = c.getContext('2d', { willReadFrequently: true })
+      ctx.drawImage(img, 0, 0, w, h)
+      const d = ctx.getImageData(0, 0, w, h).data
+      const lum = (x, y) => {
+        const i = (y * w + x) * 4
+        return d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+      }
+      const vals = []
+      let ls = 0
+      let ln = 0
+      let rs = 0
+      let rn = 0
+      for (let y = 0; y < Math.round(h * 0.07); y += 1) for (let x = 0; x < w; x += 1) vals.push(lum(x, y))
+      for (let y = 0; y < Math.round(h * 0.55); y += 1) {
+        for (let x = 0; x < Math.round(w * 0.1); x += 1) {
+          const v = lum(x, y)
+          vals.push(v)
+          ls += v
+          ln += 1
+        }
+        for (let x = Math.round(w * 0.9); x < w; x += 1) {
+          const v = lum(x, y)
+          vals.push(v)
+          rs += v
+          rn += 1
+        }
+      }
+      const mean = vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length)
+      const std = Math.sqrt(vals.reduce((a, b) => a + (b - mean) * (b - mean), 0) / Math.max(1, vals.length))
+      const plain = std < 30 && Math.abs(ls / Math.max(1, ln) - rs / Math.max(1, rn)) < 35
+      window.__deskPlainBgLog = { std: Number(std.toFixed(1)), plain }
+      return plain
+    } catch (_) {
+      return false
+    }
+  }
+
+  async function pastePixelHeadOnStanding(standingUrl, sourceUrl, opts) {
     const t0 = Date.now()
     const log = { engine: 'pixel' }
     const fail = (why, extra) => {
@@ -12185,6 +12330,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       return { url: '', log }
     }
     try {
+      if (opts?.strict && !(await idPhotoLooksPlain(sourceUrl))) {
+        return fail('busy_bg', window.__deskPlainBgLog)
+      }
       const [sImg, gImg] = await Promise.all([loadHtmlImage(sourceUrl), loadHtmlImage(standingUrl)])
       const sw = sImg.naturalWidth
       const sh = sImg.naturalHeight
@@ -12549,6 +12697,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
       }
       if (fine.score < 0.3) return fail('no_match_fine', { score: Number(fine.score.toFixed(3)) })
+      if (opts?.strict && fine.score < 0.8) return fail('low_match', { score: Number(fine.score.toFixed(3)) })
       const scale = fine.s
       // 템플릿 왼쪽 위 (tplX0, tplY0)가 생성 이미지의 (ox*K2, oy*K2)에 놓인다
       const gAx = fine.ox * K2 - tplX0 * scale
@@ -12636,7 +12785,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         octx.putImageData(od, 0, 0)
       }
       // 8) 원본 머리를 얹는다. 생성된 몸은 머리가 큰 편(약 6등신)이라, 목 자리를 기준으로 머리만 조금 줄인다
-      const shrink = Number(window.__deskHeadShrink) > 0 ? Number(window.__deskHeadShrink) : 0.95
+      const shrink =
+        Number(opts?.shrink) > 0
+          ? Number(opts.shrink)
+          : Number(window.__deskHeadShrink) > 0
+            ? Number(window.__deskHeadShrink)
+            : 0.95
       const pgx = gAx + cx * scale
       const pgy = gAy + chinY * scale
       const scale2 = scale * shrink
@@ -12709,11 +12863,17 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       if (!face) return false
       return face.h >= 0.36 || face.y + face.h >= 0.58
     }
+    const isManHold = gender === 'male' || gender === 'man'
     const pixelHeadOn =
       window.__deskPixelHead === true ||
-      (window.__deskPixelHead !== false && (gender === 'male' || gender === 'man'))
+      (window.__deskPixelHead !== false && (isManHold || window.__deskPixelHeadWoman !== false))
     if (pixelHeadOn) {
-      const px = await pastePixelHeadOnStanding(bodyDisplay, idDataUrl)
+      // 남자는 기존 그대로. 여자는 단색 배경 증명사진이고 일치도 0.8 이상일 때만 쓰고, 아니면 아래 교체 엔진으로 넘어간다
+      const px = await pastePixelHeadOnStanding(
+        bodyDisplay,
+        idDataUrl,
+        isManHold ? undefined : { strict: true, shrink: Number(window.__deskHeadShrinkWoman) > 0 ? Number(window.__deskHeadShrinkWoman) : 1.0 },
+      )
       log.push(px.log)
       if (px.url) return px.url
     }
@@ -12773,6 +12933,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     }
     setStatus(`이어그리기 · ${index}/${total} 사진 붙이는 중…`, false)
     const source = opts?.faceSrc || idDataUrl
+    const isWomanBody = !(gender === 'male' || gender === 'man')
+    const plainSource = isWomanBody && window.__deskPixelHeadWoman !== false ? await idPhotoLooksPlain(source) : false
     const drawn = opts?.forcePhoto ? false : await sourceLooksIllustration(source)
     const zipCloth = await deskClothRgb(source, 0.78, 0.98, { bright: true }).catch(() => null)
     const sourceCloth = zipCloth?.hex
@@ -12978,7 +13140,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       if (opts?.jacket !== false && (await deskChestSplit(result.display))) return rejectBody('chestSplit')
       const pixelWillRun =
         window.__deskPixelHead === true ||
-        (window.__deskPixelHead !== false && (gender === 'male' || gender === 'man'))
+        (window.__deskPixelHead !== false && (gender === 'male' || gender === 'man' || plainSource))
       if (opts?.face !== false && !pixelWillRun) {
         const hold = await deskFacesHold(source, result.display)
         if (!hold.ok) return rejectBody('faceHold')

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const [orig, standing, outFile, shrink] = process.argv.slice(2)
+const [orig, standing, outFile, shrink, strict] = process.argv.slice(2)
 const app = readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8')
 const grab = (name) => {
   const m = new RegExp(String.raw`\n  (async )?function ${name}\b`).exec(app)
@@ -19,7 +19,7 @@ const grab = (name) => {
     else if (app[k] === '}' && --depth === 0) return app.slice(m.index, k + 1)
   }
 }
-const names = ['loadHtmlImage', 'canvasHasTransparency', 'floodKeyStudio', 'dropStudioIslands', 'defringeCutout', 'pastePixelHeadOnStanding']
+const names = ['loadHtmlImage', 'idPhotoLooksPlain', 'canvasHasTransparency', 'floodKeyStudio', 'dropStudioIslands', 'defringeCutout', 'pastePixelHeadOnStanding']
 const src = names.map(grab).join('\n')
 const b64 = (f) => 'data:image/' + (f.toLowerCase().endsWith('png') ? 'png' : 'jpeg') + ';base64,' + readFileSync(f).toString('base64')
 const browser = await chromium.launch({
@@ -28,13 +28,13 @@ const browser = await chromium.launch({
 const page = await browser.newPage()
 await page.setContent('<html><body></body></html>')
 const res = await page.evaluate(
-  async ({ src, o, st, shrink }) => {
+  async ({ src, o, st, shrink, strict }) => {
     if (shrink) window.__deskHeadShrink = Number(shrink)
     const t = performance.now()
-    const r = await new Function(`${src}; return pastePixelHeadOnStanding`)()(st, o)
+    const r = await new Function(`${src}; return pastePixelHeadOnStanding`)()(st, o, strict ? { strict: true, shrink: shrink ? Number(shrink) : 1 } : undefined)
     return { url: r.url, log: r.log, ms: Math.round(performance.now() - t) }
   },
-  { src, o: b64(orig), st: b64(standing), shrink },
+  { src, o: b64(orig), st: b64(standing), shrink, strict: Boolean(strict) },
 )
 console.log(JSON.stringify({ ...res, url: res.url ? res.url.length : 0 }))
 if (res.url) writeFileSync(outFile, Buffer.from(res.url.split(",")[1], "base64"))
