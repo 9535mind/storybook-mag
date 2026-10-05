@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 여자 몸 잇기 잠금 점검(2026-10-05 수정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw180)
+ * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw181)
  * 사용: node scripts/desk-woman-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'

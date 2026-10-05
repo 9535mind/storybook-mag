@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw180'
+window.__DESK_BUILD = '20261005mw181'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12942,6 +12942,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     window.__deskTiming = timing
     const timingDone = () => {
       timing.totalSec = Math.round((Date.now() - timingT0) / 1000)
+      if (timing.continue && timing.continue.reason && timing.continue.reason !== 'ok') {
+        const why = `장면 이어 그리기를 쓰지 못해 서서 전신으로 이었습니다: ${timing.continue.reason}${timing.continue.message ? ` (${timing.continue.message})` : ''}`
+        setTimeout(() => (typeof setFormStatus === 'function' ? setFormStatus(why, true) : null), 1500)
+      }
       try {
         console.info('[desk-extend timing]', JSON.stringify(timing))
       } catch (_) {
@@ -13270,9 +13274,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         if (alt?.display) {
           const restored = await restoreProtectedExtendPixels(alt.display, prepared)
           let reason = ''
-          if (await isSolidBlackPhoto(restored)) reason = 'black'
-          else if (typeof countDeskSceneFaces === 'function' && (await countDeskSceneFaces(restored, 4000)) >= 2) reason = 'two_people'
-          else if (!(await hasStandingLegs(restored))) reason = 'no_legs'
+          contLog.black = await isSolidBlackPhoto(restored)
+          contLog.faces = typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(restored, 4000) : 1
+          contLog.legs = await hasStandingLegs(restored)
+          if (contLog.black) reason = 'black'
+          else if (contLog.faces >= 2) reason = 'two_people'
+          else if (!contLog.legs) reason = 'no_legs'
           contLog.reason = reason || 'ok'
           if (!reason) {
             timingDone()
