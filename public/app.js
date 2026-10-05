@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw168'
+window.__DESK_BUILD = '20261005mw169'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11758,6 +11758,113 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   }
 
   /**
+   * 남자 어깨 너비 보정. 목 아래 상체(어깨·몸통·팔)를 가로로 factor배(기본 0.95) 줄이고,
+   * 허벅지 위에서 서서히 원래 폭으로 되돌린다. 머리·다리는 그대로 둔다.
+   * window.__deskShoulderScale 로 조정(1이면 끔). 실패하면 원본을 돌려준다.
+   */
+  async function narrowManShoulders(src) {
+    const log = { engine: 'shoulder' }
+    window.__deskShoulderLog = log
+    const k = Number(window.__deskShoulderScale) > 0 ? Number(window.__deskShoulderScale) : 0.95
+    log.factor = k
+    if (k >= 0.999) return src
+    try {
+      const img = await loadHtmlImage(src)
+      const W = img.naturalWidth
+      const H = img.naturalHeight
+      if (!(W > 80 && H > 160)) return src
+      const c0 = document.createElement('canvas')
+      c0.width = W
+      c0.height = H
+      const x0 = c0.getContext('2d', { willReadFrequently: true })
+      x0.drawImage(img, 0, 0)
+      const px = x0.getImageData(0, 0, W, H).data
+      const bgAt = (y) => {
+        const e = [0, 0, 0]
+        for (let kk = 0; kk < 24; kk += 1) {
+          const il = (y * W + kk) * 4
+          const ir = (y * W + (W - 1 - kk)) * 4
+          for (let c = 0; c < 3; c += 1) e[c] += (px[il + c] + px[ir + c]) / 48
+        }
+        return e
+      }
+      const personRun = (y, a, b, need) => {
+        const e = bgAt(y)
+        let n = 0
+        for (let x = a; x < b; x += 1) {
+          const i = (y * W + x) * 4
+          if (Math.hypot(px[i] - e[0], px[i + 1] - e[1], px[i + 2] - e[2]) > 38) {
+            n += 1
+            if (n >= need) return true
+          }
+        }
+        return false
+      }
+      const a0 = Math.round(W * 0.28)
+      const b0 = Math.round(W * 0.72)
+      let top = -1
+      for (let y = 0; y < H * 0.4 && top < 0; y += 1) if (personRun(y, a0, b0, 6)) top = y
+      let soles = -1
+      for (let y = H - 1; y > H * 0.6 && soles < 0; y -= 1) if (personRun(y, a0, b0, 6)) soles = y
+      if (top < 0 || soles < 0 || soles - top < H * 0.5) {
+        log.skip = 'no_figure'
+        return src
+      }
+      const Hc = soles - top
+      // 몸 중심선: 머리 줄의 좌우 끝 가운데
+      const headRow = Math.round(top + Hc * 0.08)
+      const e = bgAt(headRow)
+      let fl = W
+      let fr = 0
+      for (let x = 0; x < W; x += 1) {
+        const i = (headRow * W + x) * 4
+        if (Math.hypot(px[i] - e[0], px[i + 1] - e[1], px[i + 2] - e[2]) > 38) {
+          if (x < fl) fl = x
+          if (x > fr) fr = x
+        }
+      }
+      const cx = fr > fl ? (fl + fr) / 2 : W / 2
+      const smooth = (t) => t * t * (3 - 2 * t)
+      const scaleAt = (y) => {
+        const f = (y - top) / Hc
+        if (f < 0.145 || f > 0.7) return 1
+        if (f < 0.2) return 1 + (k - 1) * smooth((f - 0.145) / 0.055)
+        if (f <= 0.58) return k
+        return k + (1 - k) * smooth((f - 0.58) / 0.12)
+      }
+      const out = document.createElement('canvas')
+      out.width = W
+      out.height = H
+      const octx = out.getContext('2d', { willReadFrequently: true })
+      const od = octx.createImageData(W, H)
+      const o = od.data
+      for (let y = 0; y < H; y += 1) {
+        const s = scaleAt(y)
+        for (let x = 0; x < W; x += 1) {
+          const xs = Math.max(0, Math.min(W - 1.001, cx + (x - cx) / s))
+          const xi = Math.floor(xs)
+          const t = xs - xi
+          const a = (y * W + xi) * 4
+          const b = a + 4
+          const d = (y * W + x) * 4
+          o[d] = px[a] * (1 - t) + px[b] * t
+          o[d + 1] = px[a + 1] * (1 - t) + px[b + 1] * t
+          o[d + 2] = px[a + 2] * (1 - t) + px[b + 2] * t
+          o[d + 3] = 255
+        }
+      }
+      octx.putImageData(od, 0, 0)
+      log.top = top
+      log.soles = soles
+      return out.toDataURL('image/png')
+    } catch (err) {
+      log.skip = 'err'
+      log.message = err instanceof Error ? err.message : String(err)
+      return src
+    }
+  }
+
+  /**
    * 남자 전신 비율 보정. 생성 결과는 몸통이 길고 다리가 짧게 나온다(다리 약 27~35%, 정상 46~48%).
    * 머리·목(위 18.5%)과 신발(아래 4.5%)은 그대로 두고, 그 사이에서 몸통은 줄이고 다리는 늘린다.
    * 다리가 이미 길면(40% 이상) 건드리지 않는다. 실패하면 원본을 돌려준다.
@@ -12858,6 +12965,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (fitted) result.display = fitted
           result.display = await fixManProportions(result.display)
           timing.proportion = window.__deskPropLog
+          result.display = await narrowManShoulders(result.display)
+          timing.shoulder = window.__deskShoulderLog
         } else {
           const fitted = await fitKoreanWomanCanon(result.display)
           if (fitted) result.display = fitted
