@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 여자 몸 잇기 잠금 점검(2026-10-05 수정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw178)
+ * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw179)
  * 사용: node scripts/desk-woman-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'
@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const app = readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8')
+const tale = readFileSync(path.join(ROOT, 'functions', 'api', 'tale-scene.ts'), 'utf8')
 
 const checks = [
   ['단색 배경 판정 함수가 있다', /async function idPhotoLooksPlain\(/.test(app)],
@@ -23,6 +24,11 @@ const checks = [
   ['팔 보정이 측정 기반이다(손끝 0.36 미만이면 0.385로)', /async function shortenWomanArmsInPlace/.test(app) && /floorH >= 0\.36/.test(app) && /\(0\.385 - floorH\) \* Hc/.test(app)],
   ['팔 보정: 최대 20%까지만 줄이고 길지 않으면 그대로', /Math\.max\(0\.8, Math\.min\(1, \(L - delta\) \/ L\)\)/.test(app) && /log\.skip = 'arms_ok'/.test(app)],
   ['옛 열 띠 팔 보정(직사각형 이음새)이 없다', !/Math\.round\(iw \* 0\.292\)/.test(app)],
+  ['일상 사진 여자는 장면 이어 그리기 경로를 탄다', /isWomanBody && !drawn && !plainSource && window\.__deskWomanContinue !== false/.test(app)],
+  ['이어 그리기: 3:4 캔버스 + 원본 화소 복원', /buildBodyContinueCanvas\(source, \[864, 1152\]\)/.test(app) && /restoreProtectedExtendPixels\(alt\.display, prepared\)/.test(app)],
+  ['이어 그리기: 보호 마스크 90%·가장자리 부드럽게', /Math\.round\(dh \* 0\.9\)/.test(app) && /1 - md\[i\] \/ 255/.test(app)],
+  ['이어 그리기가 안 되면 서서 전신으로 넘어간다', /서서 전신 방식으로 넘어갑니다/.test(app)],
+  ['서버 이어 그리기 모드 문구(좌우 여백 포함)', /stretched empty space below it and at both sides/.test(tale)],
   ['남자 경로는 엄격 조건 없이 그대로', /isManHold \? undefined/.test(app)],
 ]
 

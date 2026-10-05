@@ -681,7 +681,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               drawn
                 ? 'Image 1 is the standing full-body layout. Image 2 is the exact identity drawing of the SAME one person. Keep image 2 art style.'
                 : continueMode
-                  ? 'Image 1 is the original photograph already placed at the top, with empty space only below. Image 2 is that same original photo. Continue ONLY the empty lower area. Do not redraw the existing photograph.'
+                  ? 'Image 1 is the original photograph already placed at the top, with stretched empty space below it and at both sides. Image 2 is that same original photo. Continue ONLY the empty stretched area: paint the missing body, the lower scene, and extend the same place (sky, wall, ground) naturally to both sides. Do not redraw the existing photograph.'
                   : 'Image 1 already shows ONE identity head and shoulders. Image 2 is that same person, not a second person.',
               continueMode
                 ? 'EXACTLY ONE adult. Keep every pixel of the existing photo. Same clothes, same pose, same raised hand if present, same background. Paint only the missing legs and shoes under the photo. FORBIDDEN studio restage, black office suit, new pose, new face, oval sticker, beige plate.'

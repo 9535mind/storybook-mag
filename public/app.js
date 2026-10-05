@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw178'
+window.__DESK_BUILD = '20261005mw179'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8685,8 +8685,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return [Math.round(r / n), Math.round(g / n), Math.round(b / n)]
   }
 
-  async function buildBodyContinueCanvas(src) {
-    const [cw, ch] = [768, 1152]
+  async function buildBodyContinueCanvas(src, size) {
+    const [cw, ch] = Array.isArray(size) ? size : [768, 1152]
     const img = await loadHtmlImage(src)
     const canvas = document.createElement('canvas')
     canvas.width = cw
@@ -8702,22 +8702,30 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     const dx = Math.round((cw - dw) / 2)
     const dy = 0
     ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh)
+    // 좌우 여백: 사진 가장자리 4px 를 옆으로 늘려 채운다 (아래쪽 빈 곳과 같은 방식. 거울로 이으면 옆 사람·소품이 복제되어 모델이 따라 그린다)
+    const margin = dx
+    if (margin > 4) {
+      ctx.drawImage(img, 0, 0, 4, img.naturalHeight, 0, dy, margin + 2, dh)
+      ctx.drawImage(img, img.naturalWidth - 4, 0, 4, img.naturalHeight, dx + dw - 2, dy, margin + 2, dh)
+      ctx.drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, dx, dy, dw, dh)
+    }
     if (dh < ch) {
       ctx.drawImage(img, 0, img.naturalHeight - 6, img.naturalWidth, 6, 0, dh - 2, cw, ch - dh + 2)
     }
+    // 보호 마스크: 검정 = 원본 화소를 그대로 둔다. 사진 거의 전체(90%)를 지키고 가장자리는 부드럽게
     const mask = document.createElement('canvas')
     mask.width = cw
     mask.height = ch
     const mctx = mask.getContext('2d')
     mctx.fillStyle = '#fff'
     mctx.fillRect(0, 0, cw, ch)
+    const keepH = Math.max(8, Math.round(dh * 0.9))
+    const blend = Math.max(16, Math.round(dh * 0.1))
     mctx.fillStyle = '#000'
-    const keepH = Math.max(8, Math.round(dh * 0.62))
-    const blend = Math.max(16, Math.round(dh * 0.16))
     mctx.fillRect(dx, dy, dw, keepH)
-    const fade = mctx.getImageData(dx, dy + keepH, dw, blend)
-    for (let y = 0; y < blend; y += 1) {
-      const t = y / Math.max(blend - 1, 1)
+    const fade = mctx.getImageData(dx, dy + keepH, dw, Math.min(blend, ch - keepH))
+    for (let y = 0; y < fade.height; y += 1) {
+      const t = y / Math.max(fade.height - 1, 1)
       const v = Math.round(255 * t)
       for (let x = 0; x < dw; x += 1) {
         const i = (y * dw + x) * 4
@@ -8728,9 +8736,16 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
     }
     mctx.putImageData(fade, dx, dy + keepH)
+    // 좌우·위 가장자리를 부드럽게 (복원할 때 경계선이 보이지 않게)
+    const soft = document.createElement('canvas')
+    soft.width = cw
+    soft.height = ch
+    const sctx = soft.getContext('2d')
+    sctx.filter = `blur(${Math.max(3, Math.round(dw * 0.012))}px)`
+    sctx.drawImage(mask, 0, 0)
     return {
       image: canvas.toDataURL('image/jpeg', 0.92),
-      mask: mask.toDataURL('image/png'),
+      mask: soft.toDataURL('image/png'),
       continue: true,
       extendStyle: 'continue',
       cw,
@@ -8772,10 +8787,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     const sd = srcData.data
     const md = maskData.data
     for (let i = 0; i < od.length; i += 4) {
-      if (md[i] >= 128) continue
-      od[i] = sd[i]
-      od[i + 1] = sd[i + 1]
-      od[i + 2] = sd[i + 2]
+      // 검정(0)=원본을 그대로, 흰색(255)=생성 결과. 가장자리는 값만큼 섞는다
+      const keep = 1 - md[i] / 255
+      if (keep <= 0.002) continue
+      od[i] = od[i] * (1 - keep) + sd[i] * keep
+      od[i + 1] = od[i + 1] * (1 - keep) + sd[i + 1] * keep
+      od[i + 2] = od[i + 2] * (1 - keep) + sd[i + 2] * keep
     }
     ctx.putImageData(outData, 0, 0)
     return canvas.toDataURL('image/jpeg', 0.92)
@@ -13236,6 +13253,36 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         display = source
       }
       return { display, remoteUrl: '', gender, isolated: false }
+    }
+    // 여자 + 일상 사진(배경이 단색이 아님): 그 장면을 살리고 아래만 이어 그린다. 원본 사진의 화소(얼굴·손·배경)는 그대로 복원한다.
+    // 사진이 안 된다고 판단되면(검은 화면·두 사람·다리 없음) 아래 서서 전신 방식으로 넘어간다. 끄기: window.__deskWomanContinue = false
+    if (isWomanBody && !drawn && !plainSource && window.__deskWomanContinue !== false) {
+      const contLog = { engine: 'continue' }
+      timing.continue = contLog
+      try {
+        setStatus(`${index}/${total} 사진의 장면을 살려 아래로 이어 그리는 중…`, false)
+        const prepared = await buildBodyContinueCanvas(source, [864, 1152])
+        const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue')
+        if (alt?.auth) return alt
+        if (alt?.display) {
+          const restored = await restoreProtectedExtendPixels(alt.display, prepared)
+          let reason = ''
+          if (await isSolidBlackPhoto(restored)) reason = 'black'
+          else if (typeof countDeskSceneFaces === 'function' && (await countDeskSceneFaces(restored, 4000)) >= 2) reason = 'two_people'
+          else if (!(await hasStandingLegs(restored))) reason = 'no_legs'
+          contLog.reason = reason || 'ok'
+          if (!reason) {
+            timingDone()
+            return { display: restored, remoteUrl: alt.remoteUrl, gender, isolated: false, continued: true }
+          }
+        } else {
+          contLog.reason = 'no_result'
+        }
+      } catch (err) {
+        contLog.reason = 'err'
+        contLog.message = err instanceof Error ? err.message : String(err)
+      }
+      console.warn('장면 이어 그리기를 쓰지 못해 서서 전신 방식으로 넘어갑니다:', JSON.stringify(contLog))
     }
     let result = null
     let standing = null
