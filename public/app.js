@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw182'
+window.__DESK_BUILD = '20261005mw183'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8798,72 +8798,6 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return canvas.toDataURL('image/jpeg', 0.92)
   }
 
-  async function stampOriginalFaceOnExtend(resultUrl, idDataUrl) {
-    if (!resultUrl || !idDataUrl) return resultUrl
-    const facePng = await extractIdFacePng(idDataUrl, { tight: true })
-    const probeImg = await loadHtmlImage(facePng.pngDataUrl)
-    const probe = document.createElement('canvas')
-    probe.width = probeImg.naturalWidth
-    probe.height = probeImg.naturalHeight
-    probe.getContext('2d').drawImage(probeImg, 0, 0)
-    if (subjectLooksLikePhotoCard(probe)) return resultUrl
-    const boxes = await detectSceneFaceBoxes(resultUrl, 1, { guessIfMissing: false })
-    if (!boxes.length) return resultUrl
-    const box = boxes.slice().sort((a, b) => b.w * b.h - a.w * a.h)[0]
-    const crop = await cropHeadFromBox(resultUrl, box)
-    const pasted = await pasteFacePngOnCrop(crop.dataUrl, facePng, {
-      maxFaceH: crop.sh * 0.92,
-      skipEraseFill: true,
-    })
-    return pasteHeadOntoFull(resultUrl, pasted, crop)
-  }
-
-  async function keepOriginalIdOnExtend(resultUrl, prepared) {
-    if (!resultUrl || !prepared?.subjectLayer) return resultUrl
-    const [img, png] = await Promise.all([
-      loadHtmlImage(resultUrl),
-      loadHtmlImage(prepared.subjectLayer),
-    ])
-    const src = document.createElement('canvas')
-    src.width = png.naturalWidth
-    src.height = png.naturalHeight
-    src.getContext('2d').drawImage(png, 0, 0)
-    if (subjectLooksLikePhotoCard(src)) return resultUrl
-    const headH = Math.max(8, Math.round(png.naturalHeight * 0.58))
-    const head = document.createElement('canvas')
-    head.width = png.naturalWidth
-    head.height = headH
-    const hctx = head.getContext('2d')
-    hctx.drawImage(png, 0, 0, png.naturalWidth, headH, 0, 0, png.naturalWidth, headH)
-    const fadeH = Math.max(12, Math.round(headH * 0.3))
-    const fade = hctx.getImageData(0, headH - fadeH, head.width, fadeH)
-    for (let y = 0; y < fadeH; y += 1) {
-      const t = y / Math.max(fadeH - 1, 1)
-      const a = 1 - t * t
-      for (let x = 0; x < head.width; x += 1) {
-        const i = (y * head.width + x) * 4 + 3
-        fade.data[i] = Math.round(fade.data[i] * a)
-      }
-    }
-    hctx.putImageData(fade, 0, headH - fadeH)
-    if (subjectLooksLikePhotoCard(head)) return resultUrl
-    const canvas = document.createElement('canvas')
-    canvas.width = img.naturalWidth
-    canvas.height = img.naturalHeight
-    const ctx = canvas.getContext('2d')
-    ctx.drawImage(img, 0, 0)
-    const sx = img.naturalWidth / Math.max(prepared.cw, 1)
-    const sy = img.naturalHeight / Math.max(prepared.ch, 1)
-    ctx.drawImage(
-      head,
-      Math.round(prepared.dx * sx),
-      Math.round(prepared.dy * sy),
-      Math.round(prepared.dw * sx),
-      Math.round(headH * sy),
-    )
-    return canvas.toDataURL('image/jpeg', 0.92)
-  }
-
   function genderHeightFactor(gender) {
     const g = (gender || '').trim().toLowerCase()
     if (g === 'male' || g === 'man') return 0.9
@@ -9714,100 +9648,6 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     return currentTarget
   }
 
-  /**
-   * 「얼굴로 장면」④: 미리 자른 얼굴 PNG를 몸통에 좌우 크기 맞춰 붙임.
-   */
-  async function insightLockOntoTarget(targetSrc, faceList, opts = {}) {
-    if (!targetSrc || !faceList?.length) return null
-    const stableTarget = await ensureStableDataUrl(targetSrc)
-    const assets = []
-    for (let i = 0; i < faceList.length; i += 1) {
-      const item = faceList[i]
-      if (item.facePng && item.facePng.pngDataUrl) {
-        assets.push({ item, facePng: item.facePng })
-        continue
-      }
-      setStatus(`2/4 · 얼굴 ${i + 1}만 투명 PNG로 자르는 중…`, false)
-      try {
-        assets.push({ item, facePng: await extractIdFacePng(item.dataUrl) })
-      } catch (err) {
-        console.warn('[faceswap] face png extract failed', err)
-        return null
-      }
-    }
-
-    async function pasteOne(targetImage, facePng, maxFaceH) {
-      setStatus('4/4 · 얼굴 PNG를 몸통 위치에 붙이는 중…', false)
-      return pasteFacePngOnCrop(targetImage, facePng, { maxFaceH })
-    }
-
-    async function pasteBySlots() {
-      if (assets.length === 1) {
-        return pasteOne(stableTarget, assets[0].facePng)
-      }
-      const originalTarget = stableTarget
-      const crops = []
-      for (let i = 0; i < assets.length; i += 1) {
-        const { item, facePng } = assets[i]
-        const side = indexToSide(item.slot)
-        setStatus(`4/4 · ${sideLabel(side)} 크롭·배치 중…`, false)
-        let crop
-        try {
-          crop = await cropTargetSide(originalTarget, side)
-        } catch (err) {
-          console.warn('[faceswap] scene face-png crop failed', err)
-          return null
-        }
-        let headH = crop.fullH * 0.18
-        try {
-          const tFace = await detectFaceBox(crop.dataUrl, 'target')
-          headH = Math.max(24, tFace.h * crop.fullH)
-        } catch (_) {
-          /* keep default */
-        }
-        crops.push({ side, crop, facePng, headH })
-      }
-      const commonHead = Math.min(...crops.map((c) => c.headH))
-      const parts = []
-      for (const row of crops) {
-        try {
-          const replaced = await pasteFacePngOnCrop(row.crop.dataUrl, row.facePng, {
-            maxFaceH: commonHead * 1.08,
-          })
-          parts.push({ side: row.side, imageUrl: replaced })
-        } catch (err) {
-          console.warn('[faceswap] scene face-png paste failed', err)
-          return null
-        }
-      }
-      let currentTarget = originalTarget
-      const ordered = parts.slice().sort((a, b) => {
-        if (a.side === b.side) return 0
-        return a.side === 'left' ? -1 : 1
-      })
-      for (const part of ordered) {
-        try {
-          setStatus(`4/4 · ${sideLabel(part.side)} 이음…`, false)
-          currentTarget = await pasteSideOntoFull(currentTarget, part.imageUrl, part.side)
-        } catch (err) {
-          console.warn('[faceswap] scene face-png stitch failed', err)
-          return null
-        }
-      }
-      return currentTarget
-    }
-
-    try {
-      const pasted = await pasteBySlots()
-      if (pasted && typeof pasted === 'string' && !(await isBadSwapResult(pasted))) {
-        return pasted
-      }
-    } catch (err) {
-      console.warn('[faceswap] png place failed', err)
-    }
-    return null
-  }
-
   /** 장면이 증명사진을 좌우로 붙인 덤프인지(키스 미생성) 대략 감지 */
   async function looksLikeIdPhotoDump(sceneSrc, face0, face1) {
     async function grayThumb(src, x0, y0, x1, y1) {
@@ -10621,29 +10461,6 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     }
   }
 
-  async function cropHeadFromSide(imageSrc, side) {
-    const half = await cropTargetSide(imageSrc, side === 'right' ? 'right' : 'left')
-    const face = await detectFaceBox(half.dataUrl, 'target')
-    const img = await loadHtmlImage(half.dataUrl)
-    const local = expandNormBox(face, img.naturalWidth, img.naturalHeight)
-    local.sw = Math.min(local.sw, img.naturalWidth - local.sx)
-    local.sh = Math.min(local.sh, img.naturalHeight - local.sy)
-    const canvas = document.createElement('canvas')
-    canvas.width = local.sw
-    canvas.height = local.sh
-    canvas.getContext('2d').drawImage(img, local.sx, local.sy, local.sw, local.sh, 0, 0, local.sw, local.sh)
-    const halfSx = side === 'right' ? Math.max(0, half.fullW - half.cut) : 0
-    return {
-      dataUrl: canvas.toDataURL('image/jpeg', 0.9),
-      sx: halfSx + local.sx,
-      sy: local.sy,
-      sw: local.sw,
-      sh: local.sh,
-      fullW: half.fullW,
-      fullH: half.fullH,
-    }
-  }
-
   async function pasteHeadOntoFull(fullSrc, swappedSrc, rect) {
     const fullDisplay =
       fullSrc.startsWith('data:') || fullSrc.startsWith('blob:') ? fullSrc : await toDisplayUrl(fullSrc)
@@ -10813,16 +10630,6 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
     }
     return { aborted: false, imageUrl: null, message: lastMessage }
-  }
-
-  async function faceSwapSourceFromPhoto(dataUrl) {
-    try {
-      const cut = await extractIdFacePng(dataUrl)
-      if (cut && cut.pngDataUrl) return cut.pngDataUrl
-    } catch (_) {
-      /* 전신 PNG면 원본으로 교체 */
-    }
-    return dataUrl
   }
 
   async function lockPoseFacesOntoResult(posedUrl, facePhotos, opts) {
@@ -12975,7 +12782,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           description:
             gender === 'male' || gender === 'man'
               ? '같은 셔츠·재킷. 증명사진 잘린 어깨를 얼굴 너비의 2.75배로 잇고, 그 어깨에서 팔을 내린다. 잘린 끝에서 팔 금지.'
-              : '한 사람만. 같은 얼굴. 검정 재킷 전신.',
+              : '한 사람만. 같은 얼굴. 같은 옷 전신.',
           photoreal: !drawn,
           extendMedium: drawn ? 'illustration' : 'photo',
           refKind: 'face',
@@ -14646,24 +14453,6 @@ function clearDeskWorkCast() {
 window.persistDeskWorkScene = persistDeskWorkScene
 window.clearDeskWorkScene = clearDeskWorkScene
 window.clearDeskWorkCast = clearDeskWorkCast
-
-async function stampDeskCastFaces(imageUrl) {
-  if (!imageUrl || typeof applyDeskWorkFaces !== 'function') return imageUrl
-  if (!deskCastPhotos().length) return imageUrl
-  try {
-    const stamped = await applyDeskWorkFaces(imageUrl, {
-      skipFaceCount: deskCastPhotos().length >= 2,
-      preferPaste: false,
-      skipPasteFallback: true,
-      engineOrder: ['insight'],
-      hardLimitSec: 28,
-    })
-    if (stamped?.url && !stamped.skipped && (stamped.locked || 0) > 0) return stamped.url
-  } catch (err) {
-    console.warn('desk cast face stamp failed', err)
-  }
-  return imageUrl
-}
 
 async function applyDeskWorkFaces(imageUrl, opts) {
   const photos =

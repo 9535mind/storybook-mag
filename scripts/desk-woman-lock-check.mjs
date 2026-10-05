@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 여자 몸 잇기 잠금 점검(2026-10-05 수정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw182)
+ * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw183)
  * 사용: node scripts/desk-woman-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'
@@ -30,8 +30,19 @@ const checks = [
   ['이어 그리기 시간은 최대 110초', /'continue', undefined, 110\)/.test(app) && /Math\.min\(capSec \|\| 200, left\)/.test(app)],
   ['이어 그리기 최대 2번, 실패하면 가짜 얼굴로 대신하지 않고 멈춘다', /attempt < 2/.test(app) && /가짜 얼굴로 대신하지 않습니다/.test(app) && /__deskWomanContinueFallback/.test(app)],
   ['이어 그리기 결과가 그려졌는지(unpainted) 검사', /tryLog\.paint < 4/.test(app) && /'unpainted'/.test(app)],
+  ['여자 서서 전신: 증명사진의 옷 그대로(검정 정장 강제 없음)', !/Black office blazer/.test(tale) && /Keep EXACTLY the clothes visible in the identity image: the same top and the same jacket if she wears one/.test(tale)],
+  [
+    '낡은 얼굴 붙이기 함수가 없다(타원 스티커·원본 얼굴 도장)',
+    ['stampOriginalFaceOnExtend', 'keepOriginalIdOnExtend', 'insightLockOntoTarget', 'cropHeadFromSide', 'faceSwapSourceFromPhoto', 'stampDeskCastFaces'].every(
+      (n) => !new RegExp('\\b' + n + '\\b').test(app),
+    ),
+  ],
+  [
+    '여자 이어 그리기·서서 전신 줄에 베이지 판·타원 스티커·카탈로그 모델 문구가 없다',
+    !/Keep the exact same clothes already in the photograph[^`]*(catalog model|beige plate|oval)/.test(tale) &&
+      !/Same face as the identity image\.[^\n]*(beige plate|oval face sticker)/.test(tale),
+  ],
   ['종아리를 굵게 그리라는 문구가 없다', !/Thick healthy thighs and calves/.test(tale) && /slim calves that taper to slim ankles/.test(tale)],
-
   ['서버 이어 그리기 모드 문구(좌우 여백 포함)', /stretched empty space below it and at both sides/.test(tale)],
   ['남자 경로는 엄격 조건 없이 그대로', /isManHold \? undefined/.test(app)],
 ]

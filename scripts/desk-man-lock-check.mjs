@@ -27,7 +27,7 @@ const checks = [
   ['잔해 오탐 구조 확인(debrisBlocks)이 있다', /const debrisBlocks = async/.test(app)],
   ['깃 윗선을 열마다 끊는다', /collarCols/.test(app)],
   ['머리 윤곽 안쪽 채우기(볼록 껍질)', /볼록 껍질/.test(app)],
-  ['서버 이어그리기 프롬프트가 남자는 증명사진 옷 그대로(성별별 분기)', !/gender === 'man' \? 'Same clothes as image 2, no added jacket or tie, standing head to shoes\.' : 'Black office blazer/.test(tale) === false],
+  ['서버 이어그리기 프롬프트가 남자는 증명사진 옷 그대로(성별별 분기)', /gender === 'man' \? 'Same clothes as image 2, no added jacket or tie, standing head to shoes\.'/.test(tale)],
   ['서버 남자 옷 규칙: 재킷·넥타이를 만들지 않는다', /Do NOT add a jacket, blazer, suit coat, or tie/.test(tale)],
   ['서버 남자 비율 문구: 다리 약 40%(더 길지 않게)·신발 전체', /legs about 40 percent of total height, not longer/.test(tale)],
 ]
