@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw197'
+window.__DESK_BUILD = '20261005mw198'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8775,6 +8775,83 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
    * (모델이 사진을 조금 다른 크기·위치로 다시 그려도 얼굴이 이중으로 보이지 않게 한다)
    * 못 찾으면(일치도 0.75 미만) url 을 비워 돌려준다. 가짜 얼굴로 대신하지 않기 위해 호출한 쪽이 실패로 처리한다.
    */
+  // 모델이 몸 가운데만 그리고 양옆을 늘려 채운 세로·가로 줄무늬로 남긴 경우: 사진 사각형과 그 아래 몸 기둥은 두고,
+  // 나머지는 크게 흐려 줄무늬를 부드러운 배경 색 번짐으로 바꾼다 (줄무늬 그대로보다 낫다)
+  async function softenStreakSides(url, rect) {
+    try {
+      if (!rect || !rect.rw) return ''
+      const img = await loadHtmlImage(url)
+      const w = img.naturalWidth
+      const h = img.naturalHeight
+      // 배경: 좌·우 가장자리 띠의 줄(행)별 평균 색만 써서 위아래로만 변하는 부드러운 그라데이션 배경을 만든다
+      const smooth = document.createElement('canvas')
+      smooth.width = w
+      smooth.height = h
+      const sx = smooth.getContext('2d')
+      sx.filter = `blur(${Math.max(6, Math.round(h * 0.012))}px)`
+      sx.drawImage(img, 0, 0, w, h)
+      sx.filter = 'none'
+      const stripe = (x0, x1) => {
+        const c = document.createElement('canvas')
+        c.width = 1
+        c.height = h
+        const cx = c.getContext('2d')
+        cx.imageSmoothingQuality = 'high'
+        cx.drawImage(smooth, x0, 0, Math.max(2, x1 - x0), h, 0, 0, 1, h)
+        return c
+      }
+      const colL = stripe(0, Math.round(w * 0.12))
+      const colR = stripe(Math.round(w * 0.88), w)
+      const blurred = document.createElement('canvas')
+      blurred.width = w
+      blurred.height = h
+      const bx = blurred.getContext('2d')
+      bx.drawImage(colL, 0, 0, w, h)
+      const rl = document.createElement('canvas')
+      rl.width = w
+      rl.height = h
+      const rlx = rl.getContext('2d')
+      rlx.drawImage(colR, 0, 0, w, h)
+      rlx.globalCompositeOperation = 'destination-in'
+      const gr = rlx.createLinearGradient(w * 0.3, 0, w * 0.7, 0)
+      gr.addColorStop(0, 'rgba(0,0,0,0)')
+      gr.addColorStop(1, 'rgba(0,0,0,1)')
+      rlx.fillStyle = gr
+      rlx.fillRect(0, 0, w, h)
+      bx.drawImage(rl, 0, 0)
+      // 지킬 곳: 붙인 사진 사각형 + 그 아래 몸 기둥(가로 22~76%)
+      const keep = document.createElement('canvas')
+      keep.width = w
+      keep.height = h
+      const kx = keep.getContext('2d')
+      const fe = Math.max(10, Math.round(w * 0.035))
+      kx.filter = `blur(${fe}px)`
+      kx.fillStyle = '#fff'
+      kx.fillRect(rect.x, rect.y, rect.w, rect.h)
+      const colTop = Math.max(0, rect.y + Math.round(rect.h * 0.6))
+      const hipY = Math.max(colTop, Math.round(h * 0.6))
+      kx.fillRect(Math.round(w * 0.25), colTop, Math.round(w * 0.48), hipY - colTop)
+      kx.fillRect(Math.round(w * 0.31), hipY, Math.round(w * 0.34), h - hipY)
+      kx.filter = 'none'
+      const body = document.createElement('canvas')
+      body.width = w
+      body.height = h
+      const dx = body.getContext('2d')
+      dx.drawImage(img, 0, 0, w, h)
+      dx.globalCompositeOperation = 'destination-in'
+      dx.drawImage(keep, 0, 0)
+      const res = document.createElement('canvas')
+      res.width = w
+      res.height = h
+      const rx = res.getContext('2d')
+      rx.drawImage(blurred, 0, 0)
+      rx.drawImage(body, 0, 0)
+      return res.toDataURL('image/jpeg', 0.92)
+    } catch (_) {
+      return ''
+    }
+  }
+
   async function restoreOriginalPhotoOnContinued(resultUrl, prepared, sourceUrl) {
     const log = {}
     try {
@@ -8861,6 +8938,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
       log.score = Number(fine.score.toFixed(3))
       log.final = { s: Number(fine.s.toFixed(3)), x: fine.ox, y: fine.oy }
+      log.rect = { x: fine.ox, y: fine.oy, w: fine.tw, h: fine.th, rw, rh }
       if (fine.score < 0.75) {
         log.skip = 'low_match'
         return { url: '', log }
@@ -13341,12 +13419,23 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (tryLog.black) tryLog.reason = 'black'
           else if (tryLog.faces >= 2) tryLog.reason = 'two_people'
           else if (tryLog.paint < 4) tryLog.reason = 'unpainted'
-          else if (await sidesStreaky(restored)) tryLog.reason = 'unpainted'
           else {
-            tryLog.reason = 'ok'
-            contLog.reason = 'ok'
-            timingDone()
-            return { display: restored, remoteUrl: alt.remoteUrl, gender, isolated: false, continued: true }
+            let finalUrl = restored
+            if (await sidesStreaky(restored)) {
+              const soft = await softenStreakSides(restored, rr.log.rect)
+              if (soft) {
+                finalUrl = soft
+                tryLog.softened = 1
+              } else {
+                tryLog.reason = 'unpainted'
+              }
+            }
+            if (!tryLog.reason) {
+              tryLog.reason = 'ok'
+              contLog.reason = 'ok'
+              timingDone()
+              return { display: finalUrl, remoteUrl: alt.remoteUrl, gender, isolated: false, continued: true }
+            }
           }
         } catch (err) {
           tryLog.reason = 'err'
