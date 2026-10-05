@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw169'
+window.__DESK_BUILD = '20261005mw170'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11959,8 +11959,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       log.top = top
       log.soles = soles
       if (!log.bar && soles >= H - 3) {
-        log.skip = 'feet_cut'
-        return src
+        // 신발이 프레임 끝에 닿았다: 그대로 보정한다 (신발 잘림 정도는 같고 캔버스만 늘어난다)
+        log.feetAtEdge = true
       }
       const Hc = soles - top
       // 사타구니: 몸 중심선 부근에서 다리 사이 틈이 처음 생기는 줄 (팔과 몸통 사이 틈은 세지 않는다)
@@ -12222,6 +12222,33 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (Math.min(dl, dr) < 14) d[i + 3] = 0
         }
       }
+      // 2-2) 배경 제거가 깎은 머리카락 복원: 머리 높이 구간에서 가장자리 배경색과 28 이상 다른 화소는 머리다
+      for (let y = Math.max(0, top - 2); y < Math.min(sh, top + Math.round(headW * 0.8)); y += 1) {
+        const eL = [0, 0, 0]
+        const eR = [0, 0, 0]
+        for (let k = 0; k < 12; k += 1) {
+          const il = (y * sw + k) * 4
+          const ir = (y * sw + (sw - 1 - k)) * 4
+          for (let c = 0; c < 3; c += 1) {
+            eL[c] += rawPx[il + c] / 12
+            eR[c] += rawPx[ir + c] / 12
+          }
+        }
+        const xa = Math.max(0, Math.round(cx - headW * 0.62))
+        const xb = Math.min(sw - 1, Math.round(cx + headW * 0.62))
+        for (let x = xa; x <= xb; x += 1) {
+          const i = (y * sw + x) * 4
+          if (d[i + 3] > 128) continue
+          const dl = Math.hypot(rawPx[i] - eL[0], rawPx[i + 1] - eL[1], rawPx[i + 2] - eL[2])
+          const dr = Math.hypot(rawPx[i] - eR[0], rawPx[i + 1] - eR[1], rawPx[i + 2] - eR[2])
+          if (Math.min(dl, dr) > 28) {
+            d[i] = rawPx[i]
+            d[i + 1] = rawPx[i + 1]
+            d[i + 2] = rawPx[i + 2]
+            d[i + 3] = 255
+          }
+        }
+      }
       // 3) 회색 머리가 배경색과 비슷해 깎인 곳을 메운다 (머리 윗부분 줄은 좌우 끝 사이가 모두 머리)
       for (let y = top; y < top + Math.round(headW * 0.55) && y < sh; y += 1) {
         const sp = rowSpan(y)
@@ -12436,7 +12463,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         octx.putImageData(od, 0, 0)
       }
       // 8) 원본 머리를 얹는다. 생성된 몸은 머리가 큰 편(약 6등신)이라, 목 자리를 기준으로 머리만 조금 줄인다
-      const shrink = Number(window.__deskHeadShrink) > 0 ? Number(window.__deskHeadShrink) : 0.88
+      const shrink = Number(window.__deskHeadShrink) > 0 ? Number(window.__deskHeadShrink) : 0.95
       const pgx = gAx + cx * scale
       const pgy = gAy + chinY * scale
       const scale2 = scale * shrink
@@ -12689,7 +12716,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         const n0 = typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(display, 4000) : 1
         const bust0 =
           typeof window.deskPhotoNeedsBodyExtend === 'function' ? await window.deskPhotoNeedsBodyExtend(display) : true
-        if (legs0 && n0 === 1 && !bust0) {
+        const faceBox0 = await estimateFaceBoxFromImage(display)
+        const faceSmall0 = Boolean(faceBox0 && faceBox0.h < 0.3 && faceBox0.y < 0.3)
+        if (legs0 && n0 === 1 && (faceSmall0 || !bust0)) {
           window.__deskAcceptLog = [...(window.__deskAcceptLog || []), `debrisIgnored:${why}`].slice(-24)
           return ''
         }
@@ -12730,7 +12759,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
       if (opts?.jacket !== false && (await deskJacketDrifted(source, result.display))) return rejectBody('jacketDrift')
       if (opts?.jacket !== false && (await deskChestSplit(result.display))) return rejectBody('chestSplit')
-      if (opts?.face !== false) {
+      const pixelWillRun =
+        window.__deskPixelHead === true ||
+        (window.__deskPixelHead !== false && (gender === 'male' || gender === 'man'))
+      if (opts?.face !== false && !pixelWillRun) {
         const hold = await deskFacesHold(source, result.display)
         if (!hold.ok) return rejectBody('faceHold')
       }
