@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw207'
+window.__DESK_BUILD = '20261005mw208'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8791,7 +8791,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const yTop = Math.max(0, faceTop - faceH * 0.5)
       const yFeet = h * 0.955
       const total = yFeet - yTop
-      const sc = Math.max(0.88, Math.min(1, total / 8.5 / faceH))
+      const raw = total / 8.5 / faceH
+      // 얼굴이 길이의 1/6.8보다 크면(약 5등신 이하) 줄여도 가분수라 이 결과는 쓰지 않는다
+      if (raw < 0.8) return 'too_big'
+      const sc = Math.max(0.88, Math.min(1, raw))
       if (sc > 0.97) return ''
       const yN = Math.min(h * 0.5, faceTop + faceH * 1.25)
       const dT = faceH * 0.9
@@ -13642,7 +13645,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             }
             if (!tryLog.reason && window.__deskWomanHeadShrink !== false) {
               const shr = await shrinkContinuedHead(finalUrl, rr.log.rect, fbox)
-              if (shr) {
+              if (shr === 'too_big') {
+                tryLog.reason = 'big_head'
+              } else if (shr) {
                 finalUrl = shr
                 tryLog.shrunk = 1
               }
