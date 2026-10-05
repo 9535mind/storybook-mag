@@ -11,7 +11,19 @@ import {
   wantsDeskPoseChange,
   COUPLE_MAN_SHIRT_ONLY,
 } from '../lib/content-policy'
-import { buildDeskStillPrompt, deskStillNegativePrompt, parseDeskIntent } from '../lib/desk-still-prompt'
+import {
+  buildDeskStillPrompt,
+  buildDeskShapePrompt,
+  buildDeskMiniPrompt,
+  buildDeskExtendJacketPrompt,
+  buildDeskExtendJacketLightPrompt,
+  buildDeskExtendKeepLightPrompt,
+  buildDeskExtendPantsPrompt,
+  buildDeskExtendRecolorPrompt,
+  buildDeskExtendSkirtPrompt,
+  deskStillNegativePrompt,
+  parseDeskIntent,
+} from '../lib/desk-still-prompt'
 import { verifyLookInpaintPayload } from '../lib/desk-look-server-verify'
 import {
   submitFalFashnTryon,
@@ -26,6 +38,7 @@ import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
 import {
   resolveReplicateImageSize,
   startReplicateImageToImage,
+  startReplicateInpaint,
 } from '../lib/replicate-client'
 import { translateDescriptionForImagePrompt } from '../lib/translate'
 
@@ -472,6 +485,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       deskLook?: string
       deskAction?: string
       deskCouple?: boolean
+      lookInpaintBoost?: boolean
       expand?: {
         top?: number
         bottom?: number
@@ -481,6 +495,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       sourceWidth?: number
       sourceHeight?: number
       extendStyle?: string
+      extendMedium?: string
+      sourceClothHex?: string
+      recolorTarget?: string
     }
     try {
       body = await request.json()
@@ -501,7 +518,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       )
     }
 
-    const descriptionKo = polishKoreanPromptText(body.description ?? '')
+    const composeModeEarly = (body.composeMode || '').trim()
+    const descriptionKo = polishKoreanPromptText(
+      body.description ??
+        (composeModeEarly === 'extend-recolor' ? '제공 사진과 같은 옷 색. 얼굴은 그대로.' : ''),
+    )
     if (!descriptionKo) {
       return jsonResponse({ ok: false, error: 'description_required' }, 400)
     }
@@ -587,14 +608,57 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     if (composeMode === 'extend-body') {
       try {
         const gender = genderWord(body.gender0) || 'adult'
-        const prompt = [
-          `Photoreal studio photograph of the SAME adult ${gender} standing full body, head to shoes.`,
-          'The face, hair, eyes, nose, mouth, and skin must match the identity photo exactly. Do not invent a similar-looking different person.',
-          'Keep the exact same clothes from the identity photo. If she wears a blouse or shirt, keep that blouse or shirt. Do not change them into a suit, blazer, or ID uniform unless those clothes are already worn in the identity photo.',
-          'Standing upright on the studio floor. Two arms at the sides. Two legs. Shoes visible.',
-          'Not a passport photo, not a Korean ID headshot, not a waist crop.',
-          'One person only. Seamless studio. No desk, no table, no chair, no blank sign, no poster board, no extra people.',
-        ].join(' ')
+        const drawn =
+          String(body.extendMedium || '').toLowerCase() === 'illustration' ||
+          body.photoreal === false
+        const identityLock =
+          'The face, hair, eyes, nose, mouth, and skin must match the identity image exactly. Same person. FORBIDDEN a different woman, a similar catalog model, a new face.'
+        const continueMode = String(body.extendStyle || '') === 'continue'
+        const clothHex =
+          typeof body.sourceClothHex === 'string' && /^#[0-9A-Fa-f]{6}$/.test(body.sourceClothHex.trim())
+            ? body.sourceClothHex.trim()
+            : ''
+        const colorLock = clothHex
+          ? `Keep the exact identity cloth color ${clothHex}. Same fabric. Continue the missing lower body in that same color family.`
+          : 'Keep the exact identity cloth color. Same fabric. Continue the missing lower body as trousers in that same light color family, not black slacks.'
+        const clothesLock =
+          gender === 'man'
+            ? 'Keep the exact same clothes from the identity image. Same jacket and trousers. Trousers stay one even color from waist to hem — same navy/black as the front. FORBIDDEN a brown, grey, faded, or shiny-white patch on the seat or back of the pants.'
+            : continueMode
+              ? `Keep the exact same clothes already in the photograph. Same top, same hair, same pose. ${colorLock} FORBIDDEN changing the cloth color, a black office suit, a new hairstyle, a catalog model, a new woman.`
+              : 'Black office blazer. Same hair length and curl. Same CAST face. FORBIDDEN a new face, a catalog model, a new woman, an oval face sticker, a beige plate.'
+        const standLock = continueMode
+          ? 'Continue only the empty area under the existing photograph. Keep every pixel of the existing photo. Same raised hand if present. Feet and shoes only in the empty lower area. EXACTLY ONE person. FORBIDDEN restaging into a studio, a new pose, redrawing the head or torso, two people.'
+          : 'Standing upright, full body, head to shoes. Two legs, shoes on the floor. Eye-level. EXACTLY ONE person. FORBIDDEN two people, two women, a couple, side-by-side portraits, desk, name-board, waist crop, ID headshot.'
+        const proportionLock =
+          gender === 'man'
+            ? 'Korean adult man, about 7 to 7.5 heads tall. Shoulders about 2.75 times the face width. ID photos crop the shoulders — reconstruct the missing shoulder, then continue the arms from that full shoulder. Shirt or jacket tucked at the hip. FORBIDDEN continuing arms from the left/right cut of the ID photo, narrow ID shoulders, cropped shirt at the navel, pear hips, new face.'
+            : 'Korean adult woman, about 7 heads tall. Same CAST face. Shoulders about 2.65 times the face width. ID photos crop the shoulders — reconstruct the missing shoulder, then continue the arms from that full shoulder. Fingertips at mid-thigh, not below the skirt hem. Thick healthy thighs and calves. FORBIDDEN ape-long arms, continuing arms from the ID crop edge, 8-head catalog model, tiny head, stick legs, narrow ID shoulders, new face.'
+        const prompt = drawn
+          ? [
+              `Full-body illustration of the SAME adult ${gender} as the identity drawing.`,
+              'Keep the same art medium and style (webtoon, manhwa, watercolor, ink, or anime). Do not convert this into a photograph or photoreal studio shot.',
+              identityLock,
+              clothesLock,
+              standLock,
+              proportionLock,
+            ].join(' ')
+          : continueMode
+            ? [
+                `Continue the same photograph of this adult ${gender} downward. Do not restage.`,
+                identityLock,
+                clothesLock,
+                standLock,
+                'Keep the original photo pixels. Only paint the missing lower body and shoes under the existing crop.',
+              ].join(' ')
+            : [
+              `Photograph of the SAME adult ${gender} standing full body, head to shoes.`,
+              identityLock,
+              clothesLock,
+              standLock,
+              proportionLock,
+              'Not a passport photo, not a Korean ID headshot, not a waist crop. Seamless studio matching the identity photo.',
+            ].join(' ')
         const identity = images[1] || images[0]
         let submitted
         if (images[1]) {
@@ -614,12 +678,18 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             falKey: env.FAL_KEY,
             imageUrls,
             prompt: [
-              'Image 1 is the standing studio layout. Image 2 is the exact identity photo.',
-              'Draw the person from image 2 standing full body inside image 1.',
+              drawn
+                ? 'Image 1 is the standing full-body layout. Image 2 is the exact identity drawing of the SAME one person. Keep image 2 art style.'
+                : continueMode
+                  ? 'Image 1 is the original photograph already placed at the top, with empty space only below. Image 2 is that same original photo. Continue ONLY the empty lower area. Do not redraw the existing photograph.'
+                  : 'Image 1 already shows ONE identity head and shoulders. Image 2 is that same person, not a second person.',
+              continueMode
+                ? 'EXACTLY ONE adult. Keep every pixel of the existing photo. Same clothes, same pose, same raised hand if present, same background. Paint only the missing legs and shoes under the photo. FORBIDDEN studio restage, black office suit, new pose, new face, oval sticker, beige plate.'
+                : 'EXACTLY ONE adult. Continue the body down from the head already in image 1. Keep image 2 face, hair length, and hair color. Black office blazer, standing head to shoes. FORBIDDEN two people, a second woman, a couple, side-by-side portraits, a new hairstyle, an oval face sticker, leftover silhouette, a beige plate. Feet must reach the bottom of image 1.',
               prompt,
             ].join(' '),
             aspectRatio: '3:4',
-            guidanceScale: 6.5,
+            guidanceScale: continueMode ? 8.2 : 7.5,
           })
         } else {
           submitted = await submitFalKontextEdit({
@@ -822,7 +892,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               {
                 ok: false,
                 error: lookGate.error,
-                message: '의상 마스크·CAST 검증이 맞지 않아 보내지 않습니다.',
+                message:
+                  lookGate.error === 'look_couple_full'
+                    ? '두 사람이 있는 장은 통째로 보내지 않습니다. 가운데는 원본입니다.'
+                    : '의상 마스크·CAST 검증이 맞지 않아 보내지 않습니다.',
               },
               lookGate.status,
             )
@@ -870,10 +943,60 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               )
             }
           }
-          // 나체·그 밖은 흰 칸 안만 그리는 인페인팅. 사람을 다시 그리게 두지 않는다.
-          const localEdit = nudeStill
-            ? `${prompt} Local edit ONLY the white-masked clothes. Melt that garment to bare adult skin of the SAME CAST body. Unmasked face, neck, hands, limbs, man, and background stay exact source pixels. Same pose, same crop. FORBIDDEN new person, bodysuit, lingerie, catalog model, white studio, oval face sticker.`
-            : `${prompt} Local edit ONLY the white-masked clothes of the CAST woman slot. Unmasked face, neck, skin, hands, man, and background stay exact source pixels. Same body, same crop. FORBIDDEN new person, catalog model, white studio, oval face sticker, assume right person is woman.`
+          // Flux-dev 인페인트는 나체를 흰 수영복으로 막거나 원본 옷을 복사한다(실측).
+          // 나체는 마스크 있는 Replicate 인페인트. 슬립 아닌 옷 갈아입히기만 Flux.
+          if (nudeStill) {
+            if (!env.REPLICATE_API_TOKEN?.trim()) {
+              return jsonResponse({ ok: false, error: 'replicate_token_not_configured' }, 500)
+            }
+            try {
+              const started = await startReplicateInpaint({
+                apiToken: env.REPLICATE_API_TOKEN,
+                imageUrl: images[0],
+                maskUrl: clientMask,
+                modelOwner: 'lucataco',
+                modelName: 'realistic-vision-v5-inpainting',
+                prompt:
+                  'Photoreal. Edit ONLY the white-masked clothes. Melt those garments to bare adult skin of the same woman. Knit OFF, sweater OFF, skirt OFF, shirt OFF, jeans OFF, panty OFF. Bare breasts with nipples, bare belly, bare hips. Same pose, same crop. No new person, no lingerie, no leotard, no swimsuit.',
+                negativePrompt: deskStillNegativePrompt({
+                  couple,
+                  nudeStill,
+                  descriptionKo,
+                }),
+                strength: 0.94,
+              })
+              const engine = 'replicate-look-inpaint'
+              if (started.imageUrl) {
+                return jsonResponse(
+                  { ok: true, imageUrl: started.imageUrl, composeMode: 'desk-still', engine, prompt },
+                  200,
+                )
+              }
+              return jsonResponse(
+                {
+                  ok: true,
+                  pending: true,
+                  predictionId: started.predictionId,
+                  composeMode: 'desk-still',
+                  engine,
+                  prompt,
+                },
+                200,
+              )
+            } catch (error) {
+              const message = error instanceof Error ? error.message : 'unknown_error'
+              return jsonResponse(
+                {
+                  ok: false,
+                  error: 'look_inpaint_failed',
+                  message: '옷을 녹이지 못했습니다. 가운데는 원본입니다. 얼굴을 붙이지 않습니다.',
+                  detail: message.slice(0, 160),
+                },
+                502,
+              )
+            }
+          }
+          const localEdit = `${prompt} Local edit ONLY the white-masked clothes of the CAST woman slot. Unmasked face, neck, skin, hands, man, and background stay exact source pixels. Same body, same crop. FORBIDDEN new person, catalog model, white studio, oval face sticker, assume right person is woman.`
           try {
             const submitted = await submitFalInpaint({
               falKey: env.FAL_KEY,
@@ -885,7 +1008,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 nudeStill,
                 descriptionKo,
               }),
-              strength: nudeStill ? 0.85 : 0.56,
+              strength: 0.56,
             })
             const engine = 'fal-look-inpaint'
             if ('imageUrl' in submitted && submitted.imageUrl) {
@@ -918,8 +1041,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
               {
                 ok: false,
                 error: 'look_inpaint_failed',
-                message: '옷을 녹이지 못했습니다. 가운데는 원본입니다. 얼굴을 붙이지 않습니다.',
-                detail: message,
+                message:
+                  message === 'look_source_too_large' || message === 'look_mask_too_large'
+                    ? '사진이 커서 옷을 보내지 못했습니다. 가운데는 원본입니다.'
+                    : '옷을 녹이지 못했습니다. 가운데는 원본입니다. 얼굴을 붙이지 않습니다.',
+                detail: message.slice(0, 160),
               },
               502,
             )
@@ -1078,6 +1204,50 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       /* 원문 유지 */
     }
 
+    if (composeMode === 'extend-recolor') {
+      try {
+        if (!images[0]) {
+          return jsonResponse({ ok: false, error: 'recolor_image_required' }, 400)
+        }
+        const clothHex =
+          typeof body.sourceClothHex === 'string' && /^#[0-9A-Fa-f]{6}$/.test(body.sourceClothHex.trim())
+            ? body.sourceClothHex.trim()
+            : ''
+        const target = String(body.recolorTarget || '')
+        const cropOnly = target === 'pants' || target === 'jacket'
+        const prompt =
+          target === 'pants'
+            ? buildDeskExtendPantsPrompt(clothHex)
+            : target === 'jacket'
+              ? buildDeskExtendJacketLightPrompt(clothHex)
+              : buildDeskExtendRecolorPrompt(clothHex)
+        const submitted = await submitFalKontextEdit({
+          falKey: env.FAL_KEY,
+          imageUrl: images[0],
+          prompt,
+          tier: 'pro',
+          guidanceScale: 8.2,
+          ...(cropOnly ? {} : { aspectRatio: '3:4' }),
+        })
+        if ('imageUrl' in submitted && submitted.imageUrl) {
+          return jsonResponse({ ok: true, imageUrl: submitted.imageUrl, composeMode: 'extend-recolor' }, 200)
+        }
+        return jsonResponse(
+          {
+            ok: true,
+            pending: true,
+            statusUrl: submitted.statusUrl,
+            responseUrl: submitted.responseUrl,
+            composeMode: 'extend-recolor',
+          },
+          200,
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'unknown_error'
+        return jsonResponse({ ok: false, error: 'extend_recolor_failed', message }, 502)
+      }
+    }
+
     // 자유 스튜디오. Desk 와 같은 엔진이지만 걸음·마스크·게이트가 없다.
     // 사용자가 적은 말을 영어로 옮겨 그대로 보낸다. 사진이 있으면 그 사진을 고치고, 없으면 글만으로 그린다.
     if (composeMode === 'free-still') {
@@ -1085,13 +1255,60 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         // aspectRatio 는 이 아래에서 선언되므로 여기서 따로 읽는다.
         const freeRatio =
           typeof body.aspectRatio === 'string' && body.aspectRatio.trim() ? body.aspectRatio.trim() : undefined
-        const submitted = images.length
+        const freeLook = String(body.deskLook || '')
+        const editPrompt =
+          freeLook === 'mini'
+            ? buildDeskMiniPrompt()
+            : freeLook === 'shape'
+              ? buildDeskShapePrompt()
+              : freeLook === 'extend-jacket'
+                ? buildDeskExtendJacketPrompt()
+                : freeLook === 'extend-skirt'
+                  ? buildDeskExtendSkirtPrompt()
+                  : freeLook === 'extend-keep-light'
+                    ? buildDeskExtendKeepLightPrompt(
+                        typeof body.sourceClothHex === 'string' &&
+                          /^#[0-9A-Fa-f]{6}$/.test(body.sourceClothHex.trim())
+                          ? body.sourceClothHex.trim()
+                          : '',
+                      )
+                    : description
+        const keepLightRefs = freeLook === 'extend-keep-light' && images.length >= 2
+        const submitted = keepLightRefs
+          ? await submitFalKontextMultiImage({
+              falKey: env.FAL_KEY,
+              imageUrls: [
+                images[0].startsWith('data:')
+                  ? await uploadDataUrlToFal(env.FAL_KEY, images[0], `keep-light-${Date.now()}-0.jpg`, {
+                      maxBytes: MAX_REFERENCE_BYTES,
+                      tooLargeError: 'reference_image_too_large',
+                    })
+                  : images[0],
+                images[1].startsWith('data:')
+                  ? await uploadDataUrlToFal(env.FAL_KEY, images[1], `keep-light-${Date.now()}-1.jpg`, {
+                      maxBytes: MAX_REFERENCE_BYTES,
+                      tooLargeError: 'reference_image_too_large',
+                    })
+                  : images[1],
+              ],
+              prompt: editPrompt,
+              aspectRatio: typeof freeRatio === 'string' ? freeRatio : '3:4',
+              guidanceScale: 8.2,
+            })
+          : images.length
           ? await submitFalKontextEdit({
               falKey: env.FAL_KEY,
               imageUrl: images[0],
-              prompt: description,
+              prompt: editPrompt,
               tier: 'pro',
-              guidanceScale: 4.2,
+              guidanceScale:
+                freeLook === 'extend-jacket' ||
+                freeLook === 'extend-skirt' ||
+                freeLook === 'extend-keep-light' ||
+                freeLook === 'mini' ||
+                freeLook === 'shape'
+                  ? 8.2
+                  : 4.2,
             })
           : await submitFalTextToImage({
               falKey: env.FAL_KEY,
@@ -1101,7 +1318,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             })
         if ('imageUrl' in submitted && submitted.imageUrl) {
           return jsonResponse(
-            { ok: true, imageUrl: submitted.imageUrl, composeMode: 'free-still', prompt: description },
+            { ok: true, imageUrl: submitted.imageUrl, composeMode: 'free-still', prompt: editPrompt },
             200,
           )
         }
@@ -1112,7 +1329,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             statusUrl: submitted.statusUrl,
             responseUrl: submitted.responseUrl,
             composeMode: 'free-still',
-            prompt: description,
+            prompt: editPrompt,
           },
           200,
         )

@@ -8,6 +8,7 @@ const report = {
   bytes: text.length,
   build: (text.match(/__DESK_BUILD = '([^']+)'/) || [])[1] || '',
   nudeGoesStill: text.includes("void runDeskStillCard('look')"),
+  pickSelectsOnly: /desk pick selects only/.test(text),
   nudeGoesShorts: /key === 'look' && id === 'nude'\)\s*\{\s*void runDeskMoveQueue/.test(text),
   onlyUndress: text.includes("const onlyUndress = !alreadyNude && head.id === 'undress'"),
   headRest: text.includes('const [head, ...rest] = picked'),

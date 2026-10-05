@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag</title>
-  <link rel="stylesheet" href="/style.css?v=20260921use" />
+  <link rel="stylesheet" href="/style.css?v=20261004mw107" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -181,7 +181,7 @@
             <button type="button" id="desk-cast-paste-m">남 붙이기</button>
             <button type="button" id="desk-scene-paste">장면 붙이기</button>
           </div>
-          <p class="adult-desk__fine">여·남 칸에 끌어다 놓거나 Ctrl+V. 두 장을 놓으면 여·남에 각각 들어갑니다.</p>
+            <p class="adult-desk__fine">커플 한 장은 여 붙이기만. 남 칸은 비워 둡니다.</p>
           <button type="button" id="desk-scene-new" class="desk-scene-upload">새 장면</button>
           <button type="button" id="desk-scene-upload" class="desk-scene-upload">장면 사진 올리기</button>
           <input id="desk-scene-input" type="file" accept="image/*" hidden />
@@ -191,24 +191,8 @@
         </aside>
 
         <div id="adult-desk-stage" class="adult-desk__stage">
+          <p id="adult-desk-progress" class="adult-desk__progress" hidden></p>
           <p id="adult-desk-stage-empty" class="adult-desk__stage-empty">CAST에 사람을 넣고, 새 사진을 만들거나 장면 사진을 올리세요.</p>
-          <div id="desk-assemble" class="desk-assemble" hidden>
-            <div class="desk-assemble__bar">
-              <button type="button" id="desk-assemble-size">세로</button>
-              <button type="button" id="desk-assemble-smaller">작게</button>
-              <button type="button" id="desk-assemble-bigger">크게</button>
-              <button type="button" id="desk-assemble-add">PNG 넣기</button>
-              <button type="button" id="desk-assemble-cast-w">여 넣기</button>
-              <button type="button" id="desk-assemble-cast-m">남 넣기</button>
-              <button type="button" id="desk-assemble-now">지금 장</button>
-              <button type="button" id="desk-assemble-drop">빼기</button>
-              <button type="button" id="desk-assemble-apply">이 장으로</button>
-              <button type="button" id="desk-assemble-close">닫기</button>
-            </div>
-            <p class="desk-assemble__hint">끌어다 놓거나 Ctrl+V로 넣습니다. 배경을 지우고 전신 키를 맞춥니다. 끌어 옮기고 휠로 미세 조정. 두세 장까지.</p>
-            <canvas id="desk-assemble-canvas" class="desk-assemble__canvas"></canvas>
-            <input id="desk-assemble-input" type="file" accept="image/png,image/*" multiple hidden />
-          </div>
         </div>
 
         <aside class="adult-desk__rail">
@@ -218,28 +202,25 @@
           </div>
 
           <div id="desk-still-packs">
-            <p id="desk-fresh-flag" class="desk-fresh-flag">새 화면 · CAST 화소 옷만 · gate</p>
-            <button type="button" class="desk-run" data-desk-step="look" id="desk-look-run" hidden>옷 갈아입히기</button>
             <p class="adult-desk__kicker" id="desk-look-kicker">옷</p>
-            <div id="desk-looks" class="desk-cards"></div>
+            <div class="desk-look-row" role="group" aria-label="옷">
+              <button type="button" class="desk-run desk-run--step" data-desk-step="look" id="desk-look-run">옷 녹이기</button>
+              <button type="button" class="desk-run desk-run--step" data-desk-step="shape" id="desk-shape-run">몸 보기</button>
+              <button type="button" class="desk-run desk-run--step" data-desk-step="mini" id="desk-mini-run">미니</button>
+            </div>
             <p class="adult-desk__kicker">방·자세</p>
             <div id="desk-places" class="desk-cards"></div>
             <div id="desk-poses" class="desk-cards"></div>
-            <button type="button" class="desk-run desk-run--step" data-desk-step="place" id="desk-place-run" hidden>장소·자세</button>
-            <p id="desk-still-hint" class="adult-desk__fine">옷을 고르면 바로 녹입니다. 방·자세를 고르면 바로 바꿉니다.</p>
+            <button type="button" class="desk-run desk-run--step" data-desk-step="place" id="desk-place-run">장소·자세</button>
+            <p id="desk-still-hint" class="adult-desk__fine">옷 녹이기는 여자만 나체입니다. 미니는 42번보다 단과 타이트함을 10% 올립니다. 몸 보기는 아이보리 운동복입니다.</p>
           </div>
 
           <div id="desk-video-packs" hidden>
-            <p class="adult-desk__kicker">옷</p>
-            <div id="desk-looks-move" class="desk-cards"></div>
             <button type="button" id="desk-run" class="desk-run">벗기 찍기</button>
-            <p class="adult-desk__fine">나체를 누르면 여 칸 사진으로 바로 벗깁니다.</p>
+            <p class="adult-desk__fine">나체는 먼저 옷 녹이기입니다. 벗기 찍기는 그 장으로 쇼츠만 만듭니다.</p>
             <p class="adult-desk__kicker">동작</p>
             <div id="desk-moves" class="desk-cards"></div>
-            <label class="desk-two" for="desk-two-people">
-              <input type="checkbox" id="desk-two-people" />
-              사진에 두 사람
-            </label>
+            <input type="checkbox" id="desk-two-people" hidden />
             <p class="adult-desk__kicker">길이</p>
             <div class="desk-job" role="group" aria-label="길이">
               <button type="button" class="desk-job__btn" data-desk-len="5">5초</button>
@@ -252,9 +233,7 @@
             <button type="button" class="desk-run desk-run--step" data-desk-step="body">1 몸 잇기</button>
             <button type="button" class="desk-run desk-run--step" data-desk-step="together">2 한 장면</button>
           </div>
-          <button type="button" id="desk-assemble-open" class="desk-scene-upload">PNG 조립</button>
           <p id="desk-status" class="form__status" hidden></p>
-          <button type="button" id="desk-advanced-toggle" class="desk-advanced">도구 더 보기</button>
         </aside>
       </div>
 
@@ -1290,8 +1269,12 @@
             title="텍스트가 있는 PDF는 바로 읽고, 스캔 이미지 PDF는 자동으로 OCR(글자 인식)을 시도합니다. OCR은 페이지당 시간이 걸릴 수 있어요."
             >PDF에서 불러오기</label
           >
+          <button id="essay-pdf-paste" class="ai-help-btn" type="button">붙이기</button>
         </div>
         <input id="essay-pdf-input" class="essay-pdf-input" type="file" accept="application/pdf,.pdf" hidden />
+        <p class="form__hint">
+          PDF는 파일 선택 · 끌어다 놓기 · 붙이기로 넣을 수 있어요. 초안 칸에 글만 붙여 넣으면 예전처럼 글이 들어갑니다.
+        </p>
         <p id="essay-pdf-status" class="form__status" hidden></p>
         <div id="essay-pdf-chunk-nav" class="essay-pdf-chunk-nav" hidden>
           <button id="essay-pdf-chunk-prev" class="review-panel__secondary" type="button">◀ 이전 조각</button>
@@ -1449,8 +1432,10 @@
         <div class="field-head">
           <label class="form__label" for="tale-img-input">그림</label>
           <label class="ai-help-btn" for="tale-img-input" id="tale-img-label">그림 불러오기</label>
+          <button id="tale-img-paste" class="ai-help-btn" type="button">붙이기</button>
         </div>
         <input id="tale-img-input" class="tale-img-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+        <p class="form__hint">파일 · 끌어다 놓기 · Ctrl+V · 붙이기. 이 칸 어디에 놓아도 그림 편집으로 들어갑니다.</p>
         <p id="tale-img-status" class="form__status" hidden></p>
 
         <div id="tale-img-wrap" class="tale-img-wrap" hidden>
@@ -1623,8 +1608,9 @@
           <button id="layout-add-image-from-editor" class="review-panel__secondary" type="button">
             위 그림 편집 결과 넣기
           </button>
-          <label class="ai-help-btn" for="layout-image-input" id="layout-add-image-label">새 그림 업로드</label>
-          <input id="layout-image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            <label class="ai-help-btn" for="layout-image-input" id="layout-add-image-label">새 그림 업로드</label>
+            <input id="layout-image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+            <button id="layout-image-paste" class="ai-help-btn" type="button">붙이기</button>
           <button id="layout-add-text" class="review-panel__secondary" type="button">+ 텍스트 상자</button>
         </div>
 
@@ -1727,7 +1713,7 @@
         </div>
         <input id="observe-image-input" type="file" accept="image/png,image/jpeg,image/webp" hidden />
         <p class="form__hint">
-          그림을 복사한 뒤 <code>그림 붙여넣기</code> 버튼을 누르거나, 이 화면 어디에서나 <code>Ctrl+V</code>로도 바로 넣을 수 있어요.
+          파일 선택 · 끌어다 놓기 · 복사 후 <code>Ctrl+V</code> · <code>그림 붙여넣기</code>. 미리보기 그림은 <code>Ctrl+C</code>로 복사됩니다.
         </p>
         <p id="observe-image-status" class="form__status" hidden></p>
         <img id="observe-preview" class="observe-preview" alt="관찰용 그림 미리보기" hidden />
@@ -1830,7 +1816,7 @@
           </p>
           <ol class="free-guide">
             <li><b>벗기고 싶으면</b> — 사진을 올리고 <b>몸매 투영</b>을 누르세요. 원래 체형을 지키며 벗깁니다. 그날 가장 잘 되던 길입니다.</li>
-            <li><b>사진을 고치고 싶으면</b> — 사진을 올리고 고칠 말을 적은 뒤 <b>한 장 만들기</b>.</li>
+            <li><b>사진을 고치고 싶으면</b> — 사진을 올리고 고칠 말을 적은 뒤 <b>수정하기</b>. 옷 갈아입히기도 여기입니다. Desk가 아닙니다.</li>
             <li><b>맨바닥에서 그리려면</b> — 사진 없이 말만 적고 <b>한 장 만들기</b>.</li>
             <li><b>영상만 필요하면</b> — 사진을 올리고 아래 <b>움직이기</b>에 동작만 적으세요. 그림은 안 만들어도 됩니다.</li>
             <li>결과가 아쉬우면 같은 단추를 다시 누르세요. 매번 달라집니다.</li>
@@ -1838,19 +1824,33 @@
         </header>
 
         <label class="form__label" for="free-photo">사진 (없어도 됩니다)</label>
-        <input id="free-photo" class="form__input" type="file" accept="image/*" />
-        <div id="free-photo-wrap" class="free-photo-wrap" hidden>
-          <img id="free-photo-preview" class="free-photo-preview" alt="올린 사진" />
-          <button id="free-photo-clear" class="review-panel__secondary" type="button">사진 빼기</button>
+        <div id="free-photo-drop" class="attach-drop free-photo-drop">
+          <div class="essay-actions">
+            <label class="ai-help-btn" for="free-photo">파일 선택</label>
+            <button id="free-photo-paste" class="ai-help-btn" type="button">붙이기</button>
+          </div>
+          <input id="free-photo" class="form__input" type="file" accept="image/*" hidden />
+          <p class="form__hint">파일 선택 · 끌어다 놓기 · 복사 후 Ctrl+V · 붙이기. 결과 그림은 Ctrl+C 로 복사됩니다.</p>
+          <div id="free-photo-wrap" class="free-photo-wrap" hidden>
+            <img id="free-photo-preview" class="free-photo-preview" alt="올린 사진" />
+            <button id="free-photo-clear" class="review-panel__secondary" type="button">사진 빼기</button>
+          </div>
         </div>
 
         <label class="form__label" for="free-text">무엇을 만들까요</label>
-        <textarea
-          id="free-text"
-          class="form__textarea"
-          rows="5"
-          placeholder="예: 이 사람 그대로, 검은 원피스로 갈아입히고 호텔 창가에 세워줘"
-        ></textarea>
+        <div id="free-text-drop" class="attach-drop free-text-drop">
+          <div class="essay-actions">
+            <label class="ai-help-btn" for="free-photo">파일 선택</label>
+            <button id="free-text-paste" class="ai-help-btn" type="button">붙이기</button>
+          </div>
+          <textarea
+            id="free-text"
+            class="form__textarea"
+            rows="5"
+            placeholder="예: 이 사람 그대로, 검은 원피스로 갈아입히고 호텔 창가에 세워줘"
+          ></textarea>
+          <p class="form__hint">글을 적거나, 그림을 이 칸에 끌어다 놓거나 복사한 뒤 Ctrl+V 로 붙이세요.</p>
+        </div>
 
         <label class="form__label" for="free-size">화면 비율</label>
         <select id="free-size" class="form__select">
@@ -1862,6 +1862,7 @@
 
         <div class="essay-actions">
           <button id="free-run" class="form__submit" type="button">한 장 만들기</button>
+          <button id="free-revise" class="form__submit" type="button" disabled>수정하기</button>
           <button id="free-project" class="review-panel__secondary" type="button" disabled>
             몸매 투영 (벗기기)
           </button>
@@ -1878,7 +1879,7 @@
           </div>
           <img id="free-result" class="free-result" alt="만든 그림" />
           <p class="form__hint">
-            마음에 들면 내려받으세요. 다시 고치려면 이 그림을 위 사진 칸에 올리고 고칠 말을 적으면 됩니다.
+            마음에 들면 내려받으세요. 더 고치려면 고칠 말을 적고 <b>수정하기</b>를 누르세요. 방금 나온 장을 이어서 고칩니다.
           </p>
         </div>
 
@@ -1932,7 +1933,7 @@
           <p id="free-move-status" class="form__status" hidden></p>
 
           <div id="free-video-wrap" hidden>
-            <video id="free-video" class="free-result" controls playsinline></video>
+            <video id="free-video" class="free-result" controls playsinline loop></video>
             <p class="form__hint">18초는 같은 장수를 느리게 트는 것이라 뒷부분이 흐트러집니다. 더 길게는 24초를 권합니다.</p>
           </div>
         </div>
@@ -1940,20 +1941,21 @@
     </div>
   </main>
 
+  <script src="/attach-image.js?v=20260924drop"></script>
   <script src="/youtube-shorts.js?v=20260719am"></script>
   <script src="/bgm-mixer.js?v=20260722a"></script>
-  <script src="/essay.js?v=20260916pdf-lazy"></script>
-  <script src="/tale.js?v=20260720e"></script>
-  <script src="/tale-layout.js?v=20260720d"></script>
-  <script src="/observe.js?v=20260722b"></script>
+  <script src="/essay.js?v=20260921attach"></script>
+  <script src="/tale.js?v=20260921attach"></script>
+  <script src="/tale-layout.js?v=20260921attach"></script>
+  <script src="/observe.js?v=20260921attach"></script>
   <script src="/poly-lasso.js?v=20260831erase2"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
   <script src="/desk-look-models.js?v=20260917vis"></script>
-  <script src="/desk-look-preflight.js?v=20260920goal"></script>
-  <script src="/desk-look-onnx.js?v=20260920thread1"></script>
+  <script src="/desk-look-preflight.js?v=20261001mw61"></script>
+  <script src="/desk-look-onnx.js?v=20260922clothes"></script>
   <script src="/desk-look-runtime.js?v=20260917vis"></script>
-  <script src="/app.js?v=20260921use"></script>
-  <script src="/desk-pipeline.js?v=20260914pixel-pipe2"></script>
-  <script src="/free-studio.js?v=20260921nudehold"></script>
+  <script src="/app.js?v=20261004mw161"></script>
+  <script src="/desk-pipeline.js?v=20261004mw161"></script>
+  <script src="/free-studio.js?v=20260930rev1"></script>
 </body>
 </html>

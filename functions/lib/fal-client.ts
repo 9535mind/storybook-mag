@@ -861,35 +861,61 @@ export async function submitFalInpaint(options: {
   prompt: string
   negativePrompt?: string
   strength?: number
+  preferGeneral?: boolean
 }): Promise<{ statusUrl: string; responseUrl: string } | { imageUrl: string }> {
   let imageUrl = options.imageUrl
   let maskUrl = options.maskUrl
-  if (imageUrl.startsWith('data:')) {
-    const ext = imageUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
-    imageUrl = await uploadDataUrlToFal(options.falKey, imageUrl, `inpaint-src-${Date.now()}.${ext}`)
-  }
-  if (maskUrl.startsWith('data:')) {
-    const ext = maskUrl.startsWith('data:image/jpeg') ? 'jpg' : 'png'
-    maskUrl = await uploadDataUrlToFal(options.falKey, maskUrl, `inpaint-mask-${Date.now()}.${ext}`)
-  }
+  const [srcUp, maskUp] = await Promise.all([
+    imageUrl.startsWith('data:')
+      ? uploadDataUrlToFal(options.falKey, imageUrl, `inpaint-src-${Date.now()}.${extOf(imageUrl)}`, {
+          maxBytes: 8_000_000,
+          tooLargeError: 'look_source_too_large',
+        })
+      : Promise.resolve(imageUrl),
+    maskUrl.startsWith('data:')
+      ? uploadDataUrlToFal(options.falKey, maskUrl, `inpaint-mask-${Date.now()}.${extOf(maskUrl)}`, {
+          maxBytes: 8_000_000,
+          tooLargeError: 'look_mask_too_large',
+        })
+      : Promise.resolve(maskUrl),
+  ])
+  imageUrl = srcUp
+  maskUrl = maskUp
   const prompt = bakeConstraintsForFlux(options.prompt, options.negativePrompt)
   const strength =
     typeof options.strength === 'number' && Number.isFinite(options.strength)
       ? Math.min(0.95, Math.max(0.35, options.strength))
       : 0.72
-  return submitFalQueueJob({
-    falKey: options.falKey,
-    falModel: 'fal-ai/flux-lora/inpainting',
-    body: {
-      prompt,
-      image_url: imageUrl,
-      mask_url: maskUrl,
-      strength,
-      num_images: 1,
-      output_format: 'png',
-      enable_safety_checker: false,
-    },
-  })
+  const body = {
+    prompt,
+    image_url: imageUrl,
+    mask_url: maskUrl,
+    strength,
+    num_images: 1,
+    num_inference_steps: 28,
+    output_format: 'png',
+    enable_safety_checker: false,
+  }
+  const models = options.preferGeneral
+    ? (['fal-ai/flux-general/inpainting', 'fal-ai/flux-lora/inpainting'] as const)
+    : (['fal-ai/flux-lora/inpainting', 'fal-ai/flux-general/inpainting'] as const)
+  let last = 'look_inpaint_failed'
+  for (const falModel of models) {
+    try {
+      return await submitFalQueueJob({
+        falKey: options.falKey,
+        falModel,
+        body,
+      })
+    } catch (error) {
+      last = error instanceof Error ? error.message : String(error)
+    }
+  }
+  throw new Error(last)
+}
+
+function extOf(url: string): 'jpg' | 'png' {
+  return url.startsWith('data:image/jpeg') ? 'jpg' : 'png'
 }
 
 /** 영역 수정(inpaint) — mask에서 흰 영역만 수정. mask는 data URI 또는 https. */
@@ -1166,6 +1192,14 @@ export type FaceSwapGender = 'male' | 'female' | 'non-binary'
 
 /** insight | easel | replicate | indexed(좌우 인덱스) | kontext(머리·헤어 통째) */
 export type FaceSwapEngine = 'insight' | 'easel' | 'replicate' | 'indexed' | 'kontext'
+
+/** Desk 몸 잇기 뒤 — 전신 구도 유지한 채 증명 머리·얼굴만 교체 */
+export const DESK_FULLBODY_HEAD_SWAP_PROMPT = [
+  'Image 1 is a FULL BODY standing photograph, head to shoes, 3:4 frame. Image 2 is the identity head.',
+  'Keep image 1 camera distance, full body, feet, clothes, pose, hands, and background. Do not zoom in. Do not crop to a bust or portrait.',
+  'Replace only the head and hairstyle of image 1 with the face and hair from image 2. Same person. Match the neck.',
+  'FORBIDDEN: a closer crop, a passport photo, a waist crop, two people, an oval face sticker, a beige plate, a new woman.',
+].join(' ')
 
 /** Kontext Multi — 원본 머리·얼굴 제거 후 증명사진 머리·얼굴 통째 교체 */
 export const HEAD_SWAP_KONTEXT_PROMPT = [

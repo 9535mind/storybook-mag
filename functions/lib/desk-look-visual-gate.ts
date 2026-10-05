@@ -581,6 +581,8 @@ export function gateLookVisual(input: {
   labels?: string[]
   upperMask?: Uint8Array
   lowerMask?: Uint8Array
+  /** 나체: 실루엣·이음매는 느슨. 옷이 그대로면 통과시키지 않는다. */
+  looseNude?: boolean
 }): LookVisualGate {
   const { src, out, mask, width, height, labels } = input
   const split =
@@ -628,6 +630,7 @@ export function gateLookVisual(input: {
   const failReasons: LookVisualReason[] = []
   for (const r of [upper, lower]) {
     for (const reason of r.failReasons) {
+      if (input.looseNude && reason === 'mask_seam') continue
       if (!failReasons.includes(reason)) failReasons.push(reason)
     }
   }

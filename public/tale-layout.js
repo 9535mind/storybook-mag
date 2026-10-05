@@ -479,8 +479,13 @@
 
   imageInput?.addEventListener('change', () => {
     const file = imageInput.files?.[0]
+    imageInput.value = ''
+    if (file) applyLayoutImageFile(file)
+  })
+
+  function applyLayoutImageFile(file) {
     if (!file) return
-    if (!file.type.startsWith('image/')) {
+    if (!file.type.startsWith('image/') && !(typeof StorymagAttach?.isImageFile === 'function' && StorymagAttach.isImageFile(file))) {
       setStatus('이미지 파일만 올릴 수 있어요.', true)
       return
     }
@@ -488,7 +493,16 @@
     reader.onload = () => addImageLayerFromDataUrl(String(reader.result))
     reader.onerror = () => setStatus('파일을 읽지 못했어요.', true)
     reader.readAsDataURL(file)
-  })
+  }
+  window.__taleLayoutApplyFile = applyLayoutImageFile
+  if (typeof StorymagAttach?.bind === 'function') {
+    const stage = document.querySelector('.tale-layout-stage-outer') || canvas
+    StorymagAttach.bind(stage, {
+      onFiles: (files) => applyLayoutImageFile(files[0]),
+      pasteBtn: document.getElementById('layout-image-paste'),
+      onEmptyPaste: () => setStatus('복사한 그림이 없어요. 그림을 복사한 뒤 Ctrl+V 또는 붙이기를 누르세요.', true),
+    })
+  }
 
   addTextBtn?.addEventListener('click', () => {
     const layer = {

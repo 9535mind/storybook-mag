@@ -58,6 +58,9 @@ export async function verifyLookInpaintPayload(input: {
   if (srcSize.width !== decoded.width || srcSize.height !== decoded.height) {
     return { ok: false, error: 'look_size_mismatch', status: 400 }
   }
+  if (srcSize.width > srcSize.height * 1.12) {
+    return { ok: false, error: 'look_couple_full', status: 400 }
+  }
   const mask = hardMask(decoded.gray)
   const sha = await sha256Hex(mask)
   if (sha !== verify.maskSha256.toLowerCase()) {

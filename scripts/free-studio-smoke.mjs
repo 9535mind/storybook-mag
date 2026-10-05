@@ -70,6 +70,7 @@ if (tabVisible) {
     fromLabel: document.getElementById('free-move-from')?.textContent?.trim() || '',
     // 몸매 투영은 사진이 있을 때만 눌린다.
     projectEnabled: document.getElementById('free-project')?.disabled === false,
+    reviseEnabled: document.getElementById('free-revise')?.disabled === false,
   }))
   // 24초를 고르면 후반 움직임 칸이 열려야 한다 (두 클립 이어 붙이기).
   // 움직이기 칸이 보이는 지금(사진 있음) 확인해야 select 를 누를 수 있다.
@@ -90,6 +91,8 @@ if (tabVisible) {
     hasText: Boolean(document.getElementById('free-text')),
     hasPhoto: Boolean(document.getElementById('free-photo')),
     hasRun: Boolean(document.getElementById('free-run')),
+    hasPaste: Boolean(document.getElementById('free-photo-paste')),
+    attachApi: typeof StorymagAttach?.bind === 'function',
     // 사진을 안 올렸으면 미리보기 줄이 아예 안 보여야 한다.
     photoRowHidden: document.getElementById('free-photo-wrap')?.offsetParent === null,
     // 그림이 없으면 움직이기 칸도 숨어 있어야 한다.
@@ -102,6 +105,8 @@ if (tabVisible) {
     // 8월 27일자 기능이 다 붙었는지
     hasProject: Boolean(document.getElementById('free-project')),
     projectDisabledWithoutPhoto: document.getElementById('free-project')?.disabled === true,
+    hasRevise: Boolean(document.getElementById('free-revise')),
+    reviseDisabledWithoutPhoto: document.getElementById('free-revise')?.disabled === true,
     hasMoveProject: Boolean(document.getElementById('free-move-project')),
     lengths: [...(document.getElementById('free-move-sec')?.options || [])].map((o) => Number(o.value)),
     sizes: [...(document.getElementById('free-size')?.options || [])].map((o) => o.value),
@@ -130,6 +135,7 @@ const report = {
   photoOpensMove: afterPhoto?.moveRowShown === true,
   moveFromLabel: afterPhoto?.fromLabel || '',
   projectEnabledWithPhoto: afterPhoto?.projectEnabled === true,
+  reviseEnabledWithPhoto: afterPhoto?.reviseEnabled === true,
   dualRowShownAt24: afterPhoto?.dualRowShownAt24 === true,
   routes,
   pageerrors,
@@ -139,6 +145,8 @@ const report = {
     panel.deskHidden === true &&
     panel.hasText === true &&
     panel.hasRun === true &&
+    panel.hasPaste === true &&
+    panel.attachApi === true &&
     panel.tabActive === true &&
     panel.photoRowHidden === true &&
     panel.moveRowHidden === true &&
@@ -147,10 +155,13 @@ const report = {
     panel.hasGuide === true &&
     afterPhoto?.moveRowShown === true &&
     afterPhoto?.projectEnabled === true &&
-    /올린 사진/.test(afterPhoto?.fromLabel || '') &&
+    /원본은 그대로/.test(afterPhoto?.fromLabel || '') &&
     /적어/.test(panel.emptyGuard || '') &&
     panel.hasProject === true &&
     panel.projectDisabledWithoutPhoto === true &&
+    panel.hasRevise === true &&
+    panel.reviseDisabledWithoutPhoto === true &&
+    afterPhoto?.reviseEnabled === true &&
     panel.hasMoveProject === true &&
     [10, 12, 15, 18, 24, 30].every((sec) => (panel.lengths || []).includes(sec)) &&
     ['portrait', 'story', 'square', 'landscape'].every((s) => (panel.sizes || []).includes(s)) &&

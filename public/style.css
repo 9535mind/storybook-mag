@@ -397,8 +397,22 @@ body {
   color: var(--muted);
 }
 
-.free-guide b {
-  color: var(--text);
+.attach-drop--on {
+  outline: 2px dashed rgba(214, 180, 255, 0.85);
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+
+.free-photo-drop,
+.free-text-drop {
+  margin: 6px 0 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+
+.free-text-drop .form__textarea {
+  margin-top: 8px;
 }
 
 .free-photo-preview {
@@ -2126,6 +2140,24 @@ body {
   color: #8b7d99;
 }
 
+#desk-look-kicker,
+#desk-look-kicker-move {
+  margin: 8px 0 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #3a2438;
+  color: #f3d9ff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
+}
+
+#desk-still-packs.is-off #desk-look-kicker,
+#desk-video-packs.is-off #desk-look-kicker-move {
+  opacity: 1;
+}
+
 .adult-desk__person .adult-desk__kicker:first-child,
 .adult-desk__rail .adult-desk__kicker:first-of-type {
   margin-top: 0;
@@ -2282,9 +2314,32 @@ body {
 }
 
 .adult-desk__stage {
+  position: relative;
   min-height: 420px;
   border-radius: 14px;
   background: rgba(8, 15, 30, 0.28);
+}
+
+.adult-desk__progress {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 12px;
+  z-index: 6;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(20, 12, 28, 0.92);
+  color: #f3eef7;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
+}
+
+.adult-desk__progress.form__status--error {
+  color: #fecaca;
 }
 
 @media (max-width: 900px) {
@@ -2507,9 +2562,18 @@ body {
   line-height: 1.35;
 }
 
-#desk-look-run {
-  margin-top: 0;
-  margin-bottom: 10px;
+.desk-look-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+  margin: 10px 0 12px;
+}
+
+.desk-look-row .desk-run {
+  width: 100%;
+  margin: 0;
+  padding: 10px 6px;
+  font-size: 13px;
 }
 
 .desk-run {
@@ -2533,9 +2597,10 @@ body {
 }
 
 .desk-run:disabled,
-.desk-run--step:disabled {
+.desk-run--step:disabled,
+.desk-run--step.is-busy {
   opacity: 0.38;
-  cursor: not-allowed;
+  cursor: wait;
 }
 
 .desk-cards.is-off,

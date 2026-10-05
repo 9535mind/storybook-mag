@@ -401,8 +401,13 @@
 
   imgInput?.addEventListener('change', () => {
     const file = imgInput.files?.[0]
+    imgInput.value = ''
+    if (file) applyTaleImageFile(file)
+  })
+
+  function applyTaleImageFile(file) {
     if (!file) return
-    if (!file.type.startsWith('image/')) {
+    if (!file.type.startsWith('image/') && !(typeof StorymagAttach?.isImageFile === 'function' && StorymagAttach.isImageFile(file))) {
       setStatus(imgStatusEl, '이미지 파일만 올릴 수 있어요.', true)
       return
     }
@@ -411,7 +416,7 @@
       return
     }
     loadImageIntoEditor(file)
-  })
+  }
 
   scaleRange?.addEventListener('input', () => {
     imgState.scale = Number(scaleRange.value) / 100
@@ -897,4 +902,40 @@
   })
 
   window.StorymagTale = { onShow: () => loadLocal() }
+
+  function applyTaleSceneRefFile(file) {
+    if (!file) return
+    if (!file.type.startsWith('image/') && !(typeof StorymagAttach?.isImageFile === 'function' && StorymagAttach.isImageFile(file))) return
+    if (file.size > SCENE_MAX_FILE_BYTES) {
+      setStatus(sceneStatusEl, '파일이 너무 커요. 15MB 이하로 올려 주세요.', true)
+      return
+    }
+    const reader = new FileReader()
+    reader.onload = () => addSceneRef(String(reader.result))
+    reader.readAsDataURL(file)
+  }
+
+  window.__taleApplyImageFile = applyTaleImageFile
+  window.__taleApplySceneRefFile = applyTaleSceneRefFile
+  if (typeof StorymagAttach?.bind === 'function') {
+    const taleArea = document.getElementById('tale-area')
+    const take = (files, event) => {
+      const t = event?.target
+      if (t?.closest?.('#layout-canvas, .tale-layout-stage-outer, #layout-add-image-label, #layout-image-paste')) {
+        window.__taleLayoutApplyFile?.(files[0])
+        return
+      }
+      if (t?.closest?.('#tale-scene-refs, #tale-scene-ref-label, #tale-scene-desc, #tale-scene-generate')) {
+        files.forEach((file) => applyTaleSceneRefFile(file))
+        return
+      }
+      applyTaleImageFile(files[0])
+    }
+    StorymagAttach.register('tale', take)
+    StorymagAttach.bind(taleArea, {
+      onFiles: take,
+      pasteBtn: document.getElementById('tale-img-paste'),
+      onEmptyPaste: () => setStatus(imgStatusEl, '복사한 그림이 없어요. 그림을 복사한 뒤 Ctrl+V 또는 붙이기를 누르세요.', true),
+    })
+  }
 })()

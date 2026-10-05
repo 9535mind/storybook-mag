@@ -127,7 +127,8 @@ function hexSha(buf: ArrayBuffer): string {
 }
 
 export async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  const copy = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+  const digest = await crypto.subtle.digest('SHA-256', copy)
   return hexSha(digest)
 }
 

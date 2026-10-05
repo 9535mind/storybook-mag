@@ -1,5 +1,5 @@
 import { wantsNudeOrUndress, wantsDeskSitOrLie, wantsSlipOrSilkLook } from './nude-intent'
-import { wantsExplicitPubicShave } from './nude-anatomy-locks'
+import { wantsExplicitPubicShave, buildStillWomanBustHint } from './nude-anatomy-locks'
 
 /** Juggernaut/SDXL CLIP은 ~77토큰. 칸을 쌓되 동작([DO])이 항상 맨 앞. */
 export const DESK_STILL_PROMPT_MAX = 420
@@ -13,6 +13,98 @@ export type DeskIntent = {
   couple: boolean
   look: DeskLookKind
   action: DeskActionKind
+}
+
+/** 겉옷 검정은 됨. 속옷·브라·팬티·크롭·숏츠는 검정 금지. */
+export const DESK_NO_BLACK_UNDERWEAR =
+  'Ivory or cream only for bra, panty, sports-bra, crop top, and bike shorts. FORBIDDEN black underwear, black panty, black bra, charcoal base-layer.'
+
+/** 42번 검정 미니를 기준으로 단을 10% 올리고 10% 더 붙인다. */
+export function buildDeskMiniPrompt(): string {
+  return [
+    'Same exact woman, same face, same hair, same standing pose, same studio, same jacket and top.',
+    'Keep the exact same full-body camera. Head to shoes in frame. Same distance. Do not crop or zoom.',
+    'Change only the skirt into a second-skin black bodycon mini.',
+    'Base length is a short tight office mini on the upper thigh. Then raise the hem 10% higher and cling 10% tighter.',
+    'Hem sits high on the upper thigh so both hands stay visible below the hem. Shoes stay visible. No flare, no A-line, no knee length.',
+    'Photoreal. FORBIDDEN a new face, a catalog model, a waist crop, a thigh crop, missing shoes, a zoom-in, leftover long skirt.',
+  ].join(' ')
+}
+
+/** 몸 잇기가 크림 재킷을 내면 검정만 되돌린다. */
+export function buildDeskExtendJacketPrompt(): string {
+  return [
+    'Same exact woman, same face, same hair, same standing pose, same studio.',
+    'Change only the cream, ivory, beige, or white jacket into a black office blazer.',
+    'Keep the same black V-neck or knit under the jacket.',
+    'Photoreal. FORBIDDEN a new face, leftover cream jacket, an ivory blazer, trousers, a pantsuit, a beige plate, an oval sticker.',
+  ].join(' ')
+}
+
+/** 가슴 크롭: 검정 재킷만 제공 옷 색 가족으로. 얼굴은 보내지 않음. */
+export function buildDeskExtendJacketLightPrompt(clothHex = ''): string {
+  const color = clothHex ? `cream ivory ${clothHex}` : 'cream ivory matching the trousers'
+  return [
+    'This photo is already a crop of a jacket and chest. Keep the exact same crop, pose, and background. Do not add a head.',
+    `Change ONLY the black blazer into a ${color} jacket. Keep the white shirt if present.`,
+    'Photoreal. FORBIDDEN a new crop, a face, a black blazer, brown stains, a beige plate.',
+  ].join(' ')
+}
+
+/** 크림 재킷은 두고 검정 바지만 제공 옷 색 가족으로. */
+export function buildDeskExtendPantsPrompt(clothHex = ''): string {
+  const color = clothHex ? `cream ivory ${clothHex}` : 'cream ivory matching the jacket at the top'
+  return [
+    'This photo is already a crop of the waist, legs, hands, and shoes.',
+    'Keep the exact same crop, pose, hands, and background. Do not add a head or a new torso.',
+    `Change ONLY the black trousers and black shoes into ${color} trousers and cream flats.`,
+    'Even cream fabric. No brown stains, no dirty patches, no squares on the thighs.',
+    'Photoreal. FORBIDDEN a new crop, a face, black pants, black shoes, a beige plate, brown stains.',
+  ].join(' ')
+}
+
+/** 검정 정장을 제공 사진과 같은 밝은 옷 색으로. */
+export function buildDeskExtendRecolorPrompt(clothHex = ''): string {
+  const color = clothHex ? `cream ivory ${clothHex}` : 'cream ivory from the identity cloth'
+  return [
+    'Keep this exact woman, exact face, exact standing pose.',
+    `Recolor the black office suit into a ${color} zip knit or jacket and matching light trousers.`,
+    'Photoreal. FORBIDDEN a new face, a black blazer, black trousers, a catalog model, a beige plate.',
+  ].join(' ')
+}
+
+/** 몸 잇기가 제공 사진과 다른 색으로 바꾸면 그 색으로 되돌린다. */
+export function buildDeskExtendKeepLightPrompt(clothHex = ''): string {
+  const color = clothHex ? `exact cloth color ${clothHex}` : 'the exact cloth color from image 2'
+  return [
+    'Image 1 is the standing full body. Image 2 is the identity photograph.',
+    'Same exact woman, same face, same hair, same standing pose, same studio.',
+    `Change only the mismatched clothes into the same ${color} zip knit from image 2.`,
+    'Keep image 2 fabric color exactly. Lower body stays in that same color family. Photoreal.',
+    'FORBIDDEN a different color, a black office suit, a brighter white catalog outfit, black trousers, black pumps, a new face, a beige plate.',
+  ].join(' ')
+}
+
+/** 몸 잇기가 롱코트·플레어로 내리면 재킷+무릎 펜슬로 되돌린다. */
+export function buildDeskExtendSkirtPrompt(): string {
+  return [
+    'Same exact woman, same face, same hair, same standing pose, same studio.',
+    'Change only the long coat or flared dress into a short black office blazer over a matching black pencil skirt.',
+    'Blazer hem at the hip. Skirt hem at the knee, straight and slim. Thighs stay visible below the hem.',
+    'Keep the black V-neck. Photoreal. FORBIDDEN a long coat, a coat-dress, an A-line flare, a midi hem, trousers, a new face.',
+  ].join(' ')
+}
+
+/** 팔 길이를 보게 — 아이보리 크롭+숏츠. 같은 얼굴·같은 자세. Kontext용이라 420자 CLIP 상한을 쓰지 않는다. */
+export function buildDeskShapePrompt(): string {
+  return [
+    'Same exact woman, same face, same hair, same standing pose, same studio.',
+    'Keep the exact same full-body camera. Head to shoes in frame. Same distance. Do not crop or zoom.',
+    'Change her outfit to an ivory cream athletic crop top and matching ivory high-waist bike shorts.',
+    DESK_NO_BLACK_UNDERWEAR,
+    'Arms hang at her sides. Both hands stay fully visible beside the thighs so arm length can be judged. Fingertips near mid-thigh. Shoes stay visible.',
+    'Photoreal. FORBIDDEN a new face, a catalog model, a waist crop, missing shoes, a zoom-in, a beige plate, black underwear.',
+  ].join(' ')
 }
 
 export function parseDeskLookKind(lookId?: string, text = ''): DeskLookKind {
@@ -79,9 +171,9 @@ function assembleDeskStill(sections: Array<{ key: DeskStillKey; text: string }>)
 function deskNudeBody(text: string, couple: boolean): string {
   const pubic = wantsExplicitPubicShave(text)
     ? 'bare crotch, shaved as asked. panty OFF.'
-    : 'bare crotch, Korean-30s pubic on mons. panty OFF.'
+    : 'bare crotch, Korean-30s pubic curly mons, soft labia, natural cleft. panty OFF.'
   const who = couple ? 'CAST woman-slot only. CAST man-slot stays dressed.' : 'Same woman nude.'
-  return `${who} ${pubic} FAILED black panty, fog, hairless blank.`
+  return `${who} ${buildStillWomanBustHint(text)} ${pubic} FAILED black panty, fog, hairless Barbie, single crease.`
 }
 
 // 슬립은 몸을 드러내는 일이 아니라 옷을 갈아입히는 일이다. 나체 문구를 섞으면
@@ -92,8 +184,8 @@ function deskSlipDo(couple: boolean): string {
     : 'Edit in place. Same woman, same body shape, same hair, same room. Change her outfit to one silk slip dress. FORBIDDEN new face, slimmer body, white studio, catalog model, nudity.'
 }
 
-function deskSlipBody(): string {
-  return 'one silk slip dress, spaghetti straps, bias cut, hem below the knee. Keep her own shoulder width, waist and hips. FAILED nudity, thigh-short hem, slimmed body, model proportions.'
+function deskSlipBody(text = ''): string {
+  return `one silk slip dress, spaghetti straps, bias cut, hem below the knee. Keep her own shoulder width, waist and hips. ${buildStillWomanBustHint(text)} FAILED nudity, thigh-short hem, slimmed body, model proportions.`
 }
 
 function deskKeep(couple: boolean, clothesStay: boolean): string {
@@ -141,7 +233,11 @@ export function buildDeskStillPrompt(
         : couple
           ? 'Edit in place. CAST woman-slot melt outfit. CAST man-slot stays. FORBIDDEN two women, gender-swap, new faces, assume right=woman.'
           : 'Edit source in place. Melt clothes into the requested outfit. FORBIDDEN new face, white studio.'
-    const body = nudeLook ? deskNudeBody(t, couple) : slip ? deskSlipBody() : ''
+    const body = nudeLook
+      ? deskNudeBody(t, couple)
+      : slip
+        ? deskSlipBody(t)
+        : `${buildStillWomanBustHint(t)} ivory/beige second-skin bodycon micro mini, cling hips and inner thighs, hem at the panty line, 5cm shorter. FORBIDDEN black A-line, flare, mid-thigh, 1970s office.`
     const hint = !nudeLook && !slip ? userHint(t) : ''
     return assembleDeskStill([
       { key: 'DO', text: hint ? `${action} User: ${hint}` : action },
@@ -195,7 +291,7 @@ export function buildDeskStillPrompt(
               : 'only this next beat. same crop.'
     return assembleDeskStill([
       { key: 'DO', text: action },
-      { key: 'BODY', text: nudeLook ? deskNudeBody(t, couple) : slip ? deskSlipBody() : '' },
+      { key: 'BODY', text: nudeLook ? deskNudeBody(t, couple) : slip ? deskSlipBody(t) : '' },
       { key: 'KEEP', text: deskKeep(couple, !nudeLook) },
     ])
   }
@@ -222,13 +318,15 @@ export function deskStillNegativePrompt(options: {
   descriptionKo: string
 }): string {
   const t = options.descriptionKo || ''
+  const hugeOk = /거유|초거유|E컵|F컵|G컵|huge\s*bust/i.test(t)
+  const noGiant = hugeOk ? '' : ', huge breasts, balloon bust, porn-giant chest'
   if (options.nudeStill) {
     return options.couple
-      ? 'two women, lesbian, gender swap, feminized man, man with breasts, standing apart, new face, missing man, bra, panty, lingerie, thong, bikini, leftover clothes, fog crotch, hairless crotch, black image, mosaic, child'
-      : 'black panty, thong, g-string, bikini, leftover clothes, bra, fog crotch, hairless crotch, black image, mosaic, new face, slim model, white studio, child'
+      ? `two women, lesbian, gender swap, feminized man, man with breasts, standing apart, new face, missing man, bra, panty, lingerie, thong, bikini, leftover clothes, fog crotch, hairless crotch, black image, mosaic, child${noGiant}`
+      : `black panty, thong, g-string, bikini, leftover clothes, bra, fog crotch, hairless crotch, black image, mosaic, new face, slim model, white studio, child${noGiant}`
   }
   if (/슬립|slip|실크/i.test(t)) {
-    return 'bra, brassiere, bra straps, underwire, separate panty, camisole, tank top, two-piece lingerie, catalog model, new face, white studio, slim beauty, black panty, black bra, lace teddy, bodysuit, black image, fully naked, child'
+    return `bra, brassiere, bra straps, underwire, separate panty, camisole, tank top, two-piece lingerie, catalog model, new face, white studio, slim beauty, black panty, black bra, lace teddy, bodysuit, black image, fully naked, child${noGiant}`
   }
   if (/포옹|안기게|서로 안|안는다|\bhug\b/i.test(t)) {
     return 'standing apart, no contact, side-by-side, missing man, new face, black image, fully naked, child'
@@ -239,6 +337,6 @@ export function deskStillNegativePrompt(options: {
       : 'still standing, standing portrait, new face, black image, fully naked, child'
   }
   return options.couple
-    ? 'missing man, new face, black image, fully naked, child, mosaic'
-    : 'new face, black image, fully naked, child, mosaic, extra person'
+    ? `missing man, new face, black image, fully naked, child, mosaic${noGiant}`
+    : `new face, black image, fully naked, child, mosaic, extra person${noGiant}`
 }

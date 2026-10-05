@@ -5,6 +5,7 @@ import {
   submitFalKontextMultiImage,
   uploadDataUrlToFal,
   HEAD_SWAP_KONTEXT_PROMPT,
+  DESK_FULLBODY_HEAD_SWAP_PROMPT,
   type FaceSwapEngine,
   type FaceSwapGender,
 } from '../lib/fal-client'
@@ -113,6 +114,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       upscale?: boolean
       engine?: string
       targetSide?: string
+      keepFullBody?: boolean
     }
     try {
       body = await request.json()
@@ -275,11 +277,13 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       }
 
       if (engine === 'kontext') {
+        const keepFullBody = body.keepFullBody === true
         const submitted = await submitFalKontextMultiImage({
           falKey: env.FAL_KEY as string,
           imageUrls: [targetImageUrl, face0ImageUrl],
-          prompt: HEAD_SWAP_KONTEXT_PROMPT,
-          guidanceScale: 5,
+          prompt: keepFullBody ? DESK_FULLBODY_HEAD_SWAP_PROMPT : HEAD_SWAP_KONTEXT_PROMPT,
+          guidanceScale: keepFullBody ? 6.5 : 5,
+          aspectRatio: keepFullBody ? '3:4' : undefined,
         })
         if ('imageUrl' in submitted && submitted.imageUrl) {
           return jsonResponse(

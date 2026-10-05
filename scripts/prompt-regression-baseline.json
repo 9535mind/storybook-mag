@@ -49,21 +49,34 @@
   "wantsDeskPoseChange/stand-false": false,
   "wantsDeskSitOrLie/앉힌다-true": true,
   "buildDeskStillPrompt/look-nude-short": {
-    "length": 248,
+    "length": 413,
     "underBudget": true,
     "startsWithDo": true,
     "pantyOff": true,
     "blackPantyFail": true,
     "pubic": true,
-    "hasKeep": true
+    "hasKeep": true,
+    "softC": true
+  },
+  "buildDeskStillPrompt/look-clothes-micro-mini": {
+    "length": 398,
+    "underBudget": true,
+    "microMini": true,
+    "noBlackAline": true,
+    "notNude": true
+  },
+  "buildStillWomanBustHint/default-glamour": {
+    "default": "soft C-cup glamour, not huge.",
+    "small": "modest bust as asked. not huge.",
+    "huge": "fuller bust as asked, still real. not cartoon."
   },
   "buildDeskStillPrompt/place-hug-short": {
-    "length": 137,
+    "length": 151,
     "underBudget": true,
     "startsWithHug": true
   },
   "buildDeskStillPrompt/place-sit-short": {
-    "length": 99,
+    "length": 117,
     "underBudget": true,
     "startsWithSit": true
   },
@@ -129,6 +142,12 @@
   },
   "wantsExplicitPubicShave/false": false,
   "wantsExplicitPubicShave/true": true,
+  "wantsExplicitPubicShave/forbid-민무늬-is-not-shave": true,
+  "buildWanPubicLine/forbid-민무늬-keeps-curls": {
+    "curls": true,
+    "notShaved": true,
+    "notTriangle": true
+  },
   "buildFemaleAdultAnatomyLock/default": {
     "__type": "long-string",
     "length": 618,
@@ -143,9 +162,9 @@
   },
   "buildAdultPubicHairLock/default": {
     "__type": "long-string",
-    "length": 950,
-    "words": 158,
-    "hash": "dde01057298c2c5c"
+    "length": 905,
+    "words": 149,
+    "hash": "8b0e32169c24dbc5"
   },
   "buildAdultPubicHairLock/shaved": "pubic area smooth/shaved ONLY because the user explicitly requested shaving/waxing",
   "buildWanPubicLine/default-visible-curls": {
@@ -155,17 +174,17 @@
   },
   "buildStillWomanNudeNoPantyLock/pubic": {
     "__type": "long-string",
-    "length": 1447,
-    "words": 253,
-    "hash": "017c214e5d46d6ac"
+    "length": 1314,
+    "words": 226,
+    "hash": "49d907b912c7939a"
   },
   "buildStillWomanNudeNoPantyLock/clothed": "",
-  "buildStillNudeAdultPubicLine/default": "MANDATORY neat dark-brown curls on the mons only (한국 30대 치골, slightly fuller than a 20s patch, still tidy). FORBIDDEN tall wide inverted triangle, thigh spread, navel climb, dense black bush, or hairless blank. ZERO panties/thong/bikini. Adult woman 18+ only.",
+  "buildStillNudeAdultPubicLine/default": "MANDATORY neat Korean-30s pubic: sparse dark-brown curls on the mons only (한국 30대, slightly fuller than a 20s). FORBIDDEN painted triangle, CGI bush, hairless blank. ZERO panties/thong/bikini. Adult woman 18+ only.",
   "buildRealisticPubicHairRefinePrompt/default": {
     "__type": "long-string",
-    "length": 1595,
-    "words": 263,
-    "hash": "2e4a0487c8e14ca8"
+    "length": 1505,
+    "words": 245,
+    "hash": "6374947926cb5d69"
   },
   "buildNippleAreolaRefinePrompt/larger": {
     "__type": "long-string",
@@ -244,7 +263,7 @@
     20
   ],
   "amplifyAdultMotionForVideo/kiss-breast-touch-lips": {
-    "addon": "FIRST remove ALL her clothes including pants/jeans/belt/panties — FULL NUDE not topless-only. THEN intimate action on bare skin — FORBIDDEN leaving trousers or a belt on. FIRST remove ALL clothing from her — top AND pants/jeans/belt/panties → FULL NUDE (not topless-only). FORBIDDEN touching over a shirt; FORBIDDEN trousers or belt still on. sustained breast play for most of the clip: hand stays on her bare breast, squeezing and stroking continuously continuously — not a one-second tap. LAST FRAME FREEZE: hand(s) STILL on bare breast through the final frame — source photo is START ONLY, never snap back to the opening still. DEEP KISS (딥키스): mouths locked through the LAST FRAME, lips sucking hard, tongues intertwining — FORBIDDEN pulling faces apart. slight natural teeth OK if lips part; no wide Hollywood grin. LAST FRAME FREEZE: still kissing — source photo is START ONLY, never snap back to the opening still",
+    "addon": "FIRST remove ALL her clothes including pants/jeans/belt/panties — FULL NUDE not topless-only. THEN intimate action on bare skin — FORBIDDEN leaving trousers or a belt on. FIRST remove ALL clothing from her — top AND pants/jeans/belt/panties → FULL NUDE (not topless-only). FORBIDDEN touching over a shirt; FORBIDDEN trousers or belt still on. sustained breast play for most of the clip: hand stays on her bare breast, squeezing and stroking continuously continuously — not a one-second tap. LAST FRAME FREEZE: hand(s) STILL on bare breast through the final frame — source photo is START ONLY, never snap back to the opening still. DEEP KISS (딥키스): lips stay sealed, tongues touch inside, both jaws nearly closed — FORBIDDEN gaping, chewing, devouring, or pulling faces apart. slight natural teeth OK if lips part; no wide Hollywood grin. LAST FRAME FREEZE: still kissing — source photo is START ONLY, never snap back to the opening still",
     "wantsPartner": true,
     "wantsPoseChange": true,
     "wantsMaleGenitalHand": false,
@@ -328,21 +347,21 @@
   },
   "buildNudeIdentityRefinePrompt/body-project": {
     "__type": "long-string",
-    "length": 2483,
-    "words": 392,
-    "hash": "4c741f0a571c0e6c"
+    "length": 2438,
+    "words": 383,
+    "hash": "ba1184ecd9895e58"
   },
   "buildNudeIdentityRefinePrompt/general-nude": {
     "__type": "long-string",
-    "length": 1173,
-    "words": 195,
-    "hash": "d1fc31884e77b8be"
+    "length": 1021,
+    "words": 170,
+    "hash": "21e39b78162afba3"
   },
   "buildNudeBecomesDefinitionLock/with-landmarks-and-height": {
     "__type": "long-string",
-    "length": 3094,
-    "words": 507,
-    "hash": "9042d6cdc32266ae"
+    "length": 3049,
+    "words": 498,
+    "hash": "f3425a2ce5ebfc55"
   },
   "buildAnimationPrompt/body-project-shorts": {
     "__type": "long-string",
@@ -352,9 +371,9 @@
   },
   "buildAnimationPrompt/kiss-breast-touch-lips": {
     "__type": "long-string",
-    "length": 1496,
-    "words": 236,
-    "hash": "4ef5bf9b494b487e"
+    "length": 1468,
+    "words": 230,
+    "hash": "d761d47936bc6e4d"
   },
   "buildAnimationPrompt/couple-clothed-date-has-face-lock": true,
   "buildAnimationPrompt/solo-implied-partner-no-couple-face-lock": false,
@@ -374,7 +393,7 @@
     "underWanBudget": true
   },
   "buildAnimationPrompt/two-women-undress-no-touch": {
-    "length": 1335,
+    "length": 1290,
     "bothWomenUndress": true,
     "noTouch": true,
     "noManLock": true,
@@ -383,7 +402,7 @@
     "underWanBudget": true
   },
   "buildAnimationPrompt/couple-nude-kiss-keeps-man": {
-    "length": 1453,
+    "length": 1307,
     "keepsMan": true,
     "forbidsTwoWomen": true,
     "bothNude": true,
@@ -518,7 +537,7 @@
     "underWanBudget": true
   },
   "buildAnimationPrompt/couple-nude-breast-then-kiss-source-faces": {
-    "length": 1482,
+    "length": 1343,
     "sourceManHand": true,
     "keepsSourceFaces": true,
     "noInventedPartner": true,
@@ -527,10 +546,43 @@
     "underWanBudget": true
   },
   "buildAnimationPrompt/fashion-prompt-must-not-invent-couple": {
-    "length": 1360,
+    "length": 1377,
     "inventsPartner": false,
     "coupleFaceLock": false,
     "forbidsInvent": true,
     "underWanBudget": true
+  },
+  "buildAnimationPrompt/desk-kiss-already-nude-hold": {
+    "noPeelBeat": true,
+    "alreadyNudeTime": true,
+    "pubic": true,
+    "kiss": true,
+    "manClothed": true,
+    "notBothNude": true,
+    "notTwoWomenPeel": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/desk-hug-already-nude-not-ww": {
+    "hug": true,
+    "notKissSteal": true,
+    "notTwoWomenPeel": true,
+    "pubic": true,
+    "underWanBudget": true
+  },
+  "buildAnimationPrompt/desk-hands-already-nude-pubic": {
+    "noPartner": true,
+    "pubic": true,
+    "noPeelBeat": true,
+    "hands": true,
+    "underWanBudget": true
+  },
+  "isExplicitTwoWomenCast/forbid-is-not-ask": {
+    "kissForbid": true,
+    "hugForbid": true,
+    "realAsk": true
+  },
+  "motionExplicitNudeHoldOnly/panty-없음-is-hold": {
+    "hold": true,
+    "peel": true
   }
 }

@@ -389,6 +389,25 @@
     })
   })
 
+  if (typeof StorymagAttach?.bind === 'function') {
+    const takePdf = (files) => {
+      const file = (files || []).find((one) => (typeof StorymagAttach.isPdfFile === 'function' ? StorymagAttach.isPdfFile(one) : /\.pdf$/i.test(one.name || '')))
+      if (!file) {
+        setStatus(pdfStatusEl, '클립보드에 PDF가 없어요. 파일을 끌어다 놓거나 「PDF에서 불러오기」를 누르세요.', true)
+        return
+      }
+      handlePdfUpload(file)
+    }
+    StorymagAttach.register('essay', takePdf)
+    StorymagAttach.bind(essayArea, {
+      onlyPdf: true,
+      onFiles: takePdf,
+      pasteBtn: document.getElementById('essay-pdf-paste'),
+      onEmptyPaste: () =>
+        setStatus(pdfStatusEl, '클립보드에 PDF가 없어요. 파일을 끌어다 놓거나 「PDF에서 불러오기」를 누르세요.', true),
+    })
+  }
+
   async function runCritique() {
     const draft = (draftEl?.value || '').trim()
     if (!draft) {

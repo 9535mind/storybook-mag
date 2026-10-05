@@ -425,6 +425,62 @@ export async function startReplicateImageToImage(options: {
   return { status: 'processing', predictionId: prediction.id }
 }
 
+/** 흰 칸만 고치는 성인 정지 인페인트. Flux-dev는 나체를 수영복으로 막는다(실측). */
+export async function startReplicateInpaint(options: {
+  apiToken: string
+  imageUrl: string
+  maskUrl: string
+  prompt: string
+  negativePrompt?: string
+  strength?: number
+  modelOwner?: string
+  modelName?: string
+}): Promise<{ status: 'succeeded' | 'processing'; predictionId: string; imageUrl?: string }> {
+  if (!options.apiToken?.trim()) throw new Error('missing_replicate_token')
+  const owner = options.modelOwner?.trim() || 'lucataco'
+  const name = options.modelName?.trim() || 'realistic-vision-v5-inpainting'
+  const versionId = await resolveLatestVersion(options.apiToken, owner, name)
+  let image = options.imageUrl
+  let mask = options.maskUrl
+  if (image.startsWith('data:')) {
+    const parsed = parseImageDataUrl(image)
+    image = await uploadBytesToReplicate(options.apiToken, parsed.bytes, parsed.contentType, parsed.filename)
+  }
+  if (mask.startsWith('data:')) {
+    const parsed = parseImageDataUrl(mask)
+    mask = await uploadBytesToReplicate(options.apiToken, parsed.bytes, parsed.contentType, parsed.filename)
+  }
+  const strength =
+    typeof options.strength === 'number' && Number.isFinite(options.strength)
+      ? Math.min(0.95, Math.max(0.35, options.strength))
+      : 0.88
+  const prediction = await createPrediction(
+    options.apiToken,
+    versionId,
+    {
+      image,
+      mask,
+      prompt: options.prompt,
+      negative_prompt: options.negativePrompt || '',
+      strength,
+      num_outputs: 1,
+      guidance_scale: 7,
+      steps: 25,
+    },
+    15_000,
+    { waitSec: null },
+  )
+  if (prediction.status === 'failed') {
+    throw new Error(extractReplicateError(prediction))
+  }
+  if (!prediction.id) throw new Error('replicate_missing_prediction_id')
+  if (prediction.status === 'succeeded') {
+    const doneUrl = extractImageUrl(prediction.output)
+    if (doneUrl) return { status: 'succeeded', predictionId: prediction.id, imageUrl: doneUrl }
+  }
+  return { status: 'processing', predictionId: prediction.id }
+}
+
 export async function checkReplicateImage(options: {
   apiToken: string
   predictionId: string

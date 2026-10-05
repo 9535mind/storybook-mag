@@ -758,52 +758,51 @@
     setStatus(imageStatusEl, '그림을 지웠어요.', false)
   })
 
-  // 키보드 Ctrl+V 없이도, 버튼 클릭만으로 클립보드의 이미지를 직접 읽어온다.
-  imagePasteBtn?.addEventListener('click', async () => {
-    if (!navigator.clipboard || !navigator.clipboard.read) {
-      setStatus(imageStatusEl, '이 브라우저에서는 버튼으로 못 붙여요. 그림을 복사한 뒤 Ctrl+V를 눌러 주세요.', true)
-      return
-    }
-    imagePasteBtn.disabled = true
-    setStatus(imageStatusEl, '클립보드에서 그림을 찾는 중…', false)
-    try {
-      const clipboardItems = await navigator.clipboard.read()
-      let file = null
-      for (const item of clipboardItems) {
-        const type = item.types.find((t) => t.startsWith('image/'))
-        if (type) {
-          const blob = await item.getType(type)
-          file = new File([blob], `clipboard-${Date.now()}.png`, { type })
-          break
-        }
-      }
-      if (!file) {
-        setStatus(imageStatusEl, '클립보드에 그림이 없어요. 이미지를 먼저 복사해 주세요.', true)
+  if (typeof StorymagAttach?.bind === 'function') {
+    StorymagAttach.register('observe', (files) => loadImageFile(files[0], '붙인'))
+    StorymagAttach.bind(areaEl, {
+      onFiles: (files) => loadImageFile(files[0], '붙인'),
+      pasteBtn: imagePasteBtn,
+      onEmptyPaste: () =>
+        setStatus(imageStatusEl, '복사한 그림이 없어요. 그림을 복사한 뒤 Ctrl+V 또는 붙이기를 누르세요.', true),
+    })
+  } else {
+    imagePasteBtn?.addEventListener('click', async () => {
+      if (!navigator.clipboard || !navigator.clipboard.read) {
+        setStatus(imageStatusEl, '이 브라우저에서는 버튼으로 못 붙여요. 그림을 복사한 뒤 Ctrl+V를 눌러 주세요.', true)
         return
       }
-      await loadImageFile(file, '붙여넣은')
-    } catch {
-      setStatus(
-        imageStatusEl,
-        '클립보드를 읽지 못했어요(권한이 필요할 수 있어요). 이 화면에서 Ctrl+V를 대신 눌러 보세요.',
-        true,
-      )
-    } finally {
-      imagePasteBtn.disabled = false
-    }
-  })
-
-  // 클립보드에 복사한 이미지를 이 패널 어디서든 Ctrl+V로 바로 넣을 수 있게.
-  areaEl?.addEventListener('paste', (event) => {
-    const items = event.clipboardData?.items
-    if (!items) return
-    const imageItem = Array.from(items).find((item) => item.type && item.type.startsWith('image/'))
-    if (!imageItem) return
-    const file = imageItem.getAsFile()
-    if (!file) return
-    event.preventDefault()
-    loadImageFile(file, '붙여넣은')
-  })
+      try {
+        const clipboardItems = await navigator.clipboard.read()
+        let file = null
+        for (const item of clipboardItems) {
+          const type = item.types.find((t) => t.startsWith('image/'))
+          if (type) {
+            const blob = await item.getType(type)
+            file = new File([blob], `clipboard-${Date.now()}.png`, { type })
+            break
+          }
+        }
+        if (!file) {
+          setStatus(imageStatusEl, '클립보드에 그림이 없어요. 이미지를 먼저 복사해 주세요.', true)
+          return
+        }
+        await loadImageFile(file, '붙여넣은')
+      } catch {
+        setStatus(imageStatusEl, '클립보드를 읽지 못했어요. 이 화면에서 Ctrl+V를 대신 눌러 보세요.', true)
+      }
+    })
+    areaEl?.addEventListener('paste', (event) => {
+      const items = event.clipboardData?.items
+      if (!items) return
+      const imageItem = Array.from(items).find((item) => item.type && item.type.startsWith('image/'))
+      if (!imageItem) return
+      const file = imageItem.getAsFile()
+      if (!file) return
+      event.preventDefault()
+      loadImageFile(file, '붙여넣은')
+    })
+  }
 
   useStudioBtn?.addEventListener('click', async () => {
     if (!authReady()) return

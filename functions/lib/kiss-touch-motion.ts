@@ -73,7 +73,7 @@ export const TOUCH_ACTION_VERBS_KO =
 /**
  * 키스 강도 구분 (제품 규칙):
  * - peck: 뽀뽀 / 가벼운 입맞춤 — 입술만 살짝 닿음
- * - kiss: 「키스」기본값 — 입술을 세게 맞대고 빠는 격한 키스 (혀 필수 아님)
+ * - kiss: 「키스」기본값 — 입을 거의 다물고 입술끼리만 맞춰 유지 (잡아먹듯 벌리기 아님)
  * - deep: 딥키스/딮키스/혀 — 혀가 보이는 프렌치 키스
  * - null: 키스 관련 단어 없음
  */
@@ -116,13 +116,13 @@ export function kissIntensityActionLine(intensity: KissIntensity, opts?: { backH
   }
   if (intensity === 'deep') {
     return back
-      ? 'DEEP KISS (딥키스) from behind: mouths locked over her shoulder through the LAST FRAME, tongues intertwining — FORBIDDEN pulling apart'
-      : 'DEEP KISS (딥키스): mouths locked through the LAST FRAME, lips sucking hard, tongues intertwining — FORBIDDEN pulling faces apart'
+      ? 'DEEP KISS (딥키스) from behind: lips stay sealed over her shoulder, tongues touch inside, both jaws nearly closed — FORBIDDEN gaping, chewing, devouring, or pulling apart'
+      : 'DEEP KISS (딥키스): lips stay sealed, tongues touch inside, both jaws nearly closed — FORBIDDEN gaping, chewing, devouring, or pulling faces apart'
   }
   // default 「키스」
   return back
-    ? 'PASSIONATE KISS from behind: mouths locked over her shoulder through the LAST FRAME — NOT a peck; FORBIDDEN unclenching or standing apart'
-    : 'PASSIONATE KISS: mouths locked through the LAST FRAME (서로 입술을 세게 빠는 키스) — FORBIDDEN pulling faces apart or the opening still'
+    ? 'KISS from behind: lips sealed lip-to-lip over her shoulder through the LAST FRAME, both jaws nearly closed, small precise lip motion — FORBIDDEN gaping, chewing, devouring, or standing apart'
+    : 'KISS: lips sealed lip-to-lip through the LAST FRAME, both jaws nearly closed, small precise lip motion — FORBIDDEN gaping, chewing, devouring, or pulling faces apart'
 }
 
 /**

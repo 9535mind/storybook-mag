@@ -2,11 +2,15 @@
 
 import {
   assembleClothesParseMask,
+  assembleNudeBodyMask,
+  assembleNudeInpaintMask,
   assembleVtonIdentityMask,
   diagnoseClothesRegions,
   parseInvasionCounts,
   MASK_MIN_WHITE,
 } from './desk-clothes-parse'
+
+export { assembleNudeBodyMask, assembleNudeInpaintMask } from './desk-clothes-parse'
 
 export { assembleVtonIdentityMask } from './desk-clothes-parse'
 
@@ -17,16 +21,33 @@ export type NormBox = { slot?: string; x: number; y: number; w: number; h: numbe
 export type DeskFace = NormBox & { slot: string }
 export type DeskEmbed = { slot: string; dim: number; vec?: number[] }
 
-export function personBoxFromFace(face: DeskFace): NormBox {
+export function coupleSplitX(a: NormBox, b: NormBox): number {
+  return (a.x + a.w / 2 + b.x + b.w / 2) / 2
+}
+
+function clipBoxToSide(box: NormBox, splitX: number, faceCx: number): NormBox {
+  const gap = 0.004
+  if (faceCx >= splitX) {
+    const x = Math.max(box.x, splitX + gap)
+    return { ...box, x, w: Math.max(0.06, box.x + box.w - x) }
+  }
+  return { ...box, w: Math.max(0.06, Math.min(box.x + box.w, splitX - gap) - box.x) }
+}
+
+export function personBoxFromFace(face: DeskFace, splitX?: number): NormBox {
   const x = Math.max(0, face.x - face.w * 0.55)
   const y = Math.max(0, face.y - face.h * 0.75)
-  return {
+  const box: NormBox = {
     slot: face.slot,
     x,
     y,
     w: Math.min(1 - x, face.w * 2.8),
     h: Math.min(1 - y, Math.max(face.h * 6.2, 0.6)),
   }
+  if (typeof splitX === 'number' && Number.isFinite(splitX)) {
+    return clipBoxToSide(box, splitX, face.x + face.w / 2)
+  }
+  return box
 }
 
 export function lookLayoutFromFaces(faces: DeskFace[]): { woman: NormBox; man: NormBox | null } {
@@ -36,7 +57,8 @@ export function lookLayoutFromFaces(faces: DeskFace[]): { woman: NormBox; man: N
     return { woman: { slot: 'woman', x: 0, y: 0, w: 1, h: 1 }, man: null }
   }
   if (!manFace) return { woman: { slot: 'woman', x: 0, y: 0, w: 1, h: 1 }, man: null }
-  return { woman: personBoxFromFace(womanFace), man: personBoxFromFace(manFace) }
+  const splitX = coupleSplitX(womanFace, manFace)
+  return { woman: personBoxFromFace(womanFace, splitX), man: personBoxFromFace(manFace, splitX) }
 }
 
 function inBox(box: NormBox | null | undefined, x: number, y: number): boolean {
@@ -99,6 +121,7 @@ export function runDeskLookPreflight(input: {
   embeds?: DeskEmbed[] | null
   embedOk?: boolean
   vton?: boolean
+  allowTogether?: boolean
   srcRgba?: Uint8Array | null
 }): {
   ok: boolean
@@ -148,7 +171,7 @@ export function runDeskLookPreflight(input: {
   const regions = diagnoseClothesRegions(clothes.whiteUpper, clothes.whiteLower)
   let reason = !link.ok ? link.reason : assembled.reason
   let ok = link.ok && assembled.ok
-  if (ok && !input.vton && regions.together) {
+  if (ok && !input.vton && regions.together && !input.allowTogether) {
     ok = false
     reason = 'clothes_regions'
   }

@@ -1,0 +1,28 @@
+---
+description: Desk 한 장면은 DeskIntent + resolveDeskFrame 한 줄로만 간다
+alwaysApply: true
+---
+
+# Desk 샷 파이프라인 (2026-09-17)
+
+땜질 정규식·체크박스로 인원·나체·키스를 추측하지 않는다. CAST / LOOK / 키스 / 쇼츠는 **같은 의도·같은 장**을 쓴다.
+
+## 한 줄
+
+`DeskIntent { look: nude|silk|clothes, action: none|kiss|hug|breast, couple, step }` + `resolveDeskFrame({ from: 'cast'|'scene', needCouple })`
+
+- LOOK: `from: 'cast'` (여 칸 원본). 얼굴 수 ≥ 2 이면 커플. 여+남이면 한 장으로 붙인 뒤 여자만 녹임.
+- PLACE / CUT / MOVE: `from: 'scene'` (옷 녹인 지금 장). 원본 CAST로 덮어쓰지 않음.
+- 인원 진실: **얼굴 수**. `desk-two-people` 체크박스는 UI 표시만.
+- 클라이언트는 `deskLook` / `deskCouple` / `deskAction`을 서버에 보냄. 서버 `parseDeskIntent`가 이 힌트를 우선.
+- 쇼츠 동작은 `compileDeskMove(couple, picked)` 한 곳. 나체인데 `옷은 그대로`를 붙이지 않음. 커플이면 남자는 남자, 여여 금지.
+- LOOK 나체가 끝나면 `lookApplied: 'nude'`. 그 다음 키스는 옷을 다시 녹이지 않고 나체 유지.
+
+## 하면 안 되는 것
+
+- 체크박스·프롬프트 정규식으로 couple을 다시 정하기
+- 움직이기 시작 프레임을 CAST 증명사진으로 되돌리기
+- 나체 키스에 옷 유지 문장과 나체 문장을 동시에 넣기
+- 쇼츠 엔진·길이·머지 변경 (Wan `wan-2.2-i2v-fast`)
+
+관련: `public/app.js` (`resolveDeskFrame`, `compileDeskMove`), `functions/lib/desk-still-prompt.ts`, `functions/api/tale-scene.ts`

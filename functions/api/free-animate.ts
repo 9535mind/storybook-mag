@@ -21,6 +21,13 @@ import {
   resolveWanI2vDuration,
   startReplicateVideo,
 } from '../lib/replicate-client'
+import {
+  buildFreeCoupleVideoPrompt,
+  FREE_BREAST_KISS_CAM,
+  isFreeBreastKissMotion,
+  isFreeCoupleIntimateMotion,
+} from '../lib/free-couple-lock'
+import { applyFreeSelfBreastLock } from '../lib/free-self-breast'
 import { translateDescriptionForImagePrompt } from '../lib/translate'
 
 interface Env {
@@ -98,6 +105,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     landmarks?: unknown
     /** single | dual-a | dual-b — 줌 연출은 dual만 */
     clipRole?: string
+    /** 시작 프레임 얼굴 수. 2면 커플 두 사람을 유지한다. */
+    sourcePeople?: number
+    /** 시작 프레임이 이미 나체 정지화인가. 다시 벗기면 스톡 몸으로 바뀐다. */
+    sourceNude?: boolean
   }
   try {
     body = await request.json()
@@ -123,7 +134,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const originalPrompt = truncatePromptAtBoundary((body.prompt ?? '').trim(), ANIMATE_PROMPT_MAX_CHARS)
-  const bodyProjectFlag = body.bodyProject === true
   // BEAT 타임라인을 "3등분 약속"(실제 초 단위)에 맞춰 표기하려면 프롬프트 빌드 전에 필요.
   const requestedDurationSec =
     typeof body.durationSec === 'number' && Number.isFinite(body.durationSec) ? body.durationSec : 15
@@ -134,7 +144,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     return jsonResponse({ ok: false, error: 'motion_too_long' }, 400)
   }
 
-  // 「몸매 투영 쇼츠」버튼 — 이미지 수정 없이 I2V에서 체형 유지 탈의 전환
+  const userMotion = motion
+  const coupleHint = body.sourcePeople === 2
+  // 커플 키스에 몸매 투영 I2V 를 켜면 솔로 탈의 비트가 키스를 먹고 스톡 서양 커플이 나온다.
+  // 키스 말만으로 커플 프롬프트를 켜면 사진에 없는 사람을 만든다.
+  const bodyProjectFlag =
+    body.bodyProject === true && !coupleHint && !isFreeCoupleIntimateMotion(userMotion)
   if (bodyProjectFlag) {
     if (!isBodyProjectRequest(motion)) {
       motion = motion
@@ -187,45 +202,68 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     }
   }
 
-  // Wan I2V도 영어 위주 모델이라, 모션 힌트를 한글 그대로 넣으면 잘 안 따라간다 — 번역해서 넣는다.
-  const [{ text: promptForVideo }, { text: motionForVideo }] = await Promise.all([
-    translateDescriptionForImagePrompt(originalPrompt, env),
-    translateDescriptionForImagePrompt(motion, env),
-  ])
   const clipRoleRaw = (body.clipRole ?? '').trim().toLowerCase()
   const clipRole =
     clipRoleRaw === 'dual-a' || clipRoleRaw === 'dual-b' ? clipRoleRaw : ('single' as const)
   const landmarks = bodyProjectFlag ? normalizeBodyLandmarks(body.landmarks) : null
-  // 몸매 투영: 긴 화보 설명(블라우스·벨트·바지)이 I2V에 다시 옷을 먹이는 걸 막기 위해
-  // 원문 프롬프트는 넣지 않고, 짧은 become 비트 + 타점만 사용.
-  // 타점 %를 motion 문자열에도 넣어 프롬프트 경로가 달라도 좌표가 빠지지 않게 한다.
-  const landmarkMotion = landmarks
-    ? [
-        '몸매 투영 full nude reveal.',
-        `LEFT mound x=${((landmarks.moundL ?? landmarks.nippleL).x * 100).toFixed(1)}% y=${((landmarks.moundL ?? landmarks.nippleL).y * 100).toFixed(1)}%.`,
-        `LEFT nipple x=${(landmarks.nippleL.x * 100).toFixed(1)}% y=${(landmarks.nippleL.y * 100).toFixed(1)}% (may be off-center).`,
-        `RIGHT mound x=${((landmarks.moundR ?? landmarks.nippleR).x * 100).toFixed(1)}% y=${((landmarks.moundR ?? landmarks.nippleR).y * 100).toFixed(1)}%.`,
-        `RIGHT nipple x=${(landmarks.nippleR.x * 100).toFixed(1)}% y=${(landmarks.nippleR.y * 100).toFixed(1)}% (may be off-center).`,
-        'Remove bra, brown waist belt, pants, and all panties (including double layers).',
-      ].join(' ')
-    : '몸매 투영 full nude reveal. Remove bra, brown waist belt, pants, and all panties.'
-  const prompt = bodyProjectFlag
-    ? buildAnimationPrompt({
-        prompt: '',
-        motion: landmarkMotion,
-        clipRole,
-        landmarks,
-        bodyProject: true,
-        durationSec: approxDurationSec,
-      })
-    : buildAnimationPrompt({
-        prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
-        motion: [motionForVideo, motion].filter(Boolean).join('\n'),
-        rawMotion,
-        clipRole,
-        landmarks,
-        durationSec: approxDurationSec,
-      })
+
+  let prompt: string
+  let motionForVideo = ''
+  if (coupleHint) {
+    // 장문 키스 프롬프트는 사진을 버리고 스톡 서양 커플을 그린다. 짧은 원본-얼굴 잠금만 보낸다.
+    prompt = buildFreeCoupleVideoPrompt(userMotion, {
+      alreadyNude: body.sourceNude === true,
+    })
+  } else {
+    const [{ text: promptForVideo }, { text: motionTx }] = await Promise.all([
+      translateDescriptionForImagePrompt(originalPrompt, env),
+      translateDescriptionForImagePrompt(motion, env),
+    ])
+    motionForVideo = motionTx
+    const landmarkMotion = landmarks
+      ? [
+          '몸매 투영 full nude reveal.',
+          `LEFT mound x=${((landmarks.moundL ?? landmarks.nippleL).x * 100).toFixed(1)}% y=${((landmarks.moundL ?? landmarks.nippleL).y * 100).toFixed(1)}%.`,
+          `LEFT nipple x=${(landmarks.nippleL.x * 100).toFixed(1)}% y=${(landmarks.nippleL.y * 100).toFixed(1)}% (may be off-center).`,
+          `RIGHT mound x=${((landmarks.moundR ?? landmarks.nippleR).x * 100).toFixed(1)}% y=${((landmarks.moundR ?? landmarks.nippleR).y * 100).toFixed(1)}%.`,
+          `RIGHT nipple x=${(landmarks.nippleR.x * 100).toFixed(1)}% y=${(landmarks.nippleR.y * 100).toFixed(1)}% (may be off-center).`,
+          'Remove bra, brown waist belt, pants, and all panties (including double layers).',
+        ].join(' ')
+      : '몸매 투영 full nude reveal. Remove bra, brown waist belt, pants, and all panties.'
+    const promptRaw = bodyProjectFlag
+      ? buildAnimationPrompt({
+          prompt: '',
+          motion: landmarkMotion,
+          clipRole,
+          landmarks,
+          bodyProject: true,
+          durationSec: approxDurationSec,
+        })
+      : buildAnimationPrompt({
+          prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
+          motion: [motionForVideo, motion].filter(Boolean).join('\n'),
+          rawMotion,
+          clipRole,
+          landmarks,
+          durationSec: approxDurationSec,
+        })
+    const motionHay = [rawMotion, motion, motionForVideo].filter(Boolean).join('\n')
+    const promptLocked = applyFreeSelfBreastLock(promptRaw, motionHay)
+    const CAST_FACE =
+      'CAST LOCK: I2V of THIS photo only. Same person from the input, same face, same hair, same age, same clothes, same place. FORBIDDEN a new face, fashion model, Caucasian, a different person. '
+    const FREE_CAM = isFreeBreastKissMotion(userMotion)
+      ? FREE_BREAST_KISS_CAM
+      : 'WIDE SHOT LOCK: exact source framing every frame. Head and shoulders stay visible. Never zoom. Never a waist-down only crop. Never a chest-only crop. '
+    const HEAD = bodyProjectFlag ? FREE_CAM : `${CAST_FACE}${FREE_CAM}`
+    prompt = (() => {
+      const next = `${HEAD}${promptLocked}`
+      if (next.length <= 1500) return next
+      const budget = 1500 - HEAD.length
+      const bodyPrompt = promptLocked.slice(0, Math.max(0, budget))
+      const cut = bodyPrompt.lastIndexOf('.')
+      return `${HEAD}${(cut > 400 ? bodyPrompt.slice(0, cut + 1) : bodyPrompt).trim()}`
+    })()
+  }
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
   const requested = requestedDurationSec

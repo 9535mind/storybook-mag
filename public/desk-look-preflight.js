@@ -20,9 +20,12 @@ var DeskLookLib = (() => {
   // functions/lib/desk-look-preflight.ts
   var desk_look_preflight_exports = {};
   __export(desk_look_preflight_exports, {
+    assembleNudeBodyMask: () => assembleNudeBodyMask,
+    assembleNudeInpaintMask: () => assembleNudeInpaintMask,
     assembleVtonIdentityMask: () => assembleVtonIdentityMask,
     buildLookPayload: () => buildLookPayload,
     checkCastEmbeds: () => checkCastEmbeds,
+    coupleSplitX: () => coupleSplitX,
     diagnoseClothesRegions: () => diagnoseClothesRegions,
     gateLookVisual: () => gateLookVisual,
     linkCastFaces: () => linkCastFaces,
@@ -140,6 +143,13 @@ var DeskLookLib = (() => {
       reason: "parse_size"
     };
     if (labels.length !== n) return empty;
+    const splitX = woman && man ? (woman.x + woman.w / 2 + man.x + man.w / 2) / 2 : null;
+    const manCx = man ? man.x + man.w / 2 : 0;
+    const onManSide = (nx) => {
+      if (man && pointIn(man, nx, 0.5)) return true;
+      if (splitX == null || !man) return false;
+      return manCx < splitX ? nx < splitX : nx > splitX;
+    };
     const mask = new Uint8Array(n);
     const upper = new Uint8Array(n);
     const lower = new Uint8Array(n);
@@ -151,6 +161,7 @@ var DeskLookLib = (() => {
         const p = y * width + x;
         const nx = (x + 0.5) / width;
         const ny = (y + 0.5) / height;
+        if (onManSide(nx)) continue;
         if (man && pointIn(man, nx, ny)) continue;
         if (woman && !pointIn(woman, nx, ny)) continue;
         const lab = labels[p] || "";
@@ -523,6 +534,109 @@ var DeskLookLib = (() => {
       ok: assembled.ok,
       reason: assembled.reason
     };
+  }
+  function assembleNudeBodyMask(options) {
+    const { width, height, woman, man, faces } = options;
+    const n = width * height;
+    const mask = new Uint8Array(n);
+    const face = (faces || []).find((f) => f.slot === "woman") || (faces || []).slice().sort((a, b) => b.w * b.h - a.w * a.h)[0];
+    if (!face || face.w < 0.03 || face.h < 0.03) {
+      return { mask, white: 0, ok: false, reason: "mask_too_small" };
+    }
+    const chin = Math.min(0.92, face.y + face.h * 0.82);
+    let bx;
+    let bw;
+    if (face.w >= 0.22) {
+      bx = 0.05;
+      bw = 0.9;
+    } else {
+      const cx = face.x + face.w / 2;
+      const half = Math.min(0.42, Math.max(0.3, face.w * 1.55));
+      bx = Math.max(0, cx - half);
+      bw = Math.min(1 - bx, half * 2);
+    }
+    const faceX0 = face.x - face.w * 0.22;
+    const faceY0 = face.y - face.h * 0.55;
+    const faceX1 = face.x + face.w * 1.22;
+    const faceY1 = face.y + face.h * 0.88;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const nx = (x + 0.5) / width;
+        const ny = (y + 0.5) / height;
+        if (ny < chin) continue;
+        if (nx < bx || nx > bx + bw) continue;
+        if (man && pointIn(man, nx, ny)) continue;
+        if (woman && woman.w < 0.95 && !pointIn(woman, nx, ny)) continue;
+        if (nx >= faceX0 && nx <= faceX1 && ny >= faceY0 && ny <= faceY1) continue;
+        mask[y * width + x] = 255;
+      }
+    }
+    let white = 0;
+    for (let i = 0; i < n; i += 1) if (mask[i] >= 128) white += 1;
+    return { mask, white, ok: white >= MASK_MIN_WHITE, reason: white >= MASK_MIN_WHITE ? "" : "mask_too_small" };
+  }
+  var NUDE_INPAINT_PROTECT = /* @__PURE__ */ new Set(["Background", "Hat", "Hair", "Sunglasses", "Face", "Bag"]);
+  function assembleNudeInpaintMask(options) {
+    const clothes = assembleClothesParseMask(options);
+    const { width, height, labels, woman, man, faces } = options;
+    const n = width * height;
+    const seed = new Uint8Array(clothes.mask);
+    for (let x = 0; x < width; x += 1) {
+      let y0 = -1;
+      let y1 = -1;
+      for (let y = 0; y < height; y += 1) {
+        if (seed[y * width + x] < 128) continue;
+        if (y0 < 0) y0 = y;
+        y1 = y;
+      }
+      if (y0 < 0 || y1 - y0 < 4) continue;
+      for (let y = y0; y <= y1; y += 1) {
+        const p = y * width + x;
+        const nx = (x + 0.5) / width;
+        const ny = (y + 0.5) / height;
+        if (man && pointIn(man, nx, ny)) continue;
+        if (woman && !pointIn(woman, nx, ny)) continue;
+        if (NUDE_INPAINT_PROTECT.has(labels[p] || "")) continue;
+        seed[p] = 255;
+      }
+    }
+    const rad = Math.max(6, Math.round(Math.min(width, height) * 0.028));
+    const grown = new Uint8Array(seed);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        if (seed[y * width + x] < 128) continue;
+        for (let dy = -rad; dy <= rad; dy += 1) {
+          for (let dx = -rad; dx <= rad; dx += 1) {
+            if (dx * dx + dy * dy > rad * rad) continue;
+            const xx = x + dx;
+            const yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue;
+            const p = yy * width + xx;
+            const nx = (xx + 0.5) / width;
+            const ny = (yy + 0.5) / height;
+            if (man && pointIn(man, nx, ny)) continue;
+            if (woman && !pointIn(woman, nx, ny)) continue;
+            if (NUDE_INPAINT_PROTECT.has(labels[p] || "")) continue;
+            grown[p] = 255;
+          }
+        }
+      }
+    }
+    for (const face of faces || []) {
+      const padX = (face.w || 0) * 0.35;
+      const padTop = (face.h || 0) * 0.55;
+      const padBot = (face.h || 0) * 0.28;
+      const x0 = Math.max(0, Math.floor((face.x - padX) * width));
+      const y0 = Math.max(0, Math.floor((face.y - padTop) * height));
+      const x1 = Math.min(width, Math.ceil((face.x + face.w + padX) * width));
+      const y1 = Math.min(height, Math.ceil((face.y + face.h + padBot) * height));
+      for (let y = y0; y < y1; y += 1) {
+        for (let x = x0; x < x1; x += 1) grown[y * width + x] = 0;
+      }
+    }
+    let white = 0;
+    for (let i = 0; i < n; i += 1) if (grown[i] >= 128) white += 1;
+    return { mask: grown, white, ok: white >= MASK_MIN_WHITE, reason: white >= MASK_MIN_WHITE ? "" : "mask_too_small" };
   }
   function parseInvasionCounts(labels, mask) {
     let background = 0;
@@ -1026,6 +1140,7 @@ var DeskLookLib = (() => {
     const failReasons = [];
     for (const r of [upper, lower]) {
       for (const reason of r.failReasons) {
+        if (input.looseNude && reason === "mask_seam") continue;
         if (!failReasons.includes(reason)) failReasons.push(reason);
       }
     }
@@ -1052,16 +1167,31 @@ var DeskLookLib = (() => {
   }
 
   // functions/lib/desk-look-preflight.ts
-  function personBoxFromFace(face) {
+  function coupleSplitX(a, b) {
+    return (a.x + a.w / 2 + b.x + b.w / 2) / 2;
+  }
+  function clipBoxToSide(box, splitX, faceCx) {
+    const gap = 4e-3;
+    if (faceCx >= splitX) {
+      const x = Math.max(box.x, splitX + gap);
+      return { ...box, x, w: Math.max(0.06, box.x + box.w - x) };
+    }
+    return { ...box, w: Math.max(0.06, Math.min(box.x + box.w, splitX - gap) - box.x) };
+  }
+  function personBoxFromFace(face, splitX) {
     const x = Math.max(0, face.x - face.w * 0.55);
     const y = Math.max(0, face.y - face.h * 0.75);
-    return {
+    const box = {
       slot: face.slot,
       x,
       y,
       w: Math.min(1 - x, face.w * 2.8),
       h: Math.min(1 - y, Math.max(face.h * 6.2, 0.6))
     };
+    if (typeof splitX === "number" && Number.isFinite(splitX)) {
+      return clipBoxToSide(box, splitX, face.x + face.w / 2);
+    }
+    return box;
   }
   function lookLayoutFromFaces(faces) {
     const womanFace = faces.find((f) => f.slot === "woman");
@@ -1070,7 +1200,8 @@ var DeskLookLib = (() => {
       return { woman: { slot: "woman", x: 0, y: 0, w: 1, h: 1 }, man: null };
     }
     if (!manFace) return { woman: { slot: "woman", x: 0, y: 0, w: 1, h: 1 }, man: null };
-    return { woman: personBoxFromFace(womanFace), man: personBoxFromFace(manFace) };
+    const splitX = coupleSplitX(womanFace, manFace);
+    return { woman: personBoxFromFace(womanFace, splitX), man: personBoxFromFace(manFace, splitX) };
   }
   function inBox(box, x, y) {
     if (!box) return false;
@@ -1136,7 +1267,7 @@ var DeskLookLib = (() => {
     const regions = diagnoseClothesRegions(clothes.whiteUpper, clothes.whiteLower);
     let reason = !link.ok ? link.reason : assembled.reason;
     let ok = link.ok && assembled.ok;
-    if (ok && !input.vton && regions.together) {
+    if (ok && !input.vton && regions.together && !input.allowTogether) {
       ok = false;
       reason = "clothes_regions";
     }

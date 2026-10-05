@@ -61,6 +61,7 @@ import {
   buildWanPubicLine,
   buildStillNudeAdultPubicLine,
   buildStillNudeAdultBustLine,
+  buildStillWomanBustHint,
   buildWanFemaleSexLock,
   buildNudeAnatomyVisibilityLock,
   buildNudeBodyShapeContinuityLock,
@@ -182,6 +183,7 @@ export {
   buildWanPubicLine,
   buildStillNudeAdultPubicLine,
   buildStillNudeAdultBustLine,
+  buildStillWomanBustHint,
   wantsStillWomanNudeOrPubic,
   buildStillWomanNudeNoPantyLock,
   buildWanFemaleSexLock,
@@ -1779,7 +1781,8 @@ export function buildAnimationPrompt(input: {
   const sourceIsNude =
     !forceBecomeNude &&
     (holdOnly ||
-      /현재\s*나체|옷\s*없음/.test(continuityText) ||
+      /현재\s*나체|옷\s*없음|이미\s*(?:완전\s*)?나체|나체\s*유지/i.test(continuityText) ||
+      /현재\s*나체|옷\s*없음|이미\s*(?:완전\s*)?나체|나체\s*유지/i.test(motion) ||
       (/fully\s*nude|already\s*(fully\s*)?nude|bare\s*breasts?\s*,\s*visible\s*nipples?/i.test(
         continuityText,
       ) &&
@@ -1960,11 +1963,11 @@ export function buildAnimationPrompt(input: {
     return assembleWanSections([
       wanSection(
         'MOTION',
-        'BOTH source adults stay in frame. Passionate mouth-to-mouth kiss. Mouths stay locked through the last frame. Keep source clothes. FORBIDDEN pulling faces apart, releasing the bodies, or the opening still. FORBIDDEN nude or undress. FORBIDDEN the man disappearing. FORBIDDEN a solo woman.',
+        'BOTH source adults stay in frame. Mouth-to-mouth kiss: lips sealed lip-to-lip, both jaws nearly closed, small precise lip motion. FORBIDDEN a wide-open jaw, gaping, chewing, or devouring the other mouth. Keep source clothes. FORBIDDEN pulling faces apart, releasing the bodies, or the opening still. FORBIDDEN nude or undress. FORBIDDEN the man disappearing. FORBIDDEN a solo woman.',
       ),
       wanSection(
         'TIME',
-        `BEAT1 0–${mid}s: they start kissing — both visible, clothes on. BEAT2 ${mid}–${hold}s: keep kissing, mouths locked, bodies pressed. HOLD ${hold}–${total}s: FREEZE both still kissing, mouths locked, clothes on. FORBIDDEN unclenching.`,
+        `BEAT1 0–${mid}s: they start a lip-to-lip kiss — both visible, clothes on, jaws nearly closed. BEAT2 ${mid}–${hold}s: keep lips sealed, small precise motion, bodies pressed. HOLD ${hold}–${total}s: FREEZE still kissing lip-to-lip, clothes on. FORBIDDEN gaping or unclenching.`,
       ),
       wanSection(
         'CAST',
@@ -1974,7 +1977,7 @@ export function buildAnimationPrompt(input: {
       wanSection('CAM', 'CAMERA: source crop. Both faces in frame. NO zoom.'),
       wanSection(
         'END',
-        `Last frames: mouths still locked, bodies still pressed, still kissing, clothes on, man still in frame. FORBIDDEN pulling apart. FORBIDDEN the opening still. FORBIDDEN solo woman. FORBIDDEN nude.`,
+        `Last frames: lips still sealed lip-to-lip, jaws nearly closed, bodies still pressed, clothes on, man still in frame. FORBIDDEN gaping or pulling apart. FORBIDDEN the opening still. FORBIDDEN solo woman. FORBIDDEN nude.`,
       ),
     ])
   }
@@ -2053,7 +2056,7 @@ export function buildAnimationPrompt(input: {
         `BEAT1 0–${mid}s: she pulls HIS pants zipper down. BEAT2 ${mid}–${hold}s: her hand on HIS open fly. HOLD ${hold}–${total}s: freeze. She still nude, no zipper on her.`,
       ),
       wanSection('CAST', `${buildCoupleFaceLock()} He stays male, dressed. She stays the source woman.`),
-      wanSection('BODY', 'Her skin has NO zipper. His pants stay on, fly open.'),
+      wanSection('BODY', `Her skin has NO zipper. His pants stay on, fly open. SHE: ${buildWanPubicLine(`${detectionMotion} ${fullOriginal}`)}`),
       wanSection('CAM', 'CAMERA: source crop. BOTH heads in every frame. FORBIDDEN belly close-up, FORBIDDEN cropping heads. NO zoom.'),
       wanSection(
         'END',
@@ -2118,7 +2121,11 @@ export function buildAnimationPrompt(input: {
     const mutualBreastHandjob = wantsBreast && wantsMaleHand
     const twoWomenAsk =
       input.sourceCast === 'ww' || isExplicitTwoWomenCast(`${detectionMotion} ${fullOriginal}`)
-    const pairTouch = wantsKiss || wantsBreast || wantsCrotch || wantsMaleHand
+    const pairTouch = wantsKiss || wantsBreast || wantsCrotch || wantsMaleHand || /안는다|포옹|껴안|\bhug\b|embrace/i.test(detectionMotion)
+    const bothNudeAsk =
+      /둘\s*다\s*(?:전신\s*)?나체|남자도\s*(?:옷을\s*)?(?:벗|나체)|both\s*(?:fully\s*)?nude|he\s+(?:also\s+)?(?:fully\s+)?nude/i.test(
+        `${detectionMotion} ${fullOriginal}`,
+      )
     const sourcePairIntimate =
       twoPeopleInSource && !twoWomenAsk && (pairTouch || undressAction || staysNude)
     const pairUndressOnly = twoPeopleInSource && undressAction && !pairTouch && twoWomenAsk
@@ -2359,7 +2366,9 @@ export function buildAnimationPrompt(input: {
                       ? `BEAT 2 (${beat2TimeLabel}): ${kissIntensityActionLine(kissIntensity)} while his hand continuously ${touchVerbPhrase} her bare breast. Kiss AND breast touch both stay visible — not a one-tap.`
                       : wantsKiss
                         ? sourcePairIntimate
-                          ? `BEAT 2 (${beat2TimeLabel}): ${kissIntensityActionLine(kissIntensity)} — already fully nude. FORBIDDEN kissing clothed.`
+                          ? bothNudeAsk
+                            ? `BEAT 2 (${beat2TimeLabel}): ${kissIntensityActionLine(kissIntensity)} — already fully nude. FORBIDDEN kissing clothed.`
+                            : `BEAT 2 (${beat2TimeLabel}): ${kissIntensityActionLine(kissIntensity)} — SHE already fully nude, HE keeps clothes. FORBIDDEN black panty.`
                           : `BEAT 2 (${beat2TimeLabel}): ${kissIntensityActionLine(kissIntensity)}.`
                         : wantsBreast
                           ? soloSelfBreast
@@ -2376,9 +2385,13 @@ export function buildAnimationPrompt(input: {
     const lastFrame = sequentialMutualHand || simultaneousMutualHand || wantsMaleHand
       ? `HIS zipper still down, her hand on the open fly, pants on. ${MAN_ZIPPER_HAND_LINE}`
       : sourcePairIntimate && undressAction && !wantsKiss
-        ? `she fully nude BARE crotch (FAILED black panty), he still in his source clothes, ${COUPLE_MAN_SHIRT_ONLY} MAN still in frame — NOT a solo woman`
+        ? 'SHE nude Korean-30s pubic ZERO panties, HE clothed — NOT black panty'
       : sourcePairIntimate && wantsKiss
-        ? 'still mouth-to-mouth kiss, both FULLY nude (no shirt, no briefs), MAN still male — NOT side-by-side clothed standing'
+        ? bothNudeAsk
+          ? 'still kissing, both nude, SHE Korean-30s pubic ZERO panties, MAN male — NOT black panty'
+          : 'still kissing, SHE nude Korean-30s pubic ZERO panties, HE clothed, MAN male — NOT black panty'
+      : sourcePairIntimate
+        ? 'SHE nude Korean-30s pubic ZERO panties, HE clothed, MAN male — NOT black panty'
       : sequentialBreastThenKiss
         ? kissIntensity === 'peck'
           ? 'still fully nude, lips just after a soft peck'
@@ -2410,7 +2423,7 @@ export function buildAnimationPrompt(input: {
         ? beat1AlreadyNudeAction
         : undressAction
           ? sourcePairIntimate
-            ? `BEAT1 (${beat1TimeLabel}): SHE peels to nude, panty OFF last. ${COUPLE_MAN_SHIRT_ONLY}`
+            ? `BEAT1 (${beat1TimeLabel}): SHE peels to nude, panty OFF last. HE clothed.`
             : peelThenKnead
               ? `BEAT1 (${beat1TimeLabel}): remove ALL clothes → full nude. Panty OFF. Bare crotch FIRST. Hands stay OFF the chest until beat 2. FACE in source crop.`
             : peelLayers
@@ -2448,10 +2461,14 @@ export function buildAnimationPrompt(input: {
               ? `BODY LOCK: same bust/waist/hips as source. ${selfKneadLock} Camera may push in as asked. Do not invent a partner. ZERO panties. Last frame still kneading.`
               : `${sourceScaleLock} BODY LOCK: same bust/waist/hips as source. ${selfKneadLock} Do not invent a partner. ZERO panties. FORBIDDEN snapback to the opening still.`
           : sourcePairIntimate && undressAction && !wantsKiss
-          ? `Keep BOTH source adults. She undresses to bare crotch. ${PANTY_MELT_FAIL} ${COUPLE_MAN_SHIRT_ONLY} Man stays visible and male. FORBIDDEN deleting the man or a solo woman.`
+          ? `Keep BOTH source adults. SHE undresses to bare crotch, Korean-30s pubic, ZERO panties. ${COUPLE_MAN_SHIRT_ONLY} NOT a solo woman.`
           : sourcePairIntimate && wantsKiss
-          ? 'Keep BOTH source faces. Source MAN+WOMAN kiss mouth-to-mouth, both fully nude (no shirt/briefs/jeans). He stays male. NOT two women. Last frames stay kissing nude — FORBIDDEN clothes back on or pulling apart.'
-          : wantsHeteroManWomanCast(detectionMotion)
+          ? bothNudeAsk
+            ? 'Keep BOTH source faces. MAN+WOMAN kiss, both fully nude (no shirt/briefs/jeans). She: Korean-30s pubic, ZERO panties. He stays male. NOT two women. FORBIDDEN black panty.'
+            : 'Keep BOTH source faces. MAN kisses WOMAN. SHE nude, Korean-30s pubic, ZERO panties. HE keeps source clothes. NOT two women. FORBIDDEN black panty, undressing him.'
+          : sourcePairIntimate
+          ? [motion || 'Keep both source adults.', 'SHE nude. HE clothed. NOT two women.'].join(' ')
+          : wantsHeteroManWomanCast(detectionMotion) && (wantsKiss || wantsBreast)
           ? [
               'Keep BOTH source faces. The source MAN kisses the source WOMAN; his hand on her bare breast. NOT two women kissing. NOT a new person.',
               'Woman is FULL NUDE (no pants/belt).',
@@ -2483,7 +2500,9 @@ export function buildAnimationPrompt(input: {
       wanSection(
         'BODY',
         sourcePairIntimate && wantsKiss
-          ? 'Same body proportions as source. Bare crotch, ZERO panties.'
+          ? bothNudeAsk
+            ? `Both nude. SHE: ${buildWanPubicLine(`${detectionMotion} ${fullOriginal}`)} HE: bare, stays male. FORBIDDEN black panty.`
+            : `Same body. SHE: ${buildWanPubicLine(`${detectionMotion} ${fullOriginal}`)} HE keeps source clothes. FORBIDDEN black panty.`
           : [
               wantsMaleHand ? buildWanFemaleSexLock() : '',
               peelLayers

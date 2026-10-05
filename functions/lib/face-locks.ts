@@ -42,7 +42,9 @@ export function buildCoupleFaceLock(): string {
 /** 「여여 키스 금지」처럼 여여를 막는 문구는 여여 요청으로 보지 않음(실측 2026-09-01). */
 function stripTwoWomenForbidPhrases(text: string): string {
   return (text || '')
-    .replace(/여여\s*키스\s*금지/g, '')
+    .replace(/여여\s*(?:키스\s*)?금지/g, '')
+    .replace(/두\s*번째\s*여자\s*금지/g, '')
+    .replace(/남자를\s*여자로\s*바꾸기\s*금지/g, '')
     .replace(/\bNOT two women\b/gi, '')
     .replace(/FORBIDDEN(?:[:\s]+)?(?:two women|turning him into a second woman)/gi, '')
 }
@@ -60,8 +62,8 @@ export function isExplicitTwoWomenCast(text: string): boolean {
  */
 export function buildSourcePairCastLock(): string {
   return [
-    'CAST: copy BOTH source faces every frame (same age, hair, wrinkles, skin). MAN stays male (flat chest). WOMAN stays female. Same two people.',
-    'FORBIDDEN new person, de-age, beautify. FORBIDDEN two women / gender-swap him.',
+    'CAST: copy BOTH source faces every frame (same age, haircut, wrinkles, skin). MAN stays male (short hair, flat chest). WOMAN stays that woman.',
+    'FORBIDDEN new model, two women / gender-swap him.',
   ].join(' ')
 }
 

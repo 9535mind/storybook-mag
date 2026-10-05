@@ -191,6 +191,14 @@ export function assembleClothesRegionMasks(options: {
     reason: 'parse_size',
   }
   if (labels.length !== n) return empty
+  const splitX =
+    woman && man ? (woman.x + woman.w / 2 + man.x + man.w / 2) / 2 : null
+  const manCx = man ? man.x + man.w / 2 : 0
+  const onManSide = (nx: number) => {
+    if (man && pointIn(man, nx, 0.5)) return true
+    if (splitX == null || !man) return false
+    return manCx < splitX ? nx < splitX : nx > splitX
+  }
   const mask = new Uint8Array(n)
   const upper = new Uint8Array(n)
   const lower = new Uint8Array(n)
@@ -202,6 +210,7 @@ export function assembleClothesRegionMasks(options: {
       const p = y * width + x
       const nx = (x + 0.5) / width
       const ny = (y + 0.5) / height
+      if (onManSide(nx)) continue
       if (man && pointIn(man, nx, ny)) continue
       if (woman && !pointIn(woman, nx, ny)) continue
       const lab = labels[p] || ''
@@ -675,6 +684,136 @@ export function assembleClothesParseMask(options: {
     ok: assembled.ok,
     reason: assembled.reason,
   }
+}
+
+/**
+ * 나체: 의상 파싱을 믿지 않는다. 흰 니트는 Background로 빠져 옷 마스크가 비고,
+ * 합성 때 원본 옷이 다시 붙는다(실측 MAD≈2). 얼굴 아래 몸 칸만 연다.
+ */
+export function assembleNudeBodyMask(options: {
+  width: number
+  height: number
+  woman?: { x: number; y: number; w: number; h: number } | null
+  man?: { x: number; y: number; w: number; h: number } | null
+  faces?: Array<{ slot?: string; x: number; y: number; w: number; h: number }>
+}): { mask: Uint8Array; white: number; ok: boolean; reason: string } {
+  const { width, height, woman, man, faces } = options
+  const n = width * height
+  const mask = new Uint8Array(n)
+  const face =
+    (faces || []).find((f) => f.slot === 'woman') ||
+    (faces || []).slice().sort((a, b) => b.w * b.h - a.w * a.h)[0]
+  if (!face || face.w < 0.03 || face.h < 0.03) {
+    return { mask, white: 0, ok: false, reason: 'mask_too_small' }
+  }
+  const chin = Math.min(0.92, face.y + face.h * 0.82)
+  let bx: number
+  let bw: number
+  if (face.w >= 0.22) {
+    bx = 0.05
+    bw = 0.9
+  } else {
+    const cx = face.x + face.w / 2
+    const half = Math.min(0.42, Math.max(0.3, face.w * 1.55))
+    bx = Math.max(0, cx - half)
+    bw = Math.min(1 - bx, half * 2)
+  }
+  const faceX0 = face.x - face.w * 0.22
+  const faceY0 = face.y - face.h * 0.55
+  const faceX1 = face.x + face.w * 1.22
+  const faceY1 = face.y + face.h * 0.88
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const nx = (x + 0.5) / width
+      const ny = (y + 0.5) / height
+      if (ny < chin) continue
+      if (nx < bx || nx > bx + bw) continue
+      if (man && pointIn(man, nx, ny)) continue
+      if (woman && woman.w < 0.95 && !pointIn(woman, nx, ny)) continue
+      if (nx >= faceX0 && nx <= faceX1 && ny >= faceY0 && ny <= faceY1) continue
+      mask[y * width + x] = 255
+    }
+  }
+  let white = 0
+  for (let i = 0; i < n; i += 1) if (mask[i]! >= 128) white += 1
+  return { mask, white, ok: white >= MASK_MIN_WHITE, reason: white >= MASK_MIN_WHITE ? '' : 'mask_too_small' }
+}
+
+const NUDE_INPAINT_PROTECT = new Set(['Background', 'Hat', 'Hair', 'Sunglasses', 'Face', 'Bag'])
+
+/**
+ * 나체 인페인트용. 옷 실루엣만 열면 엔진이 같은 옷을 다시 그린다(실측 MAD≈2).
+ * 여자 칸 안에서 옷을 잇고 넓히되 얼굴·남자·배경은 검게 둔다.
+ * 합성·clothes_goal 은 여전히 옷만 흰 마스크를 쓴다.
+ */
+export function assembleNudeInpaintMask(options: {
+  labels: string[]
+  width: number
+  height: number
+  woman?: { x: number; y: number; w: number; h: number } | null
+  man?: { x: number; y: number; w: number; h: number } | null
+  faces?: Array<{ x: number; y: number; w: number; h: number }>
+}): { mask: Uint8Array; white: number; ok: boolean; reason: string } {
+  const clothes = assembleClothesParseMask(options)
+  const { width, height, labels, woman, man, faces } = options
+  const n = width * height
+  const seed = new Uint8Array(clothes.mask)
+  for (let x = 0; x < width; x += 1) {
+    let y0 = -1
+    let y1 = -1
+    for (let y = 0; y < height; y += 1) {
+      if (seed[y * width + x]! < 128) continue
+      if (y0 < 0) y0 = y
+      y1 = y
+    }
+    if (y0 < 0 || y1 - y0 < 4) continue
+    for (let y = y0; y <= y1; y += 1) {
+      const p = y * width + x
+      const nx = (x + 0.5) / width
+      const ny = (y + 0.5) / height
+      if (man && pointIn(man, nx, ny)) continue
+      if (woman && !pointIn(woman, nx, ny)) continue
+      if (NUDE_INPAINT_PROTECT.has(labels[p] || '')) continue
+      seed[p] = 255
+    }
+  }
+  const rad = Math.max(6, Math.round(Math.min(width, height) * 0.028))
+  const grown = new Uint8Array(seed)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (seed[y * width + x]! < 128) continue
+      for (let dy = -rad; dy <= rad; dy += 1) {
+        for (let dx = -rad; dx <= rad; dx += 1) {
+          if (dx * dx + dy * dy > rad * rad) continue
+          const xx = x + dx
+          const yy = y + dy
+          if (xx < 0 || yy < 0 || xx >= width || yy >= height) continue
+          const p = yy * width + xx
+          const nx = (xx + 0.5) / width
+          const ny = (yy + 0.5) / height
+          if (man && pointIn(man, nx, ny)) continue
+          if (woman && !pointIn(woman, nx, ny)) continue
+          if (NUDE_INPAINT_PROTECT.has(labels[p] || '')) continue
+          grown[p] = 255
+        }
+      }
+    }
+  }
+  for (const face of faces || []) {
+    const padX = (face.w || 0) * 0.35
+    const padTop = (face.h || 0) * 0.55
+    const padBot = (face.h || 0) * 0.28
+    const x0 = Math.max(0, Math.floor((face.x - padX) * width))
+    const y0 = Math.max(0, Math.floor((face.y - padTop) * height))
+    const x1 = Math.min(width, Math.ceil((face.x + face.w + padX) * width))
+    const y1 = Math.min(height, Math.ceil((face.y + face.h + padBot) * height))
+    for (let y = y0; y < y1; y += 1) {
+      for (let x = x0; x < x1; x += 1) grown[y * width + x] = 0
+    }
+  }
+  let white = 0
+  for (let i = 0; i < n; i += 1) if (grown[i]! >= 128) white += 1
+  return { mask: grown, white, ok: white >= MASK_MIN_WHITE, reason: white >= MASK_MIN_WHITE ? '' : 'mask_too_small' }
 }
 
 export function parseInvasionCounts(

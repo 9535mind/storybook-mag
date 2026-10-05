@@ -32,8 +32,9 @@
   /**
    * 이미 나체인 프레임에서 시작할 때는 "벗는다"를 빼야 한다.
    * 안 빼면 엔진이 앞 절반을 탈의에 쓰고, 정작 동작은 끝에 몰려 뒤에서 옷이 되살아난다.
+   * 카메라 잠금은 맨 앞에 둔다 — Wan 은 앞문장을 더 잘 따른다. 줌·다른 얼굴이 그 실패였다.
    */
-  const holdNude = (text) => {
+  const holdNude = (text, couple) => {
     const stripped = text
       .replace(/(완전\s*)?나체(로|가\s*되어|가\s*된\s*채|인\s*채|상태로|로\s*변해)?\s*/g, '')
       .replace(/옷을?\s*(다\s*)?벗(고|은\s*채|어|기|는다)?\s*/g, '')
@@ -41,7 +42,162 @@
       .replace(/누드(로|가\s*되어)?\s*/g, '')
       .replace(/^[\s,.·]+/, '')
       .trim()
-    return `이미 완전 나체 유지. ${stripped || text}`
+    const core = stripped || text
+    const selfBreast =
+      !couple &&
+      /자기|자신|스스로|혼자|her\s+own/i.test(text) &&
+      /가슴|젖|유방|breast/i.test(text) &&
+      /만지|만져|주무르|애무|knead|squeez|fondl|touch/i.test(text)
+    const selfLock = selfBreast
+      ? ' BOTH her own hands knead and squeeze her own bare breasts. No partner. No idle pose.'
+      : ''
+    const breastKiss =
+      couple &&
+      /(?:가슴|젖꼭지|유두|유방)\s*(?:에(?:다가)?|을|를)\s*키스|키스\s*(?:를\s*)?(?:가슴|젖꼭지)|kiss(?:es|ing)?\s*(?:her\s*)?(?:breast|nipple)/i.test(
+        text,
+      )
+    const coupleLock = couple
+      ? breastKiss
+        ? ' Same two Korean people from the photo. He leans in. His mouth stays on her bare breast. Intimate chest two-shot. Same white studio. No new faces. No bathroom.'
+        : /가슴|젖|유방|breast/i.test(text)
+          ? ' Same two Korean people from the photo. Mouth-to-mouth kiss. His hand on her bare breast. Same white studio. Keep the man clothed. No bathroom. No new faces.'
+          : ' Same two Korean people from the photo. Mouth-to-mouth kiss. Same white studio. Keep the man clothed. No bathroom. No new faces.'
+      : ''
+    const faceLock = breastKiss
+      ? 'Same two faces.'
+      : couple
+        ? 'Same two faces. No zoom.'
+        : 'Same face, same glasses. No zoom.'
+    return `${faceLock} 이미 완전 나체 유지. ${core}${coupleLock}${selfLock}`
+  }
+
+  const listFaceBoxes = async (url) => {
+    if (!url) return []
+    if (typeof deskStillFaceBoxes === 'function') {
+      const boxes = await deskStillFaceBoxes(url).catch(() => null)
+      if (Array.isArray(boxes) && boxes.length) return boxes
+    }
+    return []
+  }
+
+  const sampleBelowFace = (url, box) =>
+    new Promise((resolve) => {
+      const img = new Image()
+      img.onload = () => {
+        try {
+          const w = img.naturalWidth || 1
+          const h = img.naturalHeight || 1
+          const sx = Math.max(0, Math.round((box.x + box.w * 0.15) * w))
+          const sy = Math.max(0, Math.round((box.y + box.h * 1.05) * h))
+          const sw = Math.max(8, Math.round(box.w * 0.7 * w))
+          const sh = Math.max(8, Math.round(box.h * 0.9 * h))
+          const canvas = document.createElement('canvas')
+          canvas.width = 24
+          canvas.height = 24
+          const ctx = canvas.getContext('2d')
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, 24, 24)
+          const data = ctx.getImageData(0, 0, 24, 24).data
+          let r = 0
+          let g = 0
+          let b = 0
+          let n = 0
+          for (let i = 0; i < data.length; i += 4) {
+            const luma = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]
+            if (luma > 228) continue
+            r += data[i]
+            g += data[i + 1]
+            b += data[i + 2]
+            n += 1
+          }
+          if (!n) {
+            resolve(null)
+            return
+          }
+          resolve({ r: r / n, g: g / n, b: b / n, luma: (0.299 * r + 0.587 * g + 0.114 * b) / n })
+        } catch {
+          resolve(null)
+        }
+      }
+      img.onerror = () => resolve(null)
+      img.src = url
+    })
+
+  const pickWomanBox = async (url, boxes) => {
+    if (!Array.isArray(boxes) || !boxes.length) return null
+    if (boxes.length === 1) return boxes[0]
+    const samples = await Promise.all(boxes.map((box) => sampleBelowFace(url, box)))
+    if (samples.every((s) => !s)) {
+      return boxes.slice().sort((a, b) => a.x + a.w / 2 - (b.x + b.w / 2)).pop()
+    }
+    let best = boxes[0]
+    let bestScore = -1e9
+    boxes.forEach((box, i) => {
+      const s = samples[i]
+      const score = s ? s.r - s.b + (s.r - s.g) * 0.45 : box.x
+      if (score > bestScore) {
+        bestScore = score
+        best = box
+      }
+    })
+    return best
+  }
+
+  const slotBody = (face, kind) => {
+    if (kind === 'man') {
+      const x = Math.max(0, face.x - face.w * 0.3)
+      const y = Math.max(0, face.y - face.h * 0.35)
+      return { x, y, w: Math.min(1 - x, face.w * 1.7), h: Math.min(1 - y, face.h * 4) }
+    }
+    const x = Math.max(0, face.x - face.w * 0.45)
+    const y = Math.max(0, face.y + face.h * 0.55)
+    return { x, y, w: Math.min(1 - x, face.w * 2.3), h: Math.min(1 - y, 0.78) }
+  }
+
+  const CLOTHES_LABELS = new Set(['Upper-clothes', 'Skirt', 'Pants', 'Dress', 'Belt', 'Scarf'])
+
+  const womanClothesMask = (labels, width, height, woman, man) => {
+    const canvas = document.createElement('canvas')
+    canvas.width = width
+    canvas.height = height
+    const ctx = canvas.getContext('2d')
+    const imgd = ctx.createImageData(width, height)
+    let white = 0
+    const inBox = (box, nx, ny) =>
+      Boolean(box && nx >= box.x && nx <= box.x + box.w && ny >= box.y && ny <= box.y + box.h)
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const p = y * width + x
+        const nx = (x + 0.5) / width
+        const ny = (y + 0.5) / height
+        const on =
+          CLOTHES_LABELS.has(labels[p] || '') && !inBox(man, nx, ny) && (!woman || inBox(woman, nx, ny))
+        const v = on ? 255 : 0
+        if (on) white += 1
+        imgd.data[p * 4] = v
+        imgd.data[p * 4 + 1] = v
+        imgd.data[p * 4 + 2] = v
+        imgd.data[p * 4 + 3] = 255
+      }
+    }
+    ctx.putImageData(imgd, 0, 0)
+    return { dataUrl: canvas.toDataURL('image/png'), white }
+  }
+
+  const countFaces = async (url) => {
+    const boxes = await listFaceBoxes(url)
+    if (boxes.length) return boxes.length
+    if (!url || typeof countDeskSceneFaces !== 'function') return 0
+    const n = await countDeskSceneFaces(url, 12000, { noTimeout: true }).catch(() => 0)
+    return typeof n === 'number' && n > 0 ? n : 0
+  }
+
+  const looksCoupleMotion = (text) => {
+    const t = String(text || '')
+    if (/자기|스스로|혼자/i.test(t) && !/키스|입맞춤|kiss/i.test(t)) return false
+    return (
+      /키스|입맞춤|kiss/i.test(t) ||
+      (/가슴|젖|유방|breast/i.test(t) && /남자|그(?:가|의)|파트너|여자(?:의)?\s*가슴/i.test(t))
+    )
   }
 
   const $ = (id) => document.getElementById(id)
@@ -96,18 +252,15 @@
     return state.photoUrl
   }
 
-  /** 움직이기가 쓸 시작 프레임. 새로 만든 그림이 있으면 그것, 없으면 올린 사진. */
-  const moveSource = () => state.result || state.photoUrl || state.photo || ''
-
   const syncMoveRow = () => {
     const wrap = $('free-move-wrap')
-    if (wrap) wrap.hidden = !moveSource()
+    if (wrap) wrap.hidden = !state.photo && !state.result
     const from = $('free-move-from')
     if (from) {
       from.textContent = state.result
-        ? '시작 프레임: 방금 만든 그림'
+        ? '시작 프레임: 방금 만든 그림 (올린 원본은 그대로)'
         : state.photo
-          ? '시작 프레임: 올린 사진 (그림을 안 만들어도 바로 됩니다)'
+          ? '시작 프레임: 올린 사진. 고치지 않으면 이 장으로 바로 움직입니다. 올린 원본은 그대로 둡니다.'
           : ''
     }
   }
@@ -115,6 +268,8 @@
   const syncPhotoOnlyButtons = () => {
     const project = $('free-project')
     if (project) project.disabled = !state.photo || state.busy
+    const revise = $('free-revise')
+    if (revise) revise.disabled = (!state.photo && !state.result) || state.busy
   }
 
   const showPhoto = () => {
@@ -138,6 +293,7 @@
       if (video) video.hidden = true
     }
     syncMoveRow()
+    syncPhotoOnlyButtons()
   }
 
   const busy = (on, button) => {
@@ -174,47 +330,112 @@
   const sizeValue = () => $('free-size')?.value || 'portrait'
 
   /**
-   * 한 장 만들기.
-   * 사진이 있으면 그날의 refine (지시 수정 → Kontext / 나체면 화보 img2img),
-   * 사진이 없으면 그날의 generate.
-   * @param {{ bodyProject?: boolean }} [opts]
+   * 한 장 만들기 / 수정하기 / 몸매 투영.
+   * 수정하기는 올린 사진 또는 방금 나온 장을 적은 말대로 고친다. Desk 옷 칸이 아니다.
+   * @param {{ bodyProject?: boolean, revise?: boolean }} [opts]
    */
   const run = async (opts = {}) => {
     if (state.busy) return
     const bodyProject = opts.bodyProject === true
+    const revise = opts.revise === true
     const text = String($('free-text')?.value || '').trim()
     if (bodyProject && !state.photo) {
       setStatus('몸매 투영은 사진이 있어야 합니다.', true)
       return
     }
-    if (!bodyProject && !text) {
-      setStatus('무엇을 만들지 적어 주세요.', true)
+    if (revise && !state.photo && !state.result) {
+      setStatus('고칠 사진을 올리세요. 옷 갈아입히기·수정은 이 칸입니다.', true)
       return
     }
-    const button = bodyProject ? $('free-project') : $('free-run')
+    if (!bodyProject && !text) {
+      setStatus(revise ? '무엇을 고칠지 적어 주세요.' : '무엇을 만들지 적어 주세요.', true)
+      return
+    }
+    const button = bodyProject ? $('free-project') : revise ? $('free-revise') : $('free-run')
     busy(true, button)
     setStatus(
       bodyProject
         ? '몸매 투영 중… 원래 체형 그대로 벗깁니다. 30초쯤 걸립니다.'
-        : state.photo
-          ? '올린 사진을 고치는 중… 30초쯤 걸립니다.'
-          : '글만으로 그리는 중… 30초쯤 걸립니다.',
+        : revise
+          ? '이 장을 적은 대로 고치는 중… 30초쯤 걸립니다.'
+          : state.photo
+            ? '새 그림을 그리는 중… 올린 원본은 그대로 둡니다. 30초쯤 걸립니다.'
+            : '글만으로 그리는 중… 30초쯤 걸립니다.',
       false,
     )
     try {
       let out
-      if (state.photo) {
-        const imageUrl = await hostPhoto()
+      let sourcePeople = 1
+      if (revise) {
+        const fromOriginal = (url) => Boolean(url && (url === state.photo || url === state.photoUrl))
+        const sourceUrl =
+          state.result && !fromOriginal(state.result) ? state.result : ''
+        const imageUrl = sourceUrl || (await hostPhoto())
+        const faceSrc = sourceUrl || state.photo
+        const photoFaces = await countFaces(faceSrc)
+        const coupleText = looksCoupleMotion(text)
+        sourcePeople = photoFaces >= 2 || coupleText ? 2 : 1
         out = await callJson('/api/free-refine', {
           mode: 'text',
           genMode: 'fashion',
           imageUrl,
           baseDescription: '',
           revision: text,
-          bodyProject: bodyProject || undefined,
+          sourcePeople,
           size: sizeValue(),
           mood: 'clean',
         })
+      } else if (state.photo) {
+        const photoFaces = await countFaces(state.photo)
+        const coupleText = looksCoupleMotion(text)
+        sourcePeople = photoFaces >= 2 || coupleText ? 2 : 1
+        const imageUrl = await hostPhoto()
+        if (sourcePeople === 2) {
+          setStatus('올린 원본은 그대로 두고, 여자 옷 칸만 찾아 녹입니다…', false)
+          const parse = globalThis.DeskLookOnnx?.parse
+          if (typeof parse !== 'function') {
+            setStatus('옷 칸을 읽는 모듈이 없습니다. 새로고침 후 다시 눌러 주세요.', true)
+            return
+          }
+          const parsed = await parse(state.photo)
+          if (!parsed?.ok || !Array.isArray(parsed.labels)) {
+            setStatus('옷 칸을 읽지 못했습니다. 잠시 뒤 다시 눌러 주세요.', true)
+            return
+          }
+          const boxes = await listFaceBoxes(state.photo)
+          const womanFace = await pickWomanBox(state.photo, boxes)
+          const manFace = boxes.find((b) => b !== womanFace) || null
+          const woman = womanFace ? slotBody(womanFace, 'woman') : null
+          const man = manFace ? slotBody(manFace, 'man') : null
+          const mask = womanClothesMask(parsed.labels, parsed.width, parsed.height, woman, man)
+          if (mask.white < 1200) {
+            setStatus('여자 옷을 찾지 못해 원본을 건드리지 않았습니다.', true)
+            return
+          }
+          out = await callJson('/api/free-refine', {
+            mode: 'region',
+            genMode: 'fashion',
+            imageUrl,
+            baseDescription: '',
+            revision: '여자 옷만 녹여 나체. 마스크 밖 얼굴·남자·배경은 원본 그대로.',
+            maskDataUrl: mask.dataUrl,
+            sourcePeople: 2,
+            size: sizeValue(),
+            mood: 'clean',
+          })
+        } else {
+          out = await callJson('/api/free-refine', {
+            mode: 'text',
+            genMode: 'fashion',
+            imageUrl,
+            baseDescription: '',
+            revision: text,
+            bodyProject: bodyProject || undefined,
+            sourcePeople: 1,
+            size: sizeValue(),
+            mood: 'clean',
+          })
+        }
       } else {
         out = await callJson('/api/free-generate', {
           description: text,
@@ -237,9 +458,14 @@
         return
       }
       // 글로 벗긴 경우에도 결과는 나체다 — 움직이기에서 또 벗기지 않게 표시해 둔다.
-      showResult(url, bodyProject || NUDE_WORDS.test(text))
+      showResult(url, sourcePeople === 2 || bodyProject || NUDE_WORDS.test(text))
       const label = out.data.engineLabel ? ` (${out.data.engineLabel})` : ''
-      setStatus(`나왔습니다${label}. 더 고치려면 고칠 말을 바꿔서 다시 누르세요.`, false)
+      setStatus(
+        revise
+          ? `고쳤습니다${label}. 또 고치려면 말을 바꿔 수정하기를 누르세요.`
+          : `나왔습니다${label}. 더 고치려면 고칠 말을 적고 수정하기를 누르세요.`,
+        false,
+      )
     } catch (error) {
       setStatus(`실패: ${error instanceof Error ? error.message : '알 수 없는 오류'}`, true)
     } finally {
@@ -289,8 +515,8 @@
    */
   const runMove = async () => {
     if (state.busy) return
-    if (!moveSource()) {
-      setMoveStatus('사진을 올리거나 그림을 한 장 만드세요.', true)
+    if (!state.result && !state.photo && !state.photoUrl) {
+      setMoveStatus('사진을 올리거나 한 장을 먼저 만드세요.', true)
       return
     }
     let motion = String($('free-move-text')?.value || '').trim()
@@ -311,34 +537,27 @@
     const button = $('free-move-run')
     busy(true, button)
     try {
-      let startFrame = moveSource()
-
-      // 옷 입은 사진 한 장으로 「벗고 + 동작」을 통째로 시키면, 엔진은 앞 절반을 탈의에
-      // 쓰고 남은 시간에 시작 프레임(옷 입은 사진)으로 되돌아간다 — 11초쯤에 옷이 되살아나는
-      // 그 증상이다. 그래서 나체를 먼저 정지화로 확정하고, 그 프레임에서 동작만 시킨다.
-      const needsNudeFirst = NUDE_WORDS.test(`${motion} ${motion2}`) && !state.resultNude
-      if (needsNudeFirst) {
-        setMoveStatus('먼저 나체 한 장을 확정합니다 — 이래야 뒤에서 옷이 되살아나지 않습니다…', false)
-        const nude = await callJson('/api/free-refine', {
-          mode: 'text',
-          genMode: 'fashion',
-          imageUrl: await hostPhoto(),
-          baseDescription: '',
-          revision: '',
-          bodyProject: true,
-          size: sizeValue(),
-          mood: 'clean',
-        })
-        if (nude.auth) throw new Error('로그인이 풀렸습니다. 다시 로그인해 주세요.')
-        if (nude.error) throw new Error(nude.error)
-        const nudeUrl = nude.data.imageUrl || ''
-        if (!nudeUrl) throw new Error('나체 한 장을 받지 못했습니다. 다시 눌러 주세요.')
-        showResult(nudeUrl, true)
-        startFrame = nudeUrl
+      const fromOriginal = (url) =>
+        Boolean(url && (url === state.photo || url === state.photoUrl))
+      const madeStill = Boolean(state.result && !fromOriginal(state.result))
+      let startFrame = madeStill ? state.result : ''
+      if (!startFrame) {
+        startFrame = state.photoUrl || (await hostPhoto())
       }
+      if (!startFrame) {
+        setMoveStatus('사진을 올리거나 한 장을 먼저 만드세요.', true)
+        return
+      }
+      const photoFaces = await countFaces(startFrame || state.photo || state.photoUrl || state.result)
+      const couple = photoFaces >= 2
+      if (couple || looksCoupleMotion(`${motion} ${motion2}`)) {
+        const box = $('free-move-project')
+        if (box) box.checked = false
+      }
+
       if (state.resultNude) {
-        motion = holdNude(motion)
-        if (motion2) motion2 = holdNude(motion2)
+        motion = holdNude(motion, couple)
+        if (motion2) motion2 = holdNude(motion2, couple)
       }
 
       setMoveStatus(
@@ -346,8 +565,10 @@
         false,
       )
       const clip1 = await oneClip(startFrame, motion, clipSec, {
-        bodyProject: bodyProject || undefined,
+        bodyProject: couple ? undefined : state.resultNude ? undefined : bodyProject || undefined,
         clipRole: dual ? 'dual-a' : 'single',
+        sourcePeople: couple ? 2 : 1,
+        sourceNude: state.resultNude || undefined,
       })
       if (!dual) {
         showVideo(clip1)
@@ -363,6 +584,8 @@
       setMoveStatus(`${total}초 쇼츠: 후반(2/2) 만드는 중… 1~2분`, false)
       const clip2 = await oneClip(endFrame || startFrame, motion2, clipSec, {
         clipRole: 'dual-b',
+        sourcePeople: couple ? 2 : 1,
+        sourceNude: state.resultNude || undefined,
       })
 
       setMoveStatus('두 클립 이어 붙이는 중…', false)
@@ -384,7 +607,25 @@
   const showVideo = (url) => {
     const video = $('free-video')
     const wrap = $('free-video-wrap')
-    if (video) video.src = url
+    if (video) {
+      video.loop = true
+      video.src = url
+      const start = () => {
+        video.currentTime = 0
+        const play = video.play()
+        if (play && typeof play.catch === 'function') play.catch(() => {})
+      }
+      if (video.readyState >= 2) start()
+      else video.addEventListener('canplay', start, { once: true })
+      if (!video.dataset.loopBound) {
+        video.dataset.loopBound = '1'
+        video.addEventListener('ended', () => {
+          if (!video.loop || !video.src) return
+          video.currentTime = 0
+          video.play().catch(() => {})
+        })
+      }
+    }
     if (wrap) wrap.hidden = false
   }
 
@@ -408,21 +649,49 @@
   }
 
   const init = () => {
-    $('free-photo')?.addEventListener('change', async (event) => {
-      const file = event.target?.files?.[0]
+    const applyPhotoFile = async (file) => {
       if (!file) return
+      const ok = typeof StorymagAttach?.isImageFile === 'function' ? StorymagAttach.isImageFile(file) : /^image\//.test(file.type || '')
+      if (!ok) {
+        setStatus('이미지 파일만 올릴 수 있습니다.', true)
+        return
+      }
       try {
         state.photo = await shrink(file)
         state.photoUrl = ''
         showPhoto()
-        setStatus('사진을 올렸습니다. 고칠 말을 적으세요. 벗기려면 「몸매 투영」이 가장 셉니다.', false)
+        setStatus('사진을 올렸습니다. 고치지 않으면 아래 움직이기로 바로 쇼츠 됩니다. 벗기려면 「몸매 투영」이 가장 셉니다.', false)
       } catch {
         state.photo = ''
         state.photoUrl = ''
         showPhoto()
         setStatus('사진을 읽지 못했습니다. 다른 파일로 해 주세요.', true)
       }
+    }
+    window.__freeApplyPhotoFile = applyPhotoFile
+    $('free-photo')?.addEventListener('change', async (event) => {
+      const file = event.target?.files?.[0]
+      event.target.value = ''
+      if (file) await applyPhotoFile(file)
     })
+    if (typeof StorymagAttach?.bind === 'function') {
+      StorymagAttach.register('free', (files) => applyPhotoFile(files[0]))
+      const takeFiles = (files) => applyPhotoFile(files[0])
+      const emptyPaste = () =>
+        setStatus('복사한 그림이 없습니다. 그림을 복사한 뒤 Ctrl+V 또는 붙이기를 누르세요.', true)
+      StorymagAttach.bind($('free-area'), {
+        onFiles: takeFiles,
+        pasteBtn: $('free-photo-paste'),
+        onEmptyPaste: emptyPaste,
+      })
+      StorymagAttach.bind($('free-photo-drop'), { onFiles: takeFiles })
+      StorymagAttach.bind($('free-text-drop'), {
+        onFiles: takeFiles,
+        pasteBtn: $('free-text-paste'),
+        onEmptyPaste: emptyPaste,
+      })
+      StorymagAttach.bind($('free-text'), { onFiles: takeFiles, onEmptyPaste: emptyPaste })
+    }
     $('free-photo-clear')?.addEventListener('click', () => {
       state.photo = ''
       state.photoUrl = ''
@@ -432,6 +701,7 @@
       setStatus('사진을 뺐습니다. 이제 글만으로 그립니다.', false)
     })
     $('free-run')?.addEventListener('click', () => run())
+    $('free-revise')?.addEventListener('click', () => run({ revise: true }))
     $('free-project')?.addEventListener('click', () => run({ bodyProject: true }))
     $('free-move-run')?.addEventListener('click', runMove)
     $('free-move-sec')?.addEventListener('change', syncDualRow)

@@ -166,7 +166,7 @@ function heuristicMotionKoToEn(text: string): string {
     [/딥\s*키스|딮\s*키스/g, 'deep french kiss with tongue'],
     [/뽀뽀/g, 'light peck on the lips'],
     [/입맞춤|입\s*(?:을\s*)?맞추/g, 'soft lip touch'],
-    [/키스/g, 'passionate lip-sucking kiss'],
+    [/키스/g, 'precise lip-to-lip kiss with both mouths nearly closed'],
     [/누드|나체|전라/g, 'fully nude'],
     [/자신의|스스로/g, 'her own'],
     [/(?:여성|여자)은/g, 'the woman'],

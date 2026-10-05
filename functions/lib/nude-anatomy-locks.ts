@@ -21,12 +21,21 @@ export function wantsPubicHairOnlyRefine(revision: string): boolean {
 
 /** 기본 음모 — 치골에만 정돈된 한국 30대. 20대보다 조금 더 있고, 넓은 역삼각은 금지. */
 export const KOREAN_THIRTIES_PUBIC =
-  'neat dark-brown curls on the mons only (한국 30대 치골, slightly fuller than a 20s patch, still tidy). FORBIDDEN tall wide inverted triangle, thigh spread, navel climb, dense black bush, or hairless blank'
+  'neat Korean-30s pubic: sparse dark-brown curls on the mons only (한국 30대, slightly fuller than a 20s). FORBIDDEN painted triangle, CGI bush, hairless blank'
 export const KOREAN_TWENTIES_PUBIC = KOREAN_THIRTIES_PUBIC
+
+/** 「민무늬 금지」「역삼각 금지」는 제모·삼각 요청이 아니라 음모 유지. */
+export function stripPubicForbidClauses(text: string): string {
+  return polishKoreanPromptText(text || '')
+    .replace(/민무늬[^.\n]{0,100}금지/g, ' ')
+    .replace(/역삼각[^.\n]{0,40}금지/g, ' ')
+    .replace(/그려넣은\s*역삼각[^.\n]{0,24}금지/g, ' ')
+    .replace(/FORBIDDEN[^.\n]{0,120}(?:triangle|shaved|CGI bush|hairless|black panty)/gi, ' ')
+}
 
 /** 제모·민무늬를 아주 명시했을 때만 true (bare/smooth 같은 약한 단어로는 허용하지 않음) */
 export function wantsExplicitPubicShave(text: string): boolean {
-  const t = polishKoreanPromptText(text || '')
+  const t = stripPubicForbidClauses(text)
   return /제모|민무늬|쉐이븐|왁싱|waxed|shaved\s*(pubic|bush|crotch)?|no\s*pubic\s*hair|음모\s*(없|제거|밀)/i.test(
     t,
   )
@@ -59,7 +68,7 @@ export function buildFemaleAdultAnatomyLock(text = ''): string {
  * 민무늬·넓은 역삼각 금지. 명시적 제모·넓은 요청만 예외.
  */
 export function buildAdultPubicHairLock(text = ''): string {
-  const t = polishKoreanPromptText(text || '')
+  const t = stripPubicForbidClauses(text)
   if (wantsExplicitPubicShave(t)) {
     return 'pubic area smooth/shaved ONLY because the user explicitly requested shaving/waxing'
   }
@@ -80,7 +89,7 @@ export function buildAdultPubicHairLock(text = ''): string {
  * 사용자가 민무늬/넓은/얇은 등을 쓰면 그걸 우선한다.
  */
 export function buildWanPubicLine(text = ''): string {
-  const t = polishKoreanPromptText(text || '')
+  const t = stripPubicForbidClauses(text)
   if (wantsExplicitPubicShave(t)) {
     return 'Pubic: smooth shaved as requested. ZERO panties/fog.'
   }
@@ -148,27 +157,40 @@ export function buildStillWomanNudeNoPantyLock(text = '', lookNotes = ''): strin
   return lines.join(' ')
 }
 
+/** Desk LOOK 420자용. 기본은 살짝 글래머, 과장 금지. 쇼츠 경로 금지. */
+export function buildStillWomanBustHint(text = ''): string {
+  const t = polishKoreanPromptText(text || '')
+  const askedSmall =
+    /작은\s*가슴|빈유|A컵|납작한\s*가슴/i.test(t) ||
+    (/\bsmall\s+breasts?\b/i.test(t) && !/forbidden[^.!?]{0,80}small\s+breasts?/i.test(t))
+  if (askedSmall) return 'modest bust as asked. not huge.'
+  if (/거유|초거유|E컵|F컵|G컵|balloon|huge\s*bust/i.test(t)) {
+    return 'fuller bust as asked, still real. not cartoon.'
+  }
+  if (/큰\s*가슴|풍만\s*가슴|D컵|busty|large\s*breasts?/i.test(t)) {
+    return 'fuller C-D bust. not porn-giant.'
+  }
+  return 'soft C-cup glamour, not huge.'
+}
+
 /** 정지 이미지 탈의 시 가슴이 A컵·빈유로 쪼그라드는 회귀 방지. 쇼츠 Wan 경로는 쓰지 않음. */
 export function buildStillNudeAdultBustLine(text = ''): string {
   const t = polishKoreanPromptText(text || '')
   // "FORBIDDEN A-cup" 같은 우리 잠금 문구를 작은 가슴 요청으로 오인하면 안 됨
   const askedSmall =
-    /작은\s*가슴|빈유/i.test(t) ||
+    /작은\s*가슴|빈유|A컵|납작한\s*가슴/i.test(t) ||
     (/\bsmall\s+breasts?\b/i.test(t) && !/forbidden[^.!?]{0,100}small\s+breasts?/i.test(t))
   if (askedSmall) {
-    return 'Bust: smaller/modest as the user asked — still adult female soft tissue, not a childlike chest.'
+    return 'Bust: smaller/modest as the user asked — still adult female soft tissue, not a childlike chest. FORBIDDEN huge breasts.'
   }
-  const idFull =
-    /full\s+adult\s+bust|generous\s+bust|bust\s+filling|filling\s+(?:the\s+)?(?:shirt|t-?shirt|tee)|C\s*-?\s*cup|D\s*-?\s*cup/i.test(
-      t,
-    )
-  if (LARGE_BUST_MENTION_PATTERN.test(t) || idFull) {
-    return 'Bust: keep the SAME full volume as the ID/source photo clothed chest (shirt filling). Nude must NOT look smaller than that photo. FORBIDDEN shrinking even half a cup, FORBIDDEN empty or teenage chest.'
+  if (/거유|초거유|E컵|F컵|G컵|balloon\s*bust|huge\s*breasts?/i.test(t)) {
+    return 'Bust: fuller as the user asked, still realistic on this same body. FORBIDDEN cartoon or balloon breasts that break the figure.'
   }
-  if (/modest\s+chest|average\s+adult\s+bust/i.test(t)) {
-    return 'Bust: match the ID/source photo clothed chest (average adult, about B–C). Still adult soft tissue — FORBIDDEN shrinking smaller than the ID photo.'
+  if (/큰\s*가슴|풍만\s*가슴|D컵|busty|large\s*breasts?|full\s*bust|voluptuous/i.test(t)) {
+    return 'Bust: fuller realistic C–D volume as asked. Soft round shape. FORBIDDEN porn-giant or balloon breasts.'
   }
-  return 'Bust: full adult C-cup soft volume as the minimum — match the ID/source photo clothed chest if it looks fuller. Nude breasts must look at least as large as the chest in the ID photo. FORBIDDEN shrinking breasts when undressing, FORBIDDEN childlike tiny breasts.'
+  // 기본: 살짝 글래머. 글래머만 적힌 것도 여기(과장 거유 아님).
+  return 'Bust: slightly glamorous natural adult volume (soft C-cup, about half a cup fuller than a flat shirt). Soft round shape, natural hang. FORBIDDEN porn-giant / balloon / +2–3 cup fake breasts, FORBIDDEN empty flat chest.'
 }
 
 /**
@@ -291,8 +313,8 @@ export function buildClothingSilhouetteBodyLock(text = '', bustHeight?: string):
 export function buildNudeBodyShapeContinuityLock(text = ''): string {
   const t = polishKoreanPromptText(text || '')
   const bits = [
-    'BODY SHAPE CONTINUITY: keep the exact same breast size, waist width, and hip width the person already has — do not shrink, flatten, or generic-ify the figure into a smaller doll-like body',
-    'Preserve natural adult breast volume — at least a soft B–C mound unless the user asked for a small bust; FORBIDDEN shrinking to A-cup / tiny flat chest when undressing; FORBIDDEN unrealistic oversized breasts',
+    'BODY SHAPE CONTINUITY: keep waist width and hip width; default slightly glamorous soft C-cup unless the user asked small or huge',
+    'Preserve natural adult breast volume — soft C-cup glamour, not a flat empty chest and not a porn-giant balloon bust',
   ]
   if (LARGE_BUST_MENTION_PATTERN.test(t)) {
     bits.push('text confirms large bust — preserve generous breast volume and projection')

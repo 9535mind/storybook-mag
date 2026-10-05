@@ -147,6 +147,35 @@ export function buildDeskClothesMaskDataUrl(options?: {
   return `data:image/png;base64,${bytesToBase64(png)}`
 }
 
+/** 커플: 여자 얼굴 아래 몸통만 흰. 남자·두 얼굴·배경은 검정(유지). */
+export function buildCoupleWomanBodyMaskDataUrl(options: {
+  width?: number
+  height?: number
+  box: { x: number; y: number; w: number; h: number }
+}): string {
+  const width = Math.max(64, Math.min(1536, options.width ?? 768))
+  const height = Math.max(64, Math.min(1536, options.height ?? 1024))
+  const x = Math.min(1, Math.max(0, options.box.x))
+  const y = Math.min(1, Math.max(0, options.box.y))
+  const w = Math.min(1, Math.max(0.05, options.box.w))
+  const h = Math.min(1, Math.max(0.05, options.box.h))
+  const cx = x + w / 2
+  const half = Math.max(0.16, w * 1.65)
+  const x0 = Math.floor(width * Math.max(0.02, cx - half))
+  const x1 = Math.floor(width * Math.min(0.98, cx + half))
+  const y0 = Math.floor(height * Math.min(0.5, Math.max(0.2, y + h * 0.72)))
+  const y1 = Math.floor(height * 0.96)
+  const pixels = new Uint8Array(width * height)
+  for (let py = 0; py < height; py++) {
+    const row = py * width
+    for (let px = 0; px < width; px++) {
+      pixels[row + px] = px >= x0 && px < x1 && py >= y0 && py < y1 ? 255 : 0
+    }
+  }
+  const png = encodeGrayPng(width, height, pixels)
+  return `data:image/png;base64,${bytesToBase64(png)}`
+}
+
 /**
  * 음모/체모만 수정 — 얼굴·가슴은 검정(유지), 하복부~치골 밴드만 흰(수정).
  * 반신 나체 기준: 대략 높이 52%~90%.
@@ -156,15 +185,29 @@ export function buildPubicRegionMaskDataUrl(options?: {
   height?: number
   yStartRatio?: number
   yEndRatio?: number
+  /** 남녀 커플: 왼쪽(남자)은 검정, 오른쪽 여자 치골만 흰. */
+  rightHalfOnly?: boolean
+  xStartRatio?: number
+  xEndRatio?: number
 }): string {
   const width = Math.max(64, Math.min(1536, options?.width ?? 768))
   const height = Math.max(64, Math.min(1536, options?.height ?? 1024))
   const y0 = Math.floor(height * Math.min(0.7, Math.max(0.4, options?.yStartRatio ?? 0.52)))
   const y1 = Math.floor(height * Math.min(0.98, Math.max(0.75, options?.yEndRatio ?? 0.9)))
+  const x0 = Math.floor(
+    width *
+      Math.min(
+        1,
+        Math.max(0, options?.xStartRatio ?? (options?.rightHalfOnly ? 0.5 : 0)),
+      ),
+  )
+  const x1 = Math.floor(width * Math.min(1, Math.max(x0 + 1, options?.xEndRatio ?? 1)))
   const pixels = new Uint8Array(width * height)
   for (let y = 0; y < height; y++) {
-    const v = y >= y0 && y < y1 ? 255 : 0
-    pixels.fill(v, y * width, y * width + width)
+    const row = y * width
+    for (let x = 0; x < width; x++) {
+      pixels[row + x] = y >= y0 && y < y1 && x >= x0 && x < x1 ? 255 : 0
+    }
   }
   const png = encodeGrayPng(width, height, pixels)
   return `data:image/png;base64,${bytesToBase64(png)}`

@@ -186,6 +186,7 @@
   }
 
   global.DeskLookOnnx = {
+    parse: parseLabels,
     async prepare(src, opts) {
       const parsed = await parseLabels(src)
       if (!parsed.ok) return parsed

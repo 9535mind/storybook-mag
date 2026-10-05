@@ -1,0 +1,33 @@
+---
+description: Storymag Desk 인수인계 — CAST 화소 의상 국소 편집
+alwaysApply: true
+---
+
+# Desk 인수인계 (2026-09-17)
+
+이후 목표·엔진을 다시 묻지 않는다. CAST 화소 기반 의상 국소 편집과 코드 점검만 한다.
+
+## 고정
+
+- 운영: `https://storymag.mindstory.kr/` · Pages `storymag`
+- 핵심: CAST 원본 얼굴·몸을 유지한 채 옷만 자연스럽게 변경
+- 제거: 정규식 땜질, `preferPaste`, 타원 얼굴 스티커, 낯선 몸, 추가 클릭
+- UI: 사용자는 결과 유형만 고른다. 내부 엔진 분리는 숨긴다
+- 인원: 체크박스가 아니라 얼굴 수 (`resolveDeskFrame`)
+- 순서: 옷 정지화 → 필요할 때 방·자세 정지화
+- 쇼츠 시작 프레임: CAST가 아니라 완성된 지금 장
+- Wan `wan-2.2-i2v-fast` 쇼츠 파이프라인 수정 금지
+
+## 사용자가 합격·조건부 합격으로 둔 것 (가져올 곳)
+
+- 여자 1 몸 잇기 **합격** (2026-09-30): 준비 캔버스 + 얼굴 두 장. `20260929mw24`. 이은 전신을 다시 버려서 실패 처리하지 않음. 타원 스티커로 “개선”하지 않음
+- 검은 재킷 증명 몸 잇기 **합격** (2026-10-03): 그림모음 **32.jpg**. 선 전신 + insight 얼굴. 타원·베이지 판 없음. 29·30·31·33은 실패
+- 17 여자 **조건부 합격**: 비율·팔. 17을 다시 고치지 않음
+- 남여 붙이기·한 장면 **조건부 합격**: `composePlate` 오려 붙임. 엔진으로 두 사람을 다시 그리지 않음
+- 21·22·23·25는 실패작. 합격으로 가져오지 않음. 25는 서 있는 힌트 베이지 판이 남은 것 — 힌트는 스튜디오색·옅게, 판이면 저장하지 않음
+
+## 옷 정지화
+
+전신 img2img로 사람을 다시 그리지 않는다. 얼굴은 마스크로 잠그고 목 아래만 inpaint한다 (`buildFacePreserveBodyMaskDataUrl` + `submitFalInpaint`). 증명사진은 같은 몸으로 이은 뒤에만 옷을 녹인다. LOOK 결과에 얼굴을 타원으로 붙이지 않는다.
+
+점검 파일: `public/app.js`, `public/index.html`, `functions/lib/desk-still-prompt.ts`, `functions/api/tale-scene.ts`, `functions/lib/content-policy.ts`

@@ -382,7 +382,7 @@ export function motionExplicitNudeHoldOnly(motion: string): boolean {
   if (!hold) return false
   // 유지라고 써도 벗기/팬티제거/나체로 전환이면 탈의 경로
   if (wantsUndressAction(t)) return false
-  if (/나체로|누드로|올\s*누드|완전\s*나체로|옷을\s*벗겨|팬티\s*(?:를\s*)?(?:벗|제거|없)|속옷\s*(?:을\s*)?(?:벗|제거|없)/i.test(t)) {
+  if (/나체로|누드로|올\s*누드|완전\s*나체로|옷을\s*벗겨|팬티\s*(?:를\s*)?(?:벗|제거|없애)|속옷\s*(?:을\s*)?(?:벗|제거|없애)/i.test(t)) {
     return false
   }
   return true

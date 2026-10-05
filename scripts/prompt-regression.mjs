@@ -130,13 +130,35 @@ const cases = [
       return {
         length: p.length,
         underBudget: p.length <= mod.DESK_STILL_PROMPT_MAX,
-        startsWithDo: /^\[DO\] melt ONLY her clothes to full nude/i.test(p),
+        startsWithDo: /^\[DO\] Edit in place\. CAST woman-slot/i.test(p),
         pantyOff: /panty OFF/i.test(p),
         blackPantyFail: /FAILED black panty/i.test(p),
         pubic: /Korean-30s pubic/i.test(p),
         hasKeep: /\[KEEP\]/i.test(p),
+        softC: /soft C-cup glamour, not huge/i.test(p),
       }
     },
+  ],
+  [
+    'buildDeskStillPrompt/look-clothes-micro-mini',
+    () => {
+      const p = mod.buildDeskStillPrompt('같은 니트, 얼굴은 같은 사람', false, 'look')
+      return {
+        length: p.length,
+        underBudget: p.length <= mod.DESK_STILL_PROMPT_MAX,
+        microMini: /micro mini|panty line|just below the crotch/i.test(p),
+        noBlackAline: /FORBIDDEN black A-line/i.test(p),
+        notNude: !/panty OFF/i.test(p),
+      }
+    },
+  ],
+  [
+    'buildStillWomanBustHint/default-glamour',
+    () => ({
+      default: mod.buildStillWomanBustHint(''),
+      small: mod.buildStillWomanBustHint('작은 가슴'),
+      huge: mod.buildStillWomanBustHint('거유'),
+    }),
   ],
   [
     'buildDeskStillPrompt/place-hug-short',
@@ -253,6 +275,26 @@ const cases = [
   // --- pubic hair / anatomy locks ---
   ['wantsExplicitPubicShave/false', () => mod.wantsExplicitPubicShave('나체로 서 있다')],
   ['wantsExplicitPubicShave/true', () => mod.wantsExplicitPubicShave('음모 제모해줘')],
+  [
+    'wantsExplicitPubicShave/forbid-민무늬-is-not-shave',
+    () =>
+      mod.wantsExplicitPubicShave(
+        '치골에만 성긴 실제 곱슬 음모. 민무늬·역삼각·검정 팬티·흰 팬티·끈팬티 금지. 브라·팬티 없음.',
+      ) === false,
+  ],
+  [
+    'buildWanPubicLine/forbid-민무늬-keeps-curls',
+    () => {
+      const p = mod.buildWanPubicLine(
+        '이미 나체 유지. 치골에만 성긴 실제 곱슬 음모. 민무늬·역삼각·검정 팬티 금지. 브라·팬티 없음.',
+      )
+      return {
+        curls: /Korean-30s pubic/i.test(p),
+        notShaved: !/smooth shaved/i.test(p),
+        notTriangle: !/triangular dark curls/i.test(p),
+      }
+    },
+  ],
   ['buildFemaleAdultAnatomyLock/default', () => mod.buildFemaleAdultAnatomyLock('나체')],
   ['buildFemaleAdultAnatomyLock/large-bust', () => mod.buildFemaleAdultAnatomyLock('큰 가슴')],
   ['buildAdultPubicHairLock/default', () => mod.buildAdultPubicHairLock('')],
@@ -845,6 +887,87 @@ const cases = [
         underWanBudget: p.length <= 1500,
       }
     },
+  ],
+  [
+    'buildAnimationPrompt/desk-kiss-already-nude-hold',
+    () => {
+      const p = mod.buildAnimationPrompt({
+        motion:
+          '원본 남자가 원본 여자와 입맞춤. 남자는 남자로. 여자는 이미 완전 나체 유지. 치골에만 성긴 실제 곱슬 음모. 민무늬·역삼각·검정 팬티·흰 팬티·끈팬티 금지. 브라·팬티 없음. 여여 키스 금지.',
+        rawMotion:
+          '원본 남자가 원본 여자와 입맞춤. 남자는 남자로. 여자는 이미 완전 나체 유지. 치골에만 성긴 실제 곱슬 음모. 민무늬·역삼각·검정 팬티 금지. 브라·팬티 없음. 여여 키스 금지.',
+        prompt: '스튜디오에서 남녀가 가까이 서 있다',
+        durationSec: 15,
+        sourcePeople: 2,
+      })
+      return {
+        noPeelBeat: !/remove ALL clothes|BEAT1[\s\S]{0,80}peel/i.test(p),
+        alreadyNudeTime: /already fully nude|already nude|NO undress/i.test(p) || /이미 완전 나체 유지/.test(p),
+        pubic: /Korean-30s pubic|음모|pubic patch|pubic curls/i.test(p),
+        kiss: /kiss|입맞춤/i.test(p),
+        manClothed: /HE keeps source clothes|still in source clothes|남자 옷은 유지/i.test(p),
+        notBothNude: !/both fully nude \(no shirt/i.test(p),
+        notTwoWomenPeel: !/Undress EVERY woman|both women lose/i.test(p),
+        underWanBudget: p.length <= 1500,
+      }
+    },
+  ],
+  [
+    'buildAnimationPrompt/desk-hug-already-nude-not-ww',
+    () => {
+      const p = mod.buildAnimationPrompt({
+        motion:
+          '원본 남자가 원본 여자를 안는다. 남자는 남자로. 여자는 나체 유지. 치골에만 성긴 실제 곱슬 음모. 브라·팬티 없음. 여여 금지.',
+        rawMotion:
+          '원본 남자가 원본 여자를 안는다. 남자는 남자로. 여자는 나체 유지. 치골에만 성긴 실제 곱슬 음모. 브라·팬티 없음. 여여 금지.',
+        prompt: '스튜디오에서 남녀가 가까이 서 있다',
+        durationSec: 15,
+        sourcePeople: 2,
+      })
+      return {
+        hug: /안는다|hug|embrace/i.test(p),
+        notKissSteal: !/kisses the source WOMAN; his hand on her bare breast/i.test(p),
+        notTwoWomenPeel: !/Undress EVERY woman|both women lose/i.test(p),
+        pubic: /Korean-30s pubic|음모|pubic patch|pubic curls/i.test(p),
+        underWanBudget: p.length <= 1500,
+      }
+    },
+  ],
+  [
+    'buildAnimationPrompt/desk-hands-already-nude-pubic',
+    () => {
+      const p = mod.buildAnimationPrompt({
+        motion:
+          '혼자. 왼손은 가슴을, 오른손은 보지를 만진다. 이미 나체 유지. 치골에만 성긴 실제 곱슬 음모. 브라·팬티 없음. 민무늬·검정 팬티 금지.',
+        rawMotion:
+          '혼자. 왼손은 가슴을, 오른손은 보지를 만진다. 이미 나체 유지. 치골에만 성긴 실제 곱슬 음모. 브라·팬티 없음.',
+        prompt: '스튜디오 전신',
+        durationSec: 15,
+        sourcePeople: 1,
+      })
+      return {
+        noPartner: /do not invent a partner|Only the source woman|혼자/i.test(p),
+        pubic: /Korean-30s pubic|음모|pubic patch|pubic curls/i.test(p),
+        noPeelBeat: !/remove ALL clothes|BEAT1[\s\S]{0,80}peel/i.test(p),
+        hands: /LEFT|RIGHT|가슴|보지|vulva|breast/i.test(p),
+        underWanBudget: p.length <= 1500,
+      }
+    },
+  ],
+  [
+    'isExplicitTwoWomenCast/forbid-is-not-ask',
+    () => ({
+      kissForbid: mod.isExplicitTwoWomenCast('여여 키스 금지. 원본 남자가 원본 여자와 입맞춤.') === false,
+      hugForbid: mod.isExplicitTwoWomenCast('여여 금지. 원본 남자가 원본 여자를 안는다.') === false,
+      realAsk: mod.isExplicitTwoWomenCast('여여 키스. 두 여자가 입맞춤.') === true,
+    }),
+  ],
+  [
+    'motionExplicitNudeHoldOnly/panty-없음-is-hold',
+    () => ({
+      hold: mod.motionExplicitNudeHoldOnly('여자는 이미 완전 나체 유지. 브라·팬티 없음.') === true,
+      peel: mod.motionExplicitNudeHoldOnly('옷벗김. 팬티를 벗긴다.') === false,
+    }),
   ],
 ]
 
