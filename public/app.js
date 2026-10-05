@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw199'
+window.__DESK_BUILD = '20261005mw200'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8776,7 +8776,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
    * 못 찾으면(일치도 0.75 미만) url 을 비워 돌려준다. 가짜 얼굴로 대신하지 않기 위해 호출한 쪽이 실패로 처리한다.
    */
   // 이어 그린 결과의 머리(얼굴)가 몸에 비해 크면(가분수) 머리 쪽을 줄이고 몸을 그만큼 늘려 키·발 위치는 그대로 둔다.
-  // 얼굴 높이가 (머리 위~발) 길이의 1/9 이하가 되도록. 얼굴은 원본 화소 그대로 크기만 줄어든다. 줄일 필요가 없으면 '' 반환.
+  // 얼굴 높이가 (머리 위~발) 길이의 1/8.5 이하(최대 12% 줄임)가 되도록. 얼굴은 원본 화소 그대로 크기만 줄어든다. 줄일 필요가 없으면 '' 반환.
   async function shrinkContinuedHead(url, rect, fbox) {
     try {
       if (!rect || !fbox || !(fbox.h > 0.02)) return ''
@@ -8791,7 +8791,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const yTop = Math.max(0, faceTop - faceH * 0.5)
       const yFeet = h * 0.955
       const total = yFeet - yTop
-      const sc = Math.max(0.78, Math.min(1, total / 9 / faceH))
+      const sc = Math.max(0.88, Math.min(1, total / 8.5 / faceH))
       if (sc > 0.97) return ''
       const yN = Math.min(h * 0.5, faceTop + faceH * 1.25)
       const dT = faceH * 0.9
