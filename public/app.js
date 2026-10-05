@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw184'
+window.__DESK_BUILD = '20261005mw185'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8830,12 +8830,12 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const D = 2
       const G1 = grayOf(out, Math.round(rw / D), Math.round(rh / D))
       let best = { score: -2, s: 1, ox: 0, oy: 0 }
-      for (const s of [0.8, 0.88, 0.94, 1, 1.06, 1.13, 1.22, 1.32, 1.45]) {
+      for (const s of [0.7, 0.78, 0.86, 0.94, 1, 1.07, 1.15, 1.25, 1.36, 1.5, 1.7]) {
         const T = grayOf(src, Math.round((w0 * s) / D), Math.round((h0 * s) / D))
         const baseX = Math.round((x0 + w0 / 2) / D - T.w / 2)
         const baseY = Math.round(y0 / D)
-        for (let oy = -20; oy <= 20; oy += 2) {
-          for (let ox = -20; ox <= 20; ox += 2) {
+        for (let oy = -50; oy <= 50; oy += 3) {
+          for (let ox = -50; ox <= 50; ox += 3) {
             const sc = ncc(T, G1, baseX + ox, baseY + oy, 2)
             if (sc > best.score) best = { score: sc, s, ox: baseX + ox, oy: baseY + oy }
           }
@@ -8853,8 +8853,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       for (const m of [0.97, 1, 1.03]) {
         const s = best.s * m
         const T = grayOf(src, Math.round(w0 * s), Math.round(h0 * s))
-        for (let oy = -3; oy <= 3; oy += 1) {
-          for (let ox = -3; ox <= 3; ox += 1) {
+        for (let oy = -6; oy <= 6; oy += 1) {
+          for (let ox = -6; ox <= 6; ox += 1) {
             const sc = ncc(T, G2, best.ox * D + ox, best.oy * D + oy, 3)
             if (sc > fine.score) fine = { score: sc, s, ox: best.ox * D + ox, oy: best.oy * D + oy, tw: T.w, th: T.h }
           }
@@ -12888,6 +12888,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
 
   async function extendOneIdBody(idDataUrl, gender, index, total, opts) {
     const timingT0 = Date.now()
+    window.__deskBodyStop = null
     const timing = { jobs: [], holdSec: 0, totalSec: 0 }
     window.__deskTiming = timing
     const timingDone = () => {
@@ -13295,6 +13296,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         if (typeof setFormStatus === 'function') setFormStatus(stop, true)
         else setStatus(stop, true)
         console.warn(stop, JSON.stringify(contLog))
+        window.__deskBodyStop = { at: Date.now(), text: stop }
         timing.totalSec = Math.round((Date.now() - timingT0) / 1000)
         return null
       }
@@ -14485,6 +14487,13 @@ function swapDeskCastSlots() {
     womanFull: Boolean(work.manFull),
     manFull: Boolean(work.womanFull),
   })
+}
+
+/** 몸 잇기를 멈춘 구체적 이유가 최근에 있으면 그것을, 없으면 기본 실패 문구를 돌려준다 (일반 문구가 이유를 덮어쓰지 않게) */
+function deskBodyFail(defaultText) {
+  const r = window.__deskBodyStop
+  if (r && r.text && Date.now() - r.at < 180000) return r.text
+  return defaultText
 }
 
 async function compactDeskScene(src, maxEdge = 1920, quality = 0.92) {
@@ -18629,7 +18638,7 @@ function initAdultDesk() {
         deskStatus?.textContent || '',
       )
       if (!already) {
-        setFormStatus('전신이 안 붙었습니다. 옷·자세는 보내지 않았습니다. 1 몸 잇기만 다시 누르세요.', true)
+        setFormStatus(deskBodyFail('전신이 안 붙었습니다. 옷·자세는 보내지 않았습니다. 1 몸 잇기만 다시 누르세요.'), true)
       }
       return
     }
@@ -19072,11 +19081,11 @@ function initAdultDesk() {
         deadline: window.__deskBodyDeadline,
       })
       if (!extended) {
-        setFormStatus(`전신이 안 붙었습니다. ${spec.noun}는 하지 않았습니다. 1 몸 잇기만 다시 누르세요.`, true)
+        setFormStatus(deskBodyFail(`전신이 안 붙었습니다. ${spec.noun}는 하지 않았습니다. 1 몸 잇기만 다시 누르세요.`), true)
         return
       }
       if (extended === lookId && !(await deskLooksStandingFull(extended))) {
-        setFormStatus(`전신이 안 붙었습니다. ${spec.noun}는 하지 않았습니다. 1 몸 잇기만 다시 누르세요.`, true)
+        setFormStatus(deskBodyFail(`전신이 안 붙었습니다. ${spec.noun}는 하지 않았습니다. 1 몸 잇기만 다시 누르세요.`), true)
         return
       }
       updateCurrentDeskWork({ woman: extended, womanFull: true })
@@ -19197,11 +19206,11 @@ function initAdultDesk() {
         deadline: window.__deskBodyDeadline,
       })
       if (!extended) {
-        setFormStatus('전신이 안 붙었습니다. 옷은 녹이지 않았습니다. 1 몸 잇기만 다시 누르세요.', true)
+        setFormStatus(deskBodyFail('전신이 안 붙었습니다. 옷은 녹이지 않았습니다. 1 몸 잇기만 다시 누르세요.'), true)
         return
       }
       if (extended === lookId && !(await deskLooksStandingFull(extended))) {
-        setFormStatus('전신이 안 붙었습니다. 옷은 녹이지 않았습니다. 1 몸 잇기만 다시 누르세요.', true)
+        setFormStatus(deskBodyFail('전신이 안 붙었습니다. 옷은 녹이지 않았습니다. 1 몸 잇기만 다시 누르세요.'), true)
         return
       }
       if (lookWork?.woman) updateCurrentDeskWork({ woman: extended, womanFull: true })

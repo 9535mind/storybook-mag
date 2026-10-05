@@ -25,7 +25,7 @@ const res = await page.evaluate(async ({ src, u }) => {
   const canvasImg = await f.loadHtmlImage(prepared.image)
   const out = []
   // 경우: [이름, 확대 배율(가운데 위 기준), 가로 이동, 세로 이동]
-  for (const [name, k, sx, sy] of [['same', 1, 0, 0], ['bigger1.15', 1.15, 0, 0], ['shift', 1, 14, 22], ['bigger1.3+shift', 1.3, -12, 10]]) {
+  for (const [name, k, sx, sy] of [['same', 1, 0, 0], ['bigger1.15', 1.15, 0, 0], ['shift', 1, 14, 22], ['bigger1.3+shift', 1.3, -12, 10], ['far', 1.55, 70, 95], ['small0.8', 0.8, -40, 30]]) {
     const c = document.createElement('canvas'); c.width = 880; c.height = 1184
     const x = c.getContext('2d')
     x.fillStyle = '#7a6f66'; x.fillRect(0, 0, 880, 1184)

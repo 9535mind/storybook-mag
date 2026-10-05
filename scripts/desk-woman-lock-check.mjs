@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 여자 몸 잇기 잠금 점검(2026-10-05 수정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw184)
+ * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw185)
  * 사용: node scripts/desk-woman-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'
@@ -29,6 +29,8 @@ const checks = [
   ['이어 그리기: 보호 마스크 90%·가장자리 부드럽게', /Math\.round\(dh \* 0\.9\)/.test(app) && /1 - md\[i\] \/ 255/.test(app)],
   ['이어 그리기 시간은 최대 110초', /'continue', undefined, 110\)/.test(app) && /Math\.min\(capSec \|\| 200, left\)/.test(app)],
   ['이어 그리기 최대 2번, 실패하면 가짜 얼굴로 대신하지 않고 멈춘다', /attempt < 2/.test(app) && /가짜 얼굴로 대신하지 않습니다/.test(app) && /__deskWomanContinueFallback/.test(app)],
+  ['멈춘 이유를 일반 실패 문구가 덮어쓰지 않는다(deskBodyFail)', /function deskBodyFail\(defaultText\)/.test(app) && /window\.__deskBodyStop = \{ at: Date\.now\(\), text: stop \}/.test(app) && (app.match(/deskBodyFail\(/g) || []).length >= 6],
+  ['이어 그리기 복원 탐색 범위(확대 0.7~1.7, 이동 ±150px)', /\[0\.7, 0\.78, 0\.86, 0\.94, 1, 1\.07, 1\.15, 1\.25, 1\.36, 1\.5, 1\.7\]/.test(app) && /oy = -50; oy <= 50; oy \+= 3/.test(app)],
   ['이어 그리기 결과가 그려졌는지(unpainted) 검사', /tryLog\.paint < 4/.test(app) && /'unpainted'/.test(app)],
   ['여자 서서 전신: 증명사진의 옷 그대로(검정 정장 강제 없음)', !/Black office blazer/.test(tale) && /Keep EXACTLY the clothes visible in the identity image: the same top and the same jacket if she wears one/.test(tale)],
   [
