@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw202'
+window.__DESK_BUILD = '20261005mw203'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -14864,6 +14864,23 @@ function swapDeskCastSlots() {
 function deskBodyFail(defaultText) {
   const r = window.__deskBodyStop
   if (r && r.text && Date.now() - r.at < 180000) return r.text
+  // 이유가 따로 기록되지 않은 실패: 마지막 작업의 요약(이어 그리기 결과, 서서 전신 거절, 얼굴 붙이기 기록, 걸린 시간)을 붙인다
+  try {
+    const t = window.__deskTiming
+    if (t) {
+      const parts = []
+      if (t.continue) parts.push(`이어그리기: ${String(t.continue.reason || '').slice(0, 300)}`)
+      if (t.continue && t.continue.fellBack) parts.push('서서 전신으로 넘어감')
+      const acc = (window.__deskAcceptLog || []).slice(-4).join(',')
+      if (acc) parts.push(`거절: ${acc}`)
+      if (t.holdLog) parts.push(`얼굴: ${JSON.stringify(t.holdLog).slice(0, 200)}`)
+      if (t.jobs) parts.push(`작업: ${t.jobs.map((j) => `${j.label}${j.ok ? '' : '(실패)'} ${j.sec}초`).join(' / ')}`)
+      if (t.totalSec != null) parts.push(`총 ${t.totalSec}초`)
+      if (parts.length) return `${defaultText} [${parts.join(' | ')}]`
+    }
+  } catch (_) {
+    /* 요약을 못 만들면 기본 문구 */
+  }
   return defaultText
 }
 
