@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw216'
+window.__DESK_BUILD = '20261005mw217'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -19658,6 +19658,7 @@ function initAdultDesk() {
     }
     let stable = null
     let headLog = null
+    const shapeUrls = []
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const job = await globalThis.postTaleSceneJob(
         {
@@ -19675,6 +19676,7 @@ function initAdultDesk() {
         180,
       )
       if (!job || job.auth || !job.imageUrl) return
+      shapeUrls.push(String(job.imageUrl).slice(0, 160))
       const cand = await stabilizeDeskStill(job.imageUrl)
       if (!cand) {
         setFormStatus('그림이 안 붙었습니다. 같은 버튼을 다시 누르세요.', true)
@@ -19702,7 +19704,7 @@ function initAdultDesk() {
     }
     window.__deskShapeHeadLog = headLog
     if (typeof isNearlyBlackImage === 'function' && (await isNearlyBlackImage(stable))) {
-      setFormStatus('엔진이 빈 장을 냈습니다. 가운데는 원본입니다.', true)
+      setFormStatus(`엔진이 빈 장을 냈습니다. 가운데는 원본입니다. [${shapeUrls.join(' + ')}]`, true)
       return
     }
     if (await deskMissingShoes(stable)) {
