@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw179'
+window.__DESK_BUILD = '20261005mw180'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12958,7 +12958,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       ? zipCloth
       : await deskClothRgb(source, 0.58, 0.92).catch(() => null)
     const clothHex = sourceCloth?.hex || ''
-    const runJob = async (image, label, quiet, style, mask) => {
+    const runJob = async (image, label, quiet, style, mask, capSec) => {
       const left = opts?.deadline
         ? Math.max(8, Math.round((opts.deadline - Date.now()) / 1000))
         : 200
@@ -12982,7 +12982,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           clothesMask: typeof mask === 'string' && mask.startsWith('data:image/') ? mask : undefined,
         },
         label,
-        Math.min(200, left),
+        Math.min(capSec || 200, left),
         quiet ? () => {} : undefined,
       )
       timing.jobs.push({ label, sec: Math.round((Date.now() - jobT0) / 1000), ok: Boolean(job && !job.auth) })
@@ -13262,7 +13262,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       try {
         setStatus(`${index}/${total} 사진의 장면을 살려 아래로 이어 그리는 중…`, false)
         const prepared = await buildBodyContinueCanvas(source, [864, 1152])
-        const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue')
+        const contT0 = Date.now()
+        // 이어 그리기에 쓰는 시간은 최대 110초. 실패해도 아래 서서 전신 방식에 시간이 남게 한다
+        const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110)
+        contLog.sec = Math.round((Date.now() - contT0) / 1000)
         if (alt?.auth) return alt
         if (alt?.display) {
           const restored = await restoreProtectedExtendPixels(alt.display, prepared)

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 여자 몸 잇기 잠금 점검(2026-10-05 수정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw179)
+ * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw180)
  * 사용: node scripts/desk-woman-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'
@@ -27,6 +27,7 @@ const checks = [
   ['일상 사진 여자는 장면 이어 그리기 경로를 탄다', /isWomanBody && !drawn && !plainSource && window\.__deskWomanContinue !== false/.test(app)],
   ['이어 그리기: 3:4 캔버스 + 원본 화소 복원', /buildBodyContinueCanvas\(source, \[864, 1152\]\)/.test(app) && /restoreProtectedExtendPixels\(alt\.display, prepared\)/.test(app)],
   ['이어 그리기: 보호 마스크 90%·가장자리 부드럽게', /Math\.round\(dh \* 0\.9\)/.test(app) && /1 - md\[i\] \/ 255/.test(app)],
+  ['이어 그리기 시간은 최대 110초', /'continue', undefined, 110\)/.test(app) && /Math\.min\(capSec \|\| 200, left\)/.test(app)],
   ['이어 그리기가 안 되면 서서 전신으로 넘어간다', /서서 전신 방식으로 넘어갑니다/.test(app)],
   ['서버 이어 그리기 모드 문구(좌우 여백 포함)', /stretched empty space below it and at both sides/.test(tale)],
   ['남자 경로는 엄격 조건 없이 그대로', /isManHold \? undefined/.test(app)],
