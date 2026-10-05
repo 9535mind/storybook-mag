@@ -134,7 +134,7 @@ await browser.close()
 
 const text = `${afterCast.status} ${afterCast.form} ${final.status} ${final.form}`
 const ok =
-  /20261005mw195/.test(afterCast.build) &&
+  /20261005mw196/.test(afterCast.build) &&
   clicked &&
   /아이보리 운동복/.test(text) &&
   !/다른 얼굴|전신을 잘라|빈 장|저장하지 않습니다/.test(`${final.status} ${final.form}`)
