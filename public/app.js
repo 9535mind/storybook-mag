@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw165'
+window.__DESK_BUILD = '20261005mw166'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11758,6 +11758,196 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   }
 
   /**
+   * 남자 전신 비율 보정. 생성 결과는 몸통이 길고 다리가 짧게 나온다(다리 약 27~35%, 정상 46~48%).
+   * 머리·목(위 18.5%)과 신발(아래 4.5%)은 그대로 두고, 그 사이에서 몸통은 줄이고 다리는 늘린다.
+   * 다리가 이미 길면(40% 이상) 건드리지 않는다. 실패하면 원본을 돌려준다.
+   */
+  async function fixManProportions(src) {
+    const log = { engine: 'proportion' }
+    window.__deskPropLog = log
+    try {
+      const img = await loadHtmlImage(src)
+      let W = img.naturalWidth
+      let H = img.naturalHeight
+      if (!(W > 80 && H > 160)) return src
+      const c0 = document.createElement('canvas')
+      c0.width = W
+      c0.height = H
+      const x0 = c0.getContext('2d', { willReadFrequently: true })
+      x0.drawImage(img, 0, 0)
+      const px = x0.getImageData(0, 0, W, H).data
+      // 맨 아래 균일한 어두운 띠(생성 찌꺼기)는 잘라 낸다
+      let barTop = H
+      for (let y = H - 1; y > H * 0.9; y -= 1) {
+        let dark = 0
+        let n = 0
+        for (let x = 0; x < W; x += 4) {
+          const i = (y * W + x) * 4
+          n += 1
+          if (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114 < 70) dark += 1
+        }
+        if (dark > n * 0.9) barTop = y
+        else break
+      }
+      if (barTop < H) {
+        log.bar = H - barTop
+        H = barTop - 6
+      }
+      // 배경색: 줄마다 좌우 가장자리에서 잰다 (바닥이 더 밝은 사진도 맞게)
+      const rowBg = new Float32Array(H * 6)
+      for (let y = 0; y < H; y += 1) {
+        for (let side = 0; side < 2; side += 1) {
+          const xs = side === 0 ? 0 : W - 24
+          let r = 0
+          let g = 0
+          let b = 0
+          for (let x = xs; x < xs + 24; x += 1) {
+            const i = (y * W + x) * 4
+            r += px[i]
+            g += px[i + 1]
+            b += px[i + 2]
+          }
+          rowBg[y * 6 + side * 3] = r / 24
+          rowBg[y * 6 + side * 3 + 1] = g / 24
+          rowBg[y * 6 + side * 3 + 2] = b / 24
+        }
+      }
+      const isPerson = (x, y) => {
+        const i = (y * W + x) * 4
+        let best = 1e9
+        for (let side = 0; side < 2; side += 1) {
+          const dr = px[i] - rowBg[y * 6 + side * 3]
+          const dg = px[i + 1] - rowBg[y * 6 + side * 3 + 1]
+          const db = px[i + 2] - rowBg[y * 6 + side * 3 + 2]
+          best = Math.min(best, Math.sqrt(dr * dr + dg * dg + db * db))
+        }
+        return best > 38
+      }
+      const cxa = Math.round(W * 0.28)
+      const cxb = Math.round(W * 0.72)
+      const rowHas = (y, a, b, need) => {
+        let n = 0
+        for (let x = a; x < b; x += 1) {
+          if (isPerson(x, y)) {
+            n += 1
+            if (n >= need) return true
+          }
+        }
+        return false
+      }
+      let top = -1
+      for (let y = 0; y < H * 0.4 && top < 0; y += 1) if (rowHas(y, cxa, cxb, 6)) top = y
+      let soles = -1
+      for (let y = H - 1; y > H * 0.6 && soles < 0; y -= 1) if (rowHas(y, cxa, cxb, 6)) soles = y
+      if (top < 0 || soles < 0 || soles - top < H * 0.5) return src
+      log.top = top
+      log.soles = soles
+      if (!log.bar && soles >= H - 3) {
+        log.skip = 'feet_cut'
+        return src
+      }
+      const Hc = soles - top
+      // 사타구니: 몸 중심선 부근에서 다리 사이 틈이 처음 생기는 줄 (팔과 몸통 사이 틈은 세지 않는다)
+      let figL = W
+      let figR = 0
+      const headRow = Math.round(top + Hc * 0.1)
+      for (let x = 0; x < W; x += 1) {
+        if (isPerson(x, headRow)) {
+          if (x < figL) figL = x
+          if (x > figR) figR = x
+        }
+      }
+      const midX = figR > figL ? (figL + figR) / 2 : W / 2
+      const centerGap = (y) => {
+        let runStart = -1
+        for (let x = Math.round(midX - W * 0.1); x <= Math.round(midX + W * 0.1); x += 1) {
+          const gapPx = !isPerson(x, y)
+          if (gapPx && runStart < 0) runStart = x
+          if ((!gapPx || x === Math.round(midX + W * 0.1)) && runStart >= 0) {
+            const w = x - runStart
+            const mid = runStart + w / 2
+            if (w >= 5 && w < W * 0.2 && Math.abs(mid - midX) < W * 0.07) return true
+            runStart = -1
+          }
+        }
+        return false
+      }
+      // 다리 사이 틈은 발 쪽으로 끝까지 이어진다. 셔츠 단추 줄 같은 짧은 밝은 선은 걸러진다
+      const y0g = Math.round(top + Hc * 0.45)
+      const y1g = Math.round(soles - Hc * 0.1)
+      const gapRows = []
+      for (let y = y0g; y <= y1g; y += 1) gapRows.push(centerGap(y) ? 1 : 0)
+      let crotch = -1
+      let suffix = 0
+      for (let k = gapRows.length - 1; k >= 0; k -= 1) {
+        suffix += gapRows[k]
+        const len = gapRows.length - k
+        if (len >= 30 && suffix / len >= 0.8) crotch = y0g + k
+      }
+      if (crotch < 0) {
+        // 바지가 붙어 다리 사이 틈이 안 보이면 생성 결과의 전형값(다리 약 35%)으로 가정한다
+        crotch = Math.round(soles - Hc * 0.35)
+        log.assumed = true
+      }
+      const legs = (soles - crotch) / Hc
+      log.legs = Number(legs.toFixed(3))
+      if (legs >= 0.4) {
+        log.skip = 'already_ok'
+        return src
+      }
+      const strength = Math.max(0.4, Math.min(1, (0.44 - legs) / 0.14))
+      const sTop = 1 - 0.2 * strength
+      const sBot = 1 + 0.45 * strength
+      const neckY = top + 0.185 * Hc
+      const shoeY = top + 0.955 * Hc
+      const ys = new Float64Array(H)
+      const nw = new Float64Array(H)
+      let acc = 0
+      for (let y = 0; y < H; y += 1) {
+        ys[y] = y
+        const f = (y - top) / Hc
+        const sc = y >= neckY && y < shoeY ? sTop + (sBot - sTop) / (1 + Math.exp(-14 * (f - 0.66))) : 1
+        nw[y] = acc
+        acc += sc
+      }
+      const newH = Math.ceil(acc)
+      const out = document.createElement('canvas')
+      out.width = W
+      out.height = newH
+      const octx = out.getContext('2d', { willReadFrequently: true })
+      const od = octx.createImageData(W, newH)
+      const o = od.data
+      let j = 0
+      for (let yn = 0; yn < newH; yn += 1) {
+        while (j < H - 2 && nw[j + 1] <= yn) j += 1
+        const span = Math.max(1e-6, nw[j + 1] - nw[j])
+        const ysrc = Math.min(H - 1.001, j + Math.max(0, Math.min(1, (yn - nw[j]) / span)))
+        const y0 = Math.floor(ysrc)
+        const t = ysrc - y0
+        for (let x = 0; x < W; x += 1) {
+          const a = (y0 * W + x) * 4
+          const b = ((y0 + 1) * W + x) * 4
+          const d = (yn * W + x) * 4
+          o[d] = px[a] * (1 - t) + px[b] * t
+          o[d + 1] = px[a + 1] * (1 - t) + px[b + 1] * t
+          o[d + 2] = px[a + 2] * (1 - t) + px[b + 2] * t
+          o[d + 3] = 255
+        }
+      }
+      octx.putImageData(od, 0, 0)
+      const newSoles = nw[soles]
+      const newCrotch = nw[crotch]
+      log.after = Number(((newSoles - newCrotch) / (newSoles - nw[top])).toFixed(3))
+      log.size = [W, newH]
+      return out.toDataURL('image/png')
+    } catch (err) {
+      log.skip = 'err'
+      log.message = err instanceof Error ? err.message : String(err)
+      return src
+    }
+  }
+
+  /**
    * 원본 증명사진의 머리(얼굴·머리카락·목) 화소를 이은 전신 위에 그대로 얹는다.
    * 얼굴 교체 엔진처럼 새로 그리지 않는다. 좌표 추정(LLM)에 기대지 않고,
    * 원본 머리와 생성된 머리를 크기·위치를 바꿔 가며 겹쳐 보아 가장 닮은 자리에 얹는다.
@@ -11790,14 +11980,56 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       defringeCutout(cut)
       const cd = cctx.getImageData(0, 0, sw, sh)
       const d = cd.data
+      // 머리 꼭대기: 줄마다 좌우 가장자리 배경색과 다른 화소가 이어지는 첫 줄. 그 위에 남은 배경 띠는 지운다
+      {
+        const edge = (y, side) => {
+          const xs = side === 0 ? 0 : sw - 12
+          let r = 0
+          let g = 0
+          let b = 0
+          for (let x = xs; x < xs + 12; x += 1) {
+            const i = (y * sw + x) * 4
+            r += rawPx[i]
+            g += rawPx[i + 1]
+            b += rawPx[i + 2]
+          }
+          return [r / 12, g / 12, b / 12]
+        }
+        let topC = -1
+        for (let y = 0; y < sh * 0.6 && topC < 0; y += 1) {
+          const L = edge(y, 0)
+          const R = edge(y, 1)
+          let run = 0
+          for (let x = Math.round(sw * 0.15); x < Math.round(sw * 0.85); x += 1) {
+            const i = (y * sw + x) * 4
+            const dl = Math.hypot(rawPx[i] - L[0], rawPx[i + 1] - L[1], rawPx[i + 2] - L[2])
+            const dr = Math.hypot(rawPx[i] - R[0], rawPx[i + 1] - R[1], rawPx[i + 2] - R[2])
+            if (Math.min(dl, dr) > 30) {
+              run += 1
+              if (run >= 6) {
+                topC = y
+                break
+              }
+            } else run = 0
+          }
+        }
+        if (topC > 2) {
+          for (let y = 0; y < topC - 1; y += 1) for (let x = 0; x < sw; x += 1) d[(y * sw + x) * 4 + 3] = 0
+        }
+      }
+      // 4픽셀 이상 이어진 구간만 몸으로 본다 (배경 잔점 하나로 폭이 넓어지지 않게)
       const rowSpan = (y) => {
         let a = -1
         let b = -1
+        let runLen = 0
         for (let x = 0; x < sw; x += 1) {
           if (d[(y * sw + x) * 4 + 3] > 128) {
-            if (a < 0) a = x
-            b = x
-          }
+            runLen += 1
+            if (runLen >= 4) {
+              if (a < 0) a = x - 3
+              b = x
+            }
+          } else runLen = 0
         }
         return a < 0 ? null : [a, b]
       }
@@ -11854,10 +12086,34 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         }
       }
       const cx = cxN ? cxSum / cxN : sw / 2
+      // 2-1) 배경 제거가 머리 둘레(보호 영역)에서 못 지운 배경을, 줄마다 가장자리 배경색과 거의 같은 화소로 찾아 지운다
+      for (let y = Math.max(0, top - 2); y < Math.min(sh, top + Math.round(headW * 0.95)); y += 1) {
+        const eL = [0, 0, 0]
+        const eR = [0, 0, 0]
+        for (let k = 0; k < 12; k += 1) {
+          const il = (y * sw + k) * 4
+          const ir = (y * sw + (sw - 1 - k)) * 4
+          for (let c = 0; c < 3; c += 1) {
+            eL[c] += rawPx[il + c] / 12
+            eR[c] += rawPx[ir + c] / 12
+          }
+        }
+        for (let x = 0; x < sw; x += 1) {
+          const i = (y * sw + x) * 4
+          if (d[i + 3] === 0) continue
+          const dl = Math.hypot(rawPx[i] - eL[0], rawPx[i + 1] - eL[1], rawPx[i + 2] - eL[2])
+          const dr = Math.hypot(rawPx[i] - eR[0], rawPx[i + 1] - eR[1], rawPx[i + 2] - eR[2])
+          if (Math.min(dl, dr) < 14) d[i + 3] = 0
+        }
+      }
       // 3) 회색 머리가 배경색과 비슷해 깎인 곳을 메운다 (머리 윗부분 줄은 좌우 끝 사이가 모두 머리)
       for (let y = top; y < top + Math.round(headW * 0.55) && y < sh; y += 1) {
         const sp = rowSpan(y)
         if (!sp || sp[1] - sp[0] > headW * 1.15) continue
+        // 이미 머리로 찬 비율이 낮으면(잔머리만 있는 줄) 배경을 채우게 되므로 건너뛴다
+        let filled = 0
+        for (let x = sp[0]; x <= sp[1]; x += 1) if (d[(y * sw + x) * 4 + 3] > 128) filled += 1
+        if (filled < (sp[1] - sp[0] + 1) * 0.6) continue
         for (let x = sp[0]; x <= sp[1]; x += 1) {
           const i = (y * sw + x) * 4
           if (d[i + 3] <= 128) {
@@ -12012,7 +12268,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const hx1 = gAx + (cx + headW * 0.78) * scale
       const ex0 = Math.max(6, Math.round(hx0))
       const ex1 = Math.min(gw - 7, Math.round(hx1))
-      const ey0 = 0
+      const ey0 = Math.max(0, Math.round(gAy + top * scale - headW * scale * 0.1))
       const ey1 = Math.min(gh - 8, Math.round(gAy + chinY * scale))
       if (ex1 - ex0 > 8 && ey1 - ey0 > 8) {
         const od = octx.getImageData(0, 0, gw, gh)
@@ -12027,27 +12283,19 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         const H = ey1 - ey0
         const fill = new Float32Array(W * H * 3)
         for (let yy = 0; yy < H; yy += 1) {
-          const u = yy / Math.max(1, H - 1)
-          for (let xx = 0; xx < W; xx += 1) {
-            const t = xx / Math.max(1, W - 1)
-            for (let c = 0; c < 3; c += 1) {
-              const Lc = edgeAvg(ex0, ey0 + yy, c, -1, 0)
-              const Rc = edgeAvg(ex1, ey0 + yy, c, 1, 0)
-              const Tc = ey0 === 0 ? at(ex0 + xx, 0, c) : edgeAvg(ex0 + xx, ey0, c, 0, -1)
-              const Bc = edgeAvg(ex0 + xx, ey1, c, 0, 1)
-              const corner =
-                (1 - t) * (1 - u) * (ey0 === 0 ? at(ex0, 0, c) : edgeAvg(ex0, ey0, c, 0, -1)) +
-                t * (1 - u) * (ey0 === 0 ? at(ex1, 0, c) : edgeAvg(ex1, ey0, c, 0, -1)) +
-                (1 - t) * u * edgeAvg(ex0, ey1, c, 0, 1) +
-                t * u * edgeAvg(ex1, ey1, c, 0, 1)
-              fill[(yy * W + xx) * 3 + c] = (1 - t) * Lc + t * Rc + (1 - u) * Tc + u * Bc - corner
+          for (let c = 0; c < 3; c += 1) {
+            const Lc = edgeAvg(ex0, ey0 + yy, c, -1, 0)
+            const Rc = edgeAvg(ex1, ey0 + yy, c, 1, 0)
+            for (let xx = 0; xx < W; xx += 1) {
+              const t = xx / Math.max(1, W - 1)
+              fill[(yy * W + xx) * 3 + c] = (1 - t) * Lc + t * Rc
             }
           }
         }
         const ramp = Math.max(14, Math.round((ex1 - ex0) * 0.22))
         for (let yy = 0; yy < H; yy += 1) {
           for (let xx = 0; xx < W; xx += 1) {
-            const a = Math.min(1, xx / ramp, (W - 1 - xx) / ramp, (H - 1 - yy) / ramp)
+            const a = Math.min(1, xx / ramp, (W - 1 - xx) / ramp, (H - 1 - yy) / ramp, ey0 > 0 ? yy / ramp : 1)
             const i = ((ey0 + yy) * gw + ex0 + xx) * 4
             for (let c = 0; c < 3; c += 1) g[i + c] = g[i + c] * (1 - a) + fill[(yy * W + xx) * 3 + c] * a
           }
@@ -12584,6 +12832,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         if (isMan) {
           const fitted = await fitKoreanManCanon(result.display)
           if (fitted) result.display = fitted
+          result.display = await fixManProportions(result.display)
+          timing.proportion = window.__deskPropLog
         } else {
           const fitted = await fitKoreanWomanCanon(result.display)
           if (fitted) result.display = fitted

@@ -36,5 +36,5 @@ const res = await page.evaluate(
   { src, o: b64(orig), st: b64(standing) },
 )
 console.log(JSON.stringify({ ...res, url: res.url ? res.url.length : 0 }))
-if (res.url) writeFileSync(outFile, Buffer.from(res.url.split(',')[1], 'base64'))
+if (res.url) writeFileSync(outFile, Buffer.from(res.url.split(",")[1], "base64"))
 await browser.close()
