@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw214'
+window.__DESK_BUILD = '20261005mw215'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -19705,11 +19705,12 @@ function initAdultDesk() {
       )
       return
     }
-    if (lookId && typeof deskFacesHold === 'function') {
+    // 머리를 직전 사진의 원본 화소로 되돌렸으면(headLog.ok) 얼굴은 원본이라 닮음 검사를 하지 않는다
+    if (!headLog?.ok && lookId && typeof deskFacesHold === 'function') {
       const hold = await deskFacesHold(lookId, stable)
       if (!hold.ok) {
         setFormStatus(
-          `${spec.noun}가 다른 얼굴이라 저장하지 않습니다. 가운데는 원본입니다.`,
+          `${spec.noun}가 다른 얼굴이라 저장하지 않습니다. 가운데는 원본입니다. [머리 복원: ${JSON.stringify(headLog || {})}]`,
           true,
         )
         return
