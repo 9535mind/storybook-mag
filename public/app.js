@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw196'
+window.__DESK_BUILD = '20261005mw197'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -13286,7 +13286,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           }
           tryLog.faceH = Number(faceH.toFixed(3))
           // 1번째는 머리 28%(mw187 실측: 이 구도는 모델이 그려 준다), 2번째는 20%로 달리 시도한다. 비율은 프롬프트로 모델에게 자연스럽게 그리라고 지시한다
-          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH, headTarget: [0.13, 0.16, 0.11, 0.14, 0.12][attempt] })
+          const prepared = await buildBodyContinueCanvas(source, [864, 1152], { faceH, headTarget: [0.16, 0.2, 0.14, 0.18, 0.15][attempt] })
           const contT0 = Date.now()
           // 한 번에 최대 110초
           const alt = await runJob(prepared.image, `${index}/${total} 장면 이어 그리기`, false, 'continue', undefined, 110, attempt >= 2 && attempt % 2 === 0 && tryLogs[attempt - 1]?.reason === 'black')
