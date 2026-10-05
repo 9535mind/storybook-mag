@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw217'
+window.__DESK_BUILD = '20261005mw218'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -19599,7 +19599,7 @@ function initAdultDesk() {
       poll: '팔·몸 비율을 보는 중',
       title: '몸 보기',
       promptLabel: '아이보리 운동복 · 팔 길이',
-      done: '아이보리 운동복입니다. 겉옷 검정은 되고 속옷 검정은 없습니다. 가운데가 그 장입니다.',
+      done: '아이보리 운동복입니다. 가운데가 그 장입니다.',
     }
     if (typeof isLoggedIn === 'function' && !isLoggedIn()) {
       if (typeof showPinGate === 'function') showPinGate('로그인이 필요해요.')
