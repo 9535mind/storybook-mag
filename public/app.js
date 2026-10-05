@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw213'
+window.__DESK_BUILD = '20261005mw214'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -14533,6 +14533,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   globalThis.lockPoseFacesOntoResult = lockPoseFacesOntoResult
   globalThis.postTaleSceneJob = postTaleSceneJob
   globalThis.extendOneIdBody = extendOneIdBody
+  globalThis.restoreHeadFromSource = restoreHeadFromSource
   globalThis.balanceBodyProportion = balanceBodyProportion
   globalThis.widenMaleTorso = widenMaleTorso
   globalThis.widenWomanFrame = widenWomanFrame
@@ -19679,7 +19680,10 @@ function initAdultDesk() {
         setFormStatus('그림이 안 붙었습니다. 같은 버튼을 다시 누르세요.', true)
         return
       }
-      const head = await restoreHeadFromSource(cand, src)
+      const head =
+        typeof globalThis.restoreHeadFromSource === 'function'
+          ? await globalThis.restoreHeadFromSource(cand, src)
+          : { url: '', log: { skip: 'no_fn' } }
       headLog = head.log
       if (head.url) {
         stable = head.url
