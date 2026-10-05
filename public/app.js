@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw173'
+window.__DESK_BUILD = '20261005mw174'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -11847,10 +11847,17 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const octx = out.getContext('2d', { willReadFrequently: true })
       const od = octx.createImageData(W, H)
       const o = od.data
+      const rA = W * 0.36
+      const rB = W * 0.48
       for (let y = 0; y < H; y += 1) {
         const s = scaleAt(y)
         for (let x = 0; x < W; x += 1) {
-          const xs = Math.max(0, Math.min(W - 1.001, cx + (x - cx) / s))
+          // 중심에서 rA 안쪽은 1/s 로 줄이고, rA~rB 사이에서 서서히 원래 위치로 돌아와 가장자리는 그대로 둔다 (가장자리 복제 줄무늬 방지)
+          const u = x - cx
+          const au = Math.abs(u)
+          const wt = au <= rA ? 0 : au >= rB ? 1 : smooth((au - rA) / (rB - rA))
+          const srcU = (au / s) * (1 - wt) + au * wt
+          const xs = Math.max(0, Math.min(W - 1.001, cx + (u < 0 ? -srcU : srcU)))
           const xi = Math.floor(xs)
           const t = xs - xi
           const a = (y * W + xi) * 4
@@ -13112,8 +13119,11 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         setStatus(`${index}/${total} 얼굴·어깨 비율을 맞추는 중…`, false)
         const isMan = gender === 'male' || gender === 'man'
         if (isMan) {
-          const fitted = await fitKoreanManCanon(result.display)
-          if (fitted) result.display = fitted
+          // 옛 캐논(어깨를 얼굴 폭 2.75배로 넓히고 6줄 띠로 윤곽을 계단지게 함)은 실제 체형(어깨÷머리 약 2.2)과 맞지 않아 끈다
+          if (window.__deskManCanon === true) {
+            const fitted = await fitKoreanManCanon(result.display)
+            if (fitted) result.display = fitted
+          }
           result.display = await fixManProportions(result.display)
           timing.proportion = window.__deskPropLog
           result.display = await narrowManShoulders(result.display)
