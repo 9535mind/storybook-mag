@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw185'
+window.__DESK_BUILD = '20261005mw186'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -8702,13 +8702,13 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     const faceH = Number(opts?.faceH)
     if (faceH > 0.05) {
       const headFrac = Math.min(0.9, faceH * 1.35)
-      scale = Math.min(scale, (0.145 * ch) / headFrac / ih)
+      scale = Math.min(scale, (0.18 * ch) / headFrac / ih)
     }
     const dw = Math.max(8, Math.round(iw * scale))
     const dh = Math.max(8, Math.round(ih * scale))
     const dx = Math.round((cw - dw) / 2)
     const dy = faceH > 0.05 ? Math.round(ch * 0.02) : 0
-    // 빈 곳은 사진 가장자리 4px 를 늘려 채운 뒤 크게 번지게 한다 (세로줄 무늬를 그대로 두면 모델이 줄무늬를 따라 그리고, 사진이 액자처럼 떠 보인다)
+    // 빈 곳은 사진 가장자리를 늘려 채운다 (모델이 채워야 할 곳으로 인식하는 신호)
     const fill = document.createElement('canvas')
     fill.width = cw
     fill.height = ch
@@ -8721,10 +8721,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     }
     if (dy > 2) fctx.drawImage(img, 0, 0, iw, 4, dx, 0, dw, dy + 2)
     if (dy + dh < ch) fctx.drawImage(img, 0, ih - 6, iw, 6, 0, dy + dh - 2, cw, ch - dy - dh + 2)
-    ctx.save()
-    ctx.filter = `blur(${Math.max(14, Math.round(cw * 0.03))}px)`
-    ctx.drawImage(fill, -20, -20, cw + 40, ch + 40)
-    ctx.restore()
+    // 번지게 하면 모델이 '이미 완성된 흐릿한 배경'으로 보고 몸을 그리지 않는다(mw184 실측: unpainted). 늘려 채운 줄무늬를 그대로 둔다
+    ctx.drawImage(fill, 0, 0)
     ctx.drawImage(img, 0, 0, iw, ih, dx, dy, dw, dh)
     // 보호 마스크: 검정 = 원본 화소를 그대로 둔다. 사진 거의 전체(90%)를 지키고 가장자리는 부드럽게
     const mask = document.createElement('canvas')
@@ -13287,7 +13285,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           tryLog.message = err instanceof Error ? err.message : String(err)
         }
       }
-      contLog.reason = contLog.tries.map((t) => t.reason).join('+')
+      contLog.reason = contLog.tries
+        .map((t) => `${t.reason}${t.restore && t.restore.coarse != null ? ` 일치${t.restore.coarse}` : ''}${t.paint != null ? ` 그림${t.paint}` : ''}${t.sec != null ? ` ${t.sec}초` : ''}`)
+        .join(' + ')
       if (window.__deskWomanContinueFallback === true) {
         contLog.fellBack = true
         console.warn('장면 이어 그리기를 쓰지 못해 서서 전신 방식으로 넘어갑니다:', JSON.stringify(contLog))
