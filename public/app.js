@@ -11779,21 +11779,30 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       const x0 = c0.getContext('2d', { willReadFrequently: true })
       x0.drawImage(img, 0, 0)
       const px = x0.getImageData(0, 0, W, H).data
+      // 줄마다 좌우 가장자리 배경색을 따로 재고, 사람 판정은 더 가까운 쪽 기준 (한쪽 모서리의 물체에 속지 않게)
       const bgAt = (y) => {
-        const e = [0, 0, 0]
+        const e = [0, 0, 0, 0, 0, 0]
         for (let kk = 0; kk < 24; kk += 1) {
           const il = (y * W + kk) * 4
           const ir = (y * W + (W - 1 - kk)) * 4
-          for (let c = 0; c < 3; c += 1) e[c] += (px[il + c] + px[ir + c]) / 48
+          for (let c = 0; c < 3; c += 1) {
+            e[c] += px[il + c] / 24
+            e[3 + c] += px[ir + c] / 24
+          }
         }
         return e
       }
+      const dist = (i, e) =>
+        Math.min(
+          Math.hypot(px[i] - e[0], px[i + 1] - e[1], px[i + 2] - e[2]),
+          Math.hypot(px[i] - e[3], px[i + 1] - e[4], px[i + 2] - e[5]),
+        )
       const personRun = (y, a, b, need) => {
         const e = bgAt(y)
         let n = 0
         for (let x = a; x < b; x += 1) {
           const i = (y * W + x) * 4
-          if (Math.hypot(px[i] - e[0], px[i + 1] - e[1], px[i + 2] - e[2]) > 38) {
+          if (dist(i, e) > 38) {
             n += 1
             if (n >= need) return true
           }
@@ -11818,7 +11827,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       let fr = 0
       for (let x = 0; x < W; x += 1) {
         const i = (headRow * W + x) * 4
-        if (Math.hypot(px[i] - e[0], px[i + 1] - e[1], px[i + 2] - e[2]) > 38) {
+        if (dist(i, e) > 38) {
           if (x < fl) fl = x
           if (x > fr) fr = x
         }

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright-core'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const [orig, standing, outFile] = process.argv.slice(2)
+const [orig, standing, outFile, shrink] = process.argv.slice(2)
 const app = readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8')
 const grab = (name) => {
   const m = new RegExp(String.raw`\n  (async )?function ${name}\b`).exec(app)
@@ -28,12 +28,13 @@ const browser = await chromium.launch({
 const page = await browser.newPage()
 await page.setContent('<html><body></body></html>')
 const res = await page.evaluate(
-  async ({ src, o, st }) => {
+  async ({ src, o, st, shrink }) => {
+    if (shrink) window.__deskHeadShrink = Number(shrink)
     const t = performance.now()
     const r = await new Function(`${src}; return pastePixelHeadOnStanding`)()(st, o)
     return { url: r.url, log: r.log, ms: Math.round(performance.now() - t) }
   },
-  { src, o: b64(orig), st: b64(standing) },
+  { src, o: b64(orig), st: b64(standing), shrink },
 )
 console.log(JSON.stringify({ ...res, url: res.url ? res.url.length : 0 }))
 if (res.url) writeFileSync(outFile, Buffer.from(res.url.split(",")[1], "base64"))
