@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw175'
+window.__DESK_BUILD = '20261005mw176'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12090,22 +12090,22 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       }
       const legs = (soles - crotch) / Hc
       log.legs = Number(legs.toFixed(3))
-      // 사타구니가 실제로 보였는데(가정값 아님) 다리가 45.5% 보다 길면 서양식 하체다: 목표 44% 로 줄인다
-      const longLegs = !log.assumed && legs > 0.455
-      if (legs >= 0.43 && !longLegs) {
+      // 사타구니가 실제로 보였는데(가정값 아님) 다리가 44% 보다 길면 서양식 하체다: 목표 42% 로 줄인다
+      const longLegs = !log.assumed && legs > 0.44
+      if (legs >= 0.41 && !longLegs) {
         log.skip = 'already_ok'
         return src
       }
-      const strength = Math.max(0.5, Math.min(1, (0.455 - legs) / 0.12))
+      const strength = Math.max(0.5, Math.min(1, (0.44 - legs) / 0.12))
       const sTop = 1 - 0.2 * strength
-      const sBot = 1 + 0.48 * strength
+      const sBot = 1 + 0.42 * strength
       const neckY = top + 0.185 * Hc
       const shoeY = top + 0.955 * Hc
       let cLegs = 1
       if (longLegs) {
         const L1 = Math.max(10, shoeY - crotch)
         const shoeLen = soles - shoeY
-        cLegs = Math.max(0.82, Math.min(1, (0.44 * (Hc - L1) - shoeLen) / (0.56 * L1)))
+        cLegs = Math.max(0.76, Math.min(1, (0.42 * (Hc - L1) - shoeLen) / (0.58 * L1)))
         log.compress = Number(cLegs.toFixed(3))
       }
       const smoothS = (v) => {
