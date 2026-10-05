@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw206'
+window.__DESK_BUILD = '20261005mw207'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -13497,6 +13497,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     if (isWomanBody && !drawn && window.__deskWomanContinue !== false) {
       const contLog = { engine: 'continue', tries: [] }
       timing.continue = contLog
+      // 얼굴만 달라진(restore_miss) 그림 중 몸이 그려진 것: 실패 시 이 전신에 원본 얼굴을 오려 얹는 후보
+      let cutCand = null
       // 이어 그린 결과가 정말 그려졌는지: 늘려 채운 빈 곳은 세로줄 무늬라 아래 영역에서 줄 사이 차이가 거의 없다
       const looksPainted = async (display) => {
         const img = await loadHtmlImage(display)
@@ -13615,6 +13617,9 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           tryLog.restore = rr.log
           if (!rr.url) {
             tryLog.reason = 'restore_miss'
+            if (tryLog.paint0 >= 4 && (!cutCand || tryLog.paint0 > cutCand.paint0)) {
+              cutCand = { display: alt.display, paint0: tryLog.paint0, prepared, url: tryLog.url }
+            }
             continue
           }
           const restored = rr.url
@@ -13660,6 +13665,30 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             `${t.reason}${t.restore && t.restore.coarse != null ? ` 일치${t.restore.coarse}` : ''}${t.paint != null ? ` 그림${t.paint}` : ''}${t.paint0 != null ? ` 그림0 ${t.paint0}` : ''}${t.avg != null ? ` 밝기${t.avg}/편차${t.flat}` : ''}${t.size ? ` ${t.size}` : ''}${t.nsfw != null ? ` 필터${t.nsfw}` : ''}${t.sec != null ? ` ${t.sec}초` : ''}${t.url ? ` [${t.url}]` : ''}`,
         )
         .join(' + ')
+      if (cutCand && window.__deskWomanContinueFallback !== true && window.__deskWomanFaceCut !== false) {
+        // 모델이 몸은 그렸지만 얼굴을 새로 그린 결과: 그 전신에 원본 사진의 얼굴(이마~턱)만 오려 얹는다 (새로 생성하지 않음)
+        try {
+          setStatus(`${index}/${total} 그려진 전신에 원본 얼굴을 얹는 중…`, false)
+          const fc = await pasteFaceCutoutOnStanding(cutCand.display, source)
+          contLog.faceCut = fc.log
+          if (fc.url) {
+            let out = fc.url
+            if (await sidesStreaky(out)) {
+              const im = await loadHtmlImage(out)
+              const pp = cutCand.prepared
+              const kx2 = im.naturalWidth / pp.cw
+              const ky2 = im.naturalHeight / pp.ch
+              const soft = await softenStreakSides(out, { x: pp.dx * kx2, y: pp.dy * ky2, w: pp.dw * kx2, h: pp.dh * ky2, rw: im.naturalWidth, rh: im.naturalHeight })
+              if (soft) out = soft
+            }
+            contLog.reason = `${contLog.reason} → 얼굴 오려 얹기`
+            timingDone()
+            return { display: out, remoteUrl: cutCand.url, gender, isolated: false, continued: true }
+          }
+        } catch (err) {
+          contLog.faceCut = { skip: 'err', message: err instanceof Error ? err.message : String(err) }
+        }
+      }
       if (window.__deskWomanContinueFallback === true || window.__deskWomanFaceCut !== false) {
         contLog.fellBack = true
         // 이어 그리기가 안 되면(배경이 복잡하거나 화소가 작은 사진): 서서 전신을 만들고 원본 얼굴(이마~턱)만 오려 얹는다. 교체 엔진 얼굴은 쓰지 않는다
