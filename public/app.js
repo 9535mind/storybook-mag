@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw164'
+window.__DESK_BUILD = '20261005mw165'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -12238,7 +12238,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (luma < 90) topDark += 1
         }
       }
-      if ((!face || face.y > 0.1) && topN && topDark / topN >= 0.08) return true
+      if ((!face || face.y > 0.1) && topN && topDark / topN >= 0.08) return 'topDark'
       if (face) {
         const x0 = Math.max(0, Math.round(face.x * w))
         const x1 = Math.min(w, Math.round((face.x + face.w) * w))
@@ -12256,7 +12256,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             if (luma > 198) bright += 1
           }
         }
-        if (n > 20 && bright / n >= 0.45) return true
+        if (n > 20 && bright / n >= 0.45) return 'faceBright'
       }
       let card = 0
       const y0 = Math.round(h * 0.46)
@@ -12288,8 +12288,27 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (luma < 70) rightDark += 1
         }
       }
-      if (leftN && rightN && leftDark / leftN >= 0.72 && rightDark / rightN >= 0.72) return true
-      return card > Math.round(w * h * 0.004)
+      if (leftN && rightN && leftDark / leftN >= 0.72 && rightDark / rightN >= 0.72) return 'darkSides'
+      return card > Math.round(w * h * 0.004) ? 'card' : false
+    }
+    const debrisBlocks = async (display) => {
+      const why = await looksLikeExtendDebris(display)
+      if (!why) return ''
+      // 잔해 검사는 밝은 배경·머리가 위에 닿은 사진을 잘못 거를 수 있다.
+      // 한 사람이 서 있는 전신(다리 있음)으로 확인되면 막지 않는다.
+      try {
+        const legs0 = await hasStandingLegs(display)
+        const n0 = typeof countDeskSceneFaces === 'function' ? await countDeskSceneFaces(display, 4000) : 1
+        const bust0 =
+          typeof window.deskPhotoNeedsBodyExtend === 'function' ? await window.deskPhotoNeedsBodyExtend(display) : true
+        if (legs0 && n0 === 1 && !bust0) {
+          window.__deskAcceptLog = [...(window.__deskAcceptLog || []), `debrisIgnored:${why}`].slice(-24)
+          return ''
+        }
+      } catch (_) {
+        /* 구조를 못 재면 검사 결과를 따른다 */
+      }
+      return String(why)
     }
     const rejectBody = (why) => {
       window.__deskAcceptLog = [...(window.__deskAcceptLog || []), why].slice(-24)
@@ -12300,7 +12319,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       if (!result?.display) return rejectBody('noDisplay')
       if (await isSolidBlackPhoto(result.display)) return rejectBody('solidBlack')
       if (await looksLikeEmptyExtend(result.display, layoutImage || source)) return rejectBody('emptyExtend')
-      if (await looksLikeExtendDebris(result.display)) return rejectBody('debris')
+      const debrisWhy = await debrisBlocks(result.display)
+      if (debrisWhy) return rejectBody(`debris:${debrisWhy}`)
       const face = await estimateFaceBoxFromImage(result.display)
       const faceH = face?.h || 0
       const legs = await hasStandingLegs(result.display)
@@ -12476,8 +12496,23 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
       result = { ...result, display: await restoreSkirt(result.display) }
     }
     if (!result?.display) {
-      const why = (window.__deskAcceptLog || []).slice(-6).join(',')
-      const fail = `${index}/${total} 다른 사람이나 베이지 힌트 판이 남아 저장하지 않습니다. CAST 그 얼굴만 잇습니다.${why ? ` [거절: ${why}]` : ''}`
+      const whyList = (window.__deskAcceptLog || []).slice(-6)
+      const why = whyList.join(',')
+      const lastWhy = String(whyList.filter((w) => !String(w).startsWith('debrisIgnored')).slice(-1)[0] || '')
+      const whyText = /^debris/.test(lastWhy)
+        ? '배경·가장자리 잔해 검사에 걸려 저장하지 않습니다.'
+        : /hintPlate|holdingBoard/.test(lastWhy)
+          ? '베이지 힌트 판(안내 그림)이 남아 저장하지 않습니다.'
+          : /twoFaces/.test(lastWhy)
+            ? '한 사람이 아닌 그림이 나와 저장하지 않습니다.'
+            : /faceZoomNoLegs|emptyExtend/.test(lastWhy)
+              ? '전신이 그려지지 않아 저장하지 않습니다.'
+              : /solidBlack/.test(lastWhy)
+                ? '검은 화면이 나와 저장하지 않습니다.'
+                : /jacketDrift|chestSplit|faceHold/.test(lastWhy)
+                  ? '옷이나 얼굴이 원본과 달라 저장하지 않습니다.'
+                  : '조건에 맞지 않아 저장하지 않습니다.'
+      const fail = `${index}/${total} ${whyText} CAST 그 얼굴만 잇습니다.${why ? ` [거절: ${why}]` : ''}`
       if (typeof setFormStatus === 'function') setFormStatus(fail, true)
       else setStatus(fail, true)
       timingDone()
@@ -12507,11 +12542,11 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           standingFace && (standingFace.h >= 0.36 || standingFace.y + standingFace.h >= 0.58),
         )
         const standingHasLegs = await hasStandingLegs(result.display)
-        if (!held || (await looksLikeExtendDebris(held))) {
+        if (!held || (await debrisBlocks(held))) {
           if (
             !result.display ||
             (!standingHasLegs && standingZoomed) ||
-            (await looksLikeExtendDebris(result.display))
+            (await debrisBlocks(result.display))
           ) {
             const fail = `${index}/${total} CAST 얼굴을 붙이지 못해 저장하지 않습니다. 다른 사람은 잇지 않습니다.`
             if (typeof setFormStatus === 'function') setFormStatus(fail, true)
@@ -12522,7 +12557,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           const heldFace = await estimateFaceBoxFromImage(held)
           const zoomed = Boolean(heldFace && (heldFace.h >= 0.36 || heldFace.y + heldFace.h >= 0.58))
           if (zoomed) {
-            if (standingZoomed || (await looksLikeExtendDebris(result.display))) {
+            if (standingZoomed || (await debrisBlocks(result.display))) {
               const fail = `${index}/${total} 전신이 아닌 얼굴을 저장하지 않습니다. CAST 그 얼굴만 잇습니다.`
               if (typeof setFormStatus === 'function') setFormStatus(fail, true)
               else setStatus(fail, true)
