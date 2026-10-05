@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw220'
+window.__DESK_BUILD = '20261005mw221'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -19006,6 +19006,107 @@ function initAdultDesk() {
 
   const deskSceneBase = () => currentResult?.imageUrl || currentDeskWork()?.scene || ''
 
+  // 배경이 단색에 가까운 스튜디오 전신(밝은 배경에 피부가 많이 보이는 사진 포함): 얼굴 위치 추정이 팔·다리 피부에 속아 전신을
+  // 못 알아보는 문제(54번)를 막는다. 위쪽에 머리, 아래쪽 바닥 가까이에 서로 떨어진 두 발(다리) 덩어리가 있고, 세로로 끊김이 없으면 전신.
+  const deskLooksStudioFullBody = async (url) => {
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const im = new Image()
+        if (/^https?:\/\//i.test(url)) im.crossOrigin = 'anonymous'
+        im.onload = () => resolve(im)
+        im.onerror = reject
+        im.src = url
+      })
+      const W = 96
+      const H = Math.round((96 * img.naturalHeight) / Math.max(1, img.naturalWidth))
+      if (H < W * 1.3) return false
+      const c = document.createElement('canvas')
+      c.width = W
+      c.height = H
+      const ctx = c.getContext('2d', { willReadFrequently: true })
+      ctx.drawImage(img, 0, 0, W, H)
+      const d = ctx.getImageData(0, 0, W, H).data
+      const px = (x, y) => {
+        const i = (y * W + x) * 4
+        return [d[i], d[i + 1], d[i + 2]]
+      }
+      // 배경색: 가장자리 띠(좌우 6%, 위 4%)의 중앙값
+      const samples = []
+      const bw = Math.max(2, Math.round(W * 0.06))
+      for (let y = 0; y < H; y += 2) {
+        for (let x = 0; x < bw; x += 1) {
+          samples.push(px(x, y), px(W - 1 - x, y))
+        }
+      }
+      const med = (k) => {
+        const v = samples.map((p) => p[k]).sort((a, b) => a - b)
+        return v[Math.floor(v.length / 2)]
+      }
+      const bg = [med(0), med(1), med(2)]
+      const isPerson = (x, y) => {
+        const p = px(x, y)
+        return Math.abs(p[0] - bg[0]) + Math.abs(p[1] - bg[1]) + Math.abs(p[2] - bg[2]) > 70
+      }
+      // 중앙(20~80%)에 사람이 있는 줄이 머리부터 발까지 이어지는지
+      let missing = 0
+      const y0 = Math.round(H * 0.07)
+      const y1 = Math.round(H * 0.93)
+      for (let y = y0; y <= y1; y += 1) {
+        let any = false
+        for (let x = Math.round(W * 0.2); x <= Math.round(W * 0.8); x += 1) {
+          if (isPerson(x, y)) {
+            any = true
+            break
+          }
+        }
+        if (!any) missing += 1
+      }
+      if (missing > (y1 - y0) * 0.04) return false
+      // 맨 위 줄(0~5%)에는 사람이 닿지 않아야 한다(머리 위 여백)
+      for (let y = 0; y < Math.max(1, Math.round(H * 0.008)); y += 1) {
+        for (let x = Math.round(W * 0.3); x <= Math.round(W * 0.7); x += 1) {
+          if (isPerson(x, y)) return false
+        }
+      }
+      // 머리가 작아야 한다: 위쪽(7~20%) 줄에서 사람 폭이 화면 폭의 40% 미만(큰 얼굴 셀카·클로즈업 제외)
+      for (let y = Math.round(H * 0.07); y <= Math.round(H * 0.2); y += 1) {
+        let lo = W
+        let hi = -1
+        for (let x = 0; x < W; x += 1) {
+          if (isPerson(x, y)) {
+            if (x < lo) lo = x
+            if (x > hi) hi = x
+          }
+        }
+        if (hi >= 0 && hi - lo > W * 0.4) return false
+      }
+      // 아래쪽(86~95%) 줄에 서로 떨어진 덩어리가 2개 이상(두 다리·발)이고, 가장 아랫줄 가까이까지 내려온다
+      let twoCluster = 0
+      let rows = 0
+      for (let y = Math.round(H * 0.86); y <= Math.round(H * 0.95); y += 1) {
+        rows += 1
+        const runs = []
+        let cur = null
+        for (let x = Math.round(W * 0.15); x <= Math.round(W * 0.85); x += 1) {
+          if (isPerson(x, y)) {
+            if (!cur) cur = { a: x, b: x }
+            else cur.b = x
+          } else if (cur) {
+            runs.push(cur)
+            cur = null
+          }
+        }
+        if (cur) runs.push(cur)
+        const big = runs.filter((r) => r.b - r.a >= 3)
+        // 다리·발 덩어리는 각각 화면 폭의 30% 이하
+        if (big.length >= 2 && big.every((r) => r.b - r.a <= W * 0.3)) twoCluster += 1
+      }
+      return twoCluster >= rows * 0.3
+    } catch (_) {
+      return false
+    }
+  }
+
   const deskLooksStandingFull = async (dataUrl) => {
     if (!dataUrl) return false
     const stable =
@@ -19614,7 +19715,11 @@ function initAdultDesk() {
     const scene = (typeof currentResult !== 'undefined' && currentResult.imageUrl) || work.scene || ''
     let src = work.woman
     if (scene && (await deskLooksStandingFull(scene))) src = scene
-    const alreadyFull = Boolean(work.womanFull) || (await deskLooksStandingFull(src))
+    // 밝은 단색 배경에 피부가 많이 보이는 전신(54번)은 얼굴 위치 추정이 속아 전신으로 못 알아보므로 모양으로도 본다(여자 몸 보기만)
+    const alreadyFull =
+      Boolean(work.womanFull) ||
+      (await deskLooksStandingFull(src)) ||
+      (await deskLooksStudioFullBody((await deskUnletterbox(src)) || src))
     // 경로: 전신 사진(직접) / 증명·반신·상반신(먼저 몸 잇기 — 잠금된 이어 그리기 — 그 결과로 몸 보기)
     window.__deskShapeRoute = alreadyFull ? 'direct' : 'extend'
     if (!alreadyFull && lookId && (await deskPhotoNeedsBodyExtend(src))) {
