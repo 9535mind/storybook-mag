@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw188'
+window.__DESK_BUILD = '20261005mw189'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -13287,6 +13287,11 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
             tryLog.paint0 = Number((await looksPainted(alt.display)).toFixed(2))
           } catch (_) {
             /* 상태 기록 실패는 무시 */
+          }
+          // 모델이 검은 자리표시 이미지(안전 필터)나 단색을 돌려주면 복원 시도 없이 바로 이유를 남기고 다시 시도한다
+          if (tryLog.flat != null && tryLog.flat < 2) {
+            tryLog.reason = tryLog.avg != null && tryLog.avg < 12 ? 'black' : 'flat'
+            continue
           }
           // 모델이 사진을 다른 크기·위치로 다시 그렸을 수 있어, 결과 안에서 원본 위치를 찾아 그 자리에 복원한다
           const rr = await restoreOriginalPhotoOnContinued(alt.display, prepared, source)

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 여자 몸 잇기 잠금 점검(2026-10-05 수정 상태). 배포 전에 돌려서 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw188)
+ * 규칙: .cursor/rules/desk-woman-body-extend.mdc  (태그 desk-woman-extend-mw189)
  * 사용: node scripts/desk-woman-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'
@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const app = readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8')
 const tale = readFileSync(path.join(ROOT, 'functions', 'api', 'tale-scene.ts'), 'utf8')
+const fal = readFileSync(path.join(ROOT, 'functions', 'lib', 'fal-client.ts'), 'utf8')
 
 const checks = [
   ['단색 배경 판정 함수가 있다', /async function idPhotoLooksPlain\(/.test(app)],
@@ -31,6 +32,9 @@ const checks = [
   ['이어 그리기 최대 2번, 실패하면 가짜 얼굴로 대신하지 않고 멈춘다', /attempt < 2/.test(app) && /가짜 얼굴로 대신하지 않습니다/.test(app) && /__deskWomanContinueFallback/.test(app)],
   ['멈춘 이유를 일반 실패 문구가 덮어쓰지 않는다(deskBodyFail)', /function deskBodyFail\(defaultText\)/.test(app) && /window\.__deskBodyStop = \{ at: Date\.now\(\), text: stop \}/.test(app) && (app.match(/deskBodyFail\(/g) || []).length >= 6],
   ['이어 그리기 복원 탐색 범위(확대 0.4~1.7, 이동 ±150px)', /\[0\.4, 0\.48, 0\.56, 0\.64, 0\.72, 0\.8, 0\.88, 0\.94, 1, 1\.07, 1\.15, 1\.25, 1\.36, 1\.5, 1\.7\]/.test(app) && /oy = -50; oy <= 50; oy \+= 3/.test(app)],
+  ['Kontext Multi 요청이 안전 필터를 끈다(검은 1024x768 오탐 방지)', /function buildKontextMultiBody[sS]*?enable_safety_checker: false[sS]*?
+}/.test(fal)],
+  ['이어 그리기: 검은·단색 결과를 복원 전에 알아본다', /tryLog.flat < 2/.test(app) && /'black' : 'flat'/.test(app)],
   ['이어 그리기 결과가 그려졌는지(unpainted) 검사', /tryLog\.paint < 4/.test(app) && /'unpainted'/.test(app)],
   ['여자 서서 전신: 증명사진의 옷 그대로(검정 정장 강제 없음)', !/Black office blazer/.test(tale) && /Keep EXACTLY the clothes visible in the identity image: the same top and the same jacket if she wears one/.test(tale)],
   [

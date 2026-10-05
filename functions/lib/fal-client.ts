@@ -992,6 +992,7 @@ export async function generateFalKontextMultiImage(options: {
       image_urls: options.imageUrls,
       num_images: 1,
       output_format: 'png',
+      enable_safety_checker: false,
       safety_tolerance: '6',
       ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
       ...(typeof options.guidanceScale === 'number' ? { guidance_scale: options.guidanceScale } : {}),
@@ -1011,6 +1012,8 @@ function buildKontextMultiBody(options: {
     image_urls: options.imageUrls,
     num_images: 1,
     output_format: 'png',
+    // 안전 필터가 켜져 있으면 분홍 니트 같은 피부색 계열이 넓은 이어 그리기 캔버스를 오탐해 검은 1024x768 자리표시 이미지를 돌려준다(실측)
+    enable_safety_checker: false,
     safety_tolerance: '6',
     ...(options.aspectRatio ? { aspect_ratio: options.aspectRatio } : {}),
     ...(typeof options.guidanceScale === 'number' ? { guidance_scale: options.guidanceScale } : {}),
