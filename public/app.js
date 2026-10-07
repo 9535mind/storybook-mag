@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw221'
+window.__DESK_BUILD = '20261005mw222'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -19791,8 +19791,9 @@ function initAdultDesk() {
         return
       }
       // 엔진이 검은 장(필터)을 냈으면 머리 복원 없이 바로 다시 그린다. 두 번째는 배를 덮는 반팔·무릎 길이 레깅스(shapeStrict)
+      // 두 번째 시도가 검은 장이면 첫 시도의 멀쩡한 장을 지우지 않는다
       if (typeof isNearlyBlackImage === 'function' && (await isNearlyBlackImage(cand))) {
-        stable = cand
+        if (!stable) stable = cand
         headLog = { skip: 'black' }
         if (attempt === 0) continue
         break
