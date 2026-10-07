@@ -67,7 +67,36 @@
     }
     punchStudioFill(canvas, face)
     await punchIdCardAroundFace(canvas, src)
+    // 흰 배경에 흰 옷이면 색 채우기가 옷까지 지우고 머리 주변 흰 조각도 남는다. 서버 배경 제거로 먼저 오려 보고, 몸통이 더 온전할 때만 쓴다
+    if (typeof global.isolateOutpaintedPerson === 'function') {
+      try {
+        const remote = await global.isolateOutpaintedPerson(src, '', { localOnly: false })
+        if (remote && remote.width > 24 && remote.height > 24 && torsoCoverage(remote) >= torsoCoverage(canvas)) {
+          return remote
+        }
+      } catch (err) {
+        console.warn('desk pipeline remote isolate failed', err)
+      }
+    }
     return canvas
+  }
+
+  /** 오린 사람 가운데 몸통 칸(가로 가운데 30%, 세로 30~70%)에서 남은 화소 비율. 사람이면 거의 1이다. */
+  function torsoCoverage(cut) {
+    const w = cut.width || 1
+    const h = cut.height || 1
+    const x0 = Math.floor(w * 0.35)
+    const x1 = Math.ceil(w * 0.65)
+    const y0 = Math.floor(h * 0.3)
+    const y1 = Math.ceil(h * 0.7)
+    const d = cut.getContext('2d', { willReadFrequently: true }).getImageData(x0, y0, x1 - x0, y1 - y0).data
+    let on = 0
+    let all = 0
+    for (let i = 3; i < d.length; i += 16) {
+      all += 1
+      if (d[i] >= 40) on += 1
+    }
+    return all ? on / all : 1
   }
 
   function personBox(cut) {
