@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 남녀 한 장면 합격(잠금) 점검. 배포 전에 돌려서 합격 상태가 코드에서 유지되는지 확인한다.
- * 규칙: .cursor/rules/desk-couple-compose.mdc  (태그 desk-couple-compose-mw233)
+ * 규칙: .cursor/rules/desk-couple-compose.mdc  (태그 desk-couple-compose-mw237)
  * 사용: node scripts/desk-couple-lock-check.mjs   (실패하면 종료 코드 1)
  */
 import { readFileSync } from 'node:fs'
@@ -39,6 +39,10 @@ const checks = [
   [
     '두 사람 윤곽 최단 거리를 CLOSE_PX(5)로 맞춘다',
     /const CLOSE_PX = 5/.test(pipe) && /const shift = near - CLOSE_PX/.test(pipe) && /rowEdge\(a, 'right'\)/.test(pipe),
+  ],
+  [
+    'Desk 단계 결과는 버튼 없이 항상 화질 올리기(Real-ESRGAN 2배)를 거친다',
+    /const deskForceUpscale = async \(src\)/.test(app) && /imageUrl = await deskForceUpscale\(imageUrl\)/.test(app) && /Math\.max\(size\.w, size\.h\) >= 2400/.test(app),
   ],
   ['한 장면은 엔진으로 다시 그리지 않고 composePlate로 붙인다', /DeskPipeline\.composePlate\(/.test(app)],
 ]
