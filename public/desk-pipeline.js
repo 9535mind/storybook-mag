@@ -262,6 +262,45 @@
         for (let ci = 0; ci < comp.length; ci += 1) take(comp[ci] * 4)
       }
     }
+    // 몸과 이어지지 않고 떠 있는 작은 덩어리(조명 번짐 조각)를 지운다
+    const label = new Int32Array(w * h)
+    const sizes = [0]
+    let nextLabel = 0
+    for (let k0 = 0; k0 < w * h; k0 += 1) {
+      if (label[k0] || d[k0 * 4 + 3] < 128) continue
+      nextLabel += 1
+      let size = 0
+      const st = [k0]
+      label[k0] = nextLabel
+      while (st.length) {
+        const k = st.pop()
+        size += 1
+        const x = k % w
+        const y = (k - x) / w
+        if (x > 0 && !label[k - 1] && d[(k - 1) * 4 + 3] >= 128) {
+          label[k - 1] = nextLabel
+          st.push(k - 1)
+        }
+        if (x < w - 1 && !label[k + 1] && d[(k + 1) * 4 + 3] >= 128) {
+          label[k + 1] = nextLabel
+          st.push(k + 1)
+        }
+        if (y > 0 && !label[k - w] && d[(k - w) * 4 + 3] >= 128) {
+          label[k - w] = nextLabel
+          st.push(k - w)
+        }
+        if (y < h - 1 && !label[k + w] && d[(k + w) * 4 + 3] >= 128) {
+          label[k + w] = nextLabel
+          st.push(k + w)
+        }
+      }
+      sizes.push(size)
+    }
+    const biggest = Math.max(...sizes)
+    for (let k = 0; k < w * h; k += 1) {
+      const lb = label[k]
+      if (lb && sizes[lb] < biggest * 0.02) d[k * 4 + 3] = 0
+    }
     cctx.putImageData(cd, 0, 0)
   }
 
