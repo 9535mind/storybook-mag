@@ -30,8 +30,12 @@ const checks = [
   ],
   ['서버 결과는 알파 기준으로 사람 상자를 잡는다', /if \(cut\.fromRemote\)/.test(pipe)],
   ['오린 위치를 남긴다(cropRect)', /out\.cropRect = \{/.test(app)],
-  ['머리 뒤 조명 번짐 조각을 지운다(trimGlareData, 머리 구역 15%)', /function trimGlareData\(d, w, h\)/.test(pipe) && /Math\.round\(h \* 0\.15\)/.test(pipe) && /trimGlareData\(d, w, h\)
-/.test(pipe)],
+  [
+    '머리 뒤 조명 번짐 조각을 지운다(trimGlareData, 머리 구역 15%)',
+    /function trimGlareData\(d, w, h\)/.test(pipe) &&
+      /Math\.round\(h \* 0\.15\)/.test(pipe) &&
+      /^\s+trimGlareData\(d, w, h\)\s*$/m.test(pipe),
+  ],
   ['두 사람 간격 0.8%', /const gap = Math\.round\(cw \* 0\.008\)/.test(pipe)],
   ['한 장면은 엔진으로 다시 그리지 않고 composePlate로 붙인다', /DeskPipeline\.composePlate\(/.test(app)],
 ]
