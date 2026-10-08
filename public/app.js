@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw230'
+window.__DESK_BUILD = '20261005mw231'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -16934,15 +16934,8 @@ function initAdultDesk() {
   // 옷 칸은 나체 녹이기만. 갈아입히기(VTON)는 몸을 다시 그려서 뺐다.
   const looks = [{ id: 'nude', label: '나체', garment: '나체', text: '나체' }]
   const deskLookNoun = () => '옷 녹이기'
-  const places = [
-    { id: 'hotel', label: '호텔', text: '호텔 룸' },
-    { id: 'bed', label: '침실', text: '침실' },
-    { id: 'bath', label: '욕실', text: '욕실' },
-    { id: 'living', label: '거실', text: '거실' },
-    { id: 'hall', label: '복도', text: '호텔 복도' },
-    { id: 'roof', label: '야경', text: '도시 야경 옥상' },
-    { id: 'studio', label: '스튜디오', text: '흰 스튜디오' },
-  ]
+  // 장소 고르기(호텔·침실·욕실·거실·복도·야경·스튜디오)는 없앴다. 방은 원본 그대로 둔다
+  const places = []
   const poses = [
     { id: 'stand', label: '서기', text: '서서' },
     { id: 'sit', label: '앉기', text: '앉아' },
@@ -16998,7 +16991,7 @@ function initAdultDesk() {
 
   const state = {
     look: 'nude',
-    place: 'hotel',
+    place: '',
     pose: ['stand'],
     move: [],
     job: 'still',
@@ -17253,7 +17246,7 @@ function initAdultDesk() {
         ]
           .filter(Boolean)
           .join(', ')
-    return [place, pose, sit || lie || hug ? '얼굴은 같은 사람' : '방은 바꾸고 얼굴은 유지']
+    return [place, pose, sit || lie || hug ? '얼굴은 같은 사람' : '얼굴은 유지']
       .filter(Boolean)
       .join(', ')
   }
@@ -20351,12 +20344,12 @@ function initAdultDesk() {
     }
     if (key === 'look') return runDeskStep('look')
     if (scene && (await deskPhotoNeedsBodyExtend(scene))) {
-      setFormStatus('먼저 옷을 골라 몸을 잇거나 1 몸 잇기를 누르세요. 방·자세는 전신 장 위에서만 바꿉니다.', true)
+      setFormStatus('먼저 옷을 골라 몸을 잇거나 1 몸 잇기를 누르세요. 자세는 전신 장 위에서만 바꿉니다.', true)
       return
     }
     if (!scene) {
       if (await deskPhotoNeedsBodyExtend(lead)) {
-        setFormStatus('먼저 옷을 골라 몸을 잇거나 1 몸 잇기를 누르세요. 방·자세는 전신 장 위에서만 바꿉니다.', true)
+        setFormStatus('먼저 옷을 골라 몸을 잇거나 1 몸 잇기를 누르세요. 자세는 전신 장 위에서만 바꿉니다.', true)
         return
       }
     }
@@ -20391,7 +20384,7 @@ function initAdultDesk() {
             : step === 'shape'
               ? '팔·몸 비율을 보는 중'
               : step === 'place'
-                ? '장소·자세를 그리는 중'
+                ? '자세를 그리는 중'
                 : '작업 중'
     const maxSec =
       step === 'body' ? (workNow?.woman && workNow?.man ? 420 : 360) : step === 'look' ? 240 : 180
