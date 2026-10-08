@@ -94,6 +94,7 @@ notes.push('desk ' + JSON.stringify(await snap()))
 
 const b64 = (f) => 'data:image/' + (f.endsWith('.png') ? 'png' : 'jpeg') + ';base64,' + readFileSync(f).toString('base64')
 const out = await page.evaluate(async ({ w, m }) => {
+
   const url = await window.DeskPipeline.composePlate(
     [{ src: w, heightFactor: 1, slot: 'woman' }, { src: m, heightFactor: 1.02, slot: 'man' }],
     'landscape',

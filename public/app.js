@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw224'
+window.__DESK_BUILD = '20261005mw228'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -7855,6 +7855,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     out.width = Math.max(8, sw)
     out.height = Math.max(8, sh)
     out.getContext('2d').drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height)
+    // 한 장면이 원본 사진과 맞춰 머리카락·구멍을 되살릴 수 있게 오린 위치를 남긴다
+    out.cropRect = { x: sx, y: sy, w: out.width, h: out.height, fullW: w, fullH: h }
     return out
   }
 

@@ -122,6 +122,18 @@ const waitDone = async (re, ms) => {
 if (!process.env.DESK_LOOP_SKIP_BODY) await page.locator('[data-desk-step="body"]').click({ force: true })
 const afterBody = process.env.DESK_LOOP_SKIP_BODY ? await snap() : await waitDone(/이었습니다|전신이 안 붙|다른 사람|저장하지 않습니다|이미 전신/, 420000)
 await page.screenshot({ path: shot('04-after-body.png'), fullPage: true })
+for (const [k, id] of [['woman', 'desk-cast-woman-img'], ['man', 'desk-cast-man-img']]) {
+  const src = await page.evaluate(async (i) => {
+    const el = document.getElementById(i)
+    if (!el?.src) return ''
+    if (el.src.startsWith('data:')) return el.src
+    const r = await fetch(el.src)
+    const b = await r.blob()
+    return await new Promise((res) => { const f = new FileReader(); f.onload = () => res(f.result); f.readAsDataURL(b) })
+  }, id)
+  const m = src.match(/^data:image\/\w+;base64,(.+)$/)
+  if (m) writeFileSync(path.join(OUT, 'cast-' + k + '.jpg'), Buffer.from(m[1], 'base64'))
+}
 const together = page.locator('[data-desk-step="together"]')
 let afterTogether = afterBody
 if (!(await together.isDisabled()) && !(await together.isHidden())) {

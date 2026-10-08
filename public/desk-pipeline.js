@@ -71,7 +71,14 @@
     if (typeof global.isolateOutpaintedPerson === 'function') {
       try {
         const remote = await global.isolateOutpaintedPerson(src, '', { localOnly: false })
-        if (remote && remote.width > 24 && remote.height > 24 && torsoCoverage(remote) >= torsoCoverage(canvas)) {
+        if (remote && remote.width > 24 && remote.height > 24 && (torsoCoverage(remote) >= 0.75 || torsoCoverage(remote) >= torsoCoverage(canvas))) {
+          try {
+            await restoreFromSource(remote, src, face)
+          } catch (err) {
+            console.warn('desk pipeline restore failed', err)
+          }
+          // 서버가 정확히 오린 결과: 색으로 벽 찌꺼기를 지우는 뒷정리(회색 머리카락·옷까지 지운다)를 건너뛴다
+          remote.fromRemote = true
           return remote
         }
       } catch (err) {
@@ -79,6 +86,183 @@
       }
     }
     return canvas
+  }
+
+  /**
+   * 서버 배경 제거가 지운 것 중 사람인 것을 원본에서 되살린다.
+   * 1) 얼굴 주변 타원(머리카락 포함)은 원본 화소로 채운다. 은발이 배경처럼 지워지는 것을 막는다.
+   * 2) 몸 안쪽에 갇힌 작은 구멍(흰 옷이 지워진 자리)은 원본 화소로 채운다.
+   */
+  async function restoreFromSource(cut, src, face) {
+    const rc = cut.cropRect
+    if (!rc || !rc.fullW || !rc.fullH) return
+    const img = await load(src)
+    const orig = document.createElement('canvas')
+    orig.width = cut.width
+    orig.height = cut.height
+    orig
+      .getContext('2d')
+      .drawImage(img, 0, 0, img.naturalWidth, img.naturalHeight, -rc.x, -rc.y, rc.fullW, rc.fullH)
+    const w = cut.width
+    const h = cut.height
+    const cctx = cut.getContext('2d', { willReadFrequently: true })
+    const cd = cctx.getImageData(0, 0, w, h)
+    const od = orig.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data
+    const d = cd.data
+    const take = (i) => {
+      d[i] = od[i]
+      d[i + 1] = od[i + 1]
+      d[i + 2] = od[i + 2]
+      d[i + 3] = 255
+    }
+    if (face && face.w > 0.03 && face.h > 0.03) {
+      const fx = face.x * rc.fullW - rc.x
+      const fy = face.y * rc.fullH - rc.y
+      const fw = face.w * rc.fullW
+      const fh = face.h * rc.fullH
+      const cx = fx + fw / 2
+      const cy = fy + fh * 0.4
+      // 얼굴 추정이 크게 잡혀도 몸 전체로 번지지 않게 상한을 둔다
+      const rx = Math.min(fw * 0.75, w * 0.4)
+      const ry = Math.min(fh * 0.85, h * 0.12)
+      const x0 = Math.max(0, Math.floor(cx - rx))
+      const x1 = Math.min(w - 1, Math.ceil(cx + rx))
+      const y0 = Math.max(0, Math.floor(cy - ry))
+      const y1 = Math.min(h - 1, Math.ceil(cy + ry))
+      // 머리 둘레의 배경 색(투명인 곳의 원본 색 평균)을 알아 두고, 그와 비슷한 화소는 배경이므로 되살리지 않는다
+      let br = 0
+      let bg = 0
+      let bb = 0
+      let bn = 0
+      const ring = (x, y) => {
+        if (x < 0 || y < 0 || x >= w || y >= h) return
+        const i = (y * w + x) * 4
+        if (d[i + 3] >= 60) return
+        br += od[i]
+        bg += od[i + 1]
+        bb += od[i + 2]
+        bn += 1
+      }
+      for (let y = Math.max(0, y0 - 24); y <= Math.min(h - 1, y1 + 24); y += 3) {
+        for (let x = Math.max(0, x0 - 24); x <= Math.min(w - 1, x1 + 24); x += 3) {
+          const ex = (x - cx) / rx
+          const ey = (y - cy) / ry
+          const e = ex * ex + ey * ey
+          if (e > 1 && e < 1.6) ring(x, y)
+        }
+      }
+      const hasBg = bn > 20
+      if (hasBg) {
+        br /= bn
+        bg /= bn
+        bb /= bn
+      }
+      for (let y = y0; y <= y1; y += 1) {
+        for (let x = x0; x <= x1; x += 1) {
+          const ex = (x - cx) / rx
+          const ey = (y - cy) / ry
+          if (ex * ex + ey * ey > 1) continue
+          const i = (y * w + x) * 4
+          if (d[i + 3] >= 200) continue
+          if (hasBg && Math.hypot(od[i] - br, od[i + 1] - bg, od[i + 2] - bb) < 40) continue
+          // 머리 뒤 스튜디오 조명(밝고 채도 낮음)은 되살리지 않는다. 은발·검은 머리·피부는 이보다 어둡거나 채도가 있다
+          const r = od[i]
+          const g = od[i + 1]
+          const b = od[i + 2]
+          const lum = r * 0.299 + g * 0.587 + b * 0.114
+          if (lum > 200 && Math.max(r, g, b) - Math.min(r, g, b) < 28) continue
+          take(i)
+        }
+      }
+    }
+    // 갇힌 구멍: 바깥에서 흘러 들어가지 못하는 투명 덩어리 중 작은 것
+    const closeR = 4
+    const solid = new Uint8Array(w * h)
+    for (let i = 0; i < w * h; i += 1) solid[i] = d[i * 4 + 3] >= 128 ? 1 : 0
+    const dil = new Uint8Array(w * h)
+    for (let y = 0; y < h; y += 1) {
+      let run = 0
+      for (let x = 0; x < w; x += 1) {
+        run = solid[y * w + x] ? closeR : run - 1
+        dil[y * w + x] = run >= 0 ? 1 : 0
+      }
+      run = 0
+      for (let x = w - 1; x >= 0; x -= 1) {
+        run = solid[y * w + x] ? closeR : run - 1
+        if (run >= 0) dil[y * w + x] = 1
+      }
+    }
+    const dil2 = new Uint8Array(w * h)
+    for (let x = 0; x < w; x += 1) {
+      let run = 0
+      for (let y = 0; y < h; y += 1) {
+        run = dil[y * w + x] ? closeR : run - 1
+        dil2[y * w + x] = run >= 0 ? 1 : 0
+      }
+      run = 0
+      for (let y = h - 1; y >= 0; y -= 1) {
+        run = dil[y * w + x] ? closeR : run - 1
+        if (run >= 0) dil2[y * w + x] = 1
+      }
+    }
+    // 닫힌 마스크(dil2)에서 바깥과 이어지지 않는 투명 덩어리 중 작은 것만 구멍으로 본다
+    const outside = new Uint8Array(w * h)
+    const stack = []
+    const pushOut = (x, y) => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return
+      const k = y * w + x
+      if (outside[k] || dil2[k]) return
+      outside[k] = 1
+      stack.push(k)
+    }
+    for (let x = 0; x < w; x += 1) {
+      pushOut(x, 0)
+      pushOut(x, h - 1)
+    }
+    for (let y = 0; y < h; y += 1) {
+      pushOut(0, y)
+      pushOut(w - 1, y)
+    }
+    while (stack.length) {
+      const k = stack.pop()
+      const x = k % w
+      const y = (k - x) / w
+      pushOut(x - 1, y)
+      pushOut(x + 1, y)
+      pushOut(x, y - 1)
+      pushOut(x, y + 1)
+    }
+    const maxHole = w * h * 0.006
+    const seen = new Uint8Array(w * h)
+    for (let k0 = 0; k0 < w * h; k0 += 1) {
+      if (seen[k0] || solid[k0]) continue
+      // 바깥과 이어진(닫힌 마스크 기준) 곳은 구멍이 아니다. 닫기 반지름 안의 틈은 같이 메운다
+      const comp = [k0]
+      seen[k0] = 1
+      let enclosed = true
+      for (let ci = 0; ci < comp.length; ci += 1) {
+        const k = comp[ci]
+        const x = k % w
+        const y = (k - x) / w
+        if (outside[k] || x === 0 || y === 0 || x === w - 1 || y === h - 1) enclosed = false
+        if (comp.length > maxHole) {
+          enclosed = false
+        }
+        const nb = [k - 1, k + 1, k - w, k + w]
+        for (let n = 0; n < 4; n += 1) {
+          const m = nb[n]
+          if (m < 0 || m >= w * h || seen[m] || solid[m]) continue
+          if ((n === 0 && x === 0) || (n === 1 && x === w - 1)) continue
+          seen[m] = 1
+          comp.push(m)
+        }
+        if (comp.length > maxHole * 2) break
+      }
+      if (enclosed && comp.length <= maxHole) {
+        for (let ci = 0; ci < comp.length; ci += 1) take(comp[ci] * 4)
+      }
+    }
+    cctx.putImageData(cd, 0, 0)
   }
 
   /** 오린 사람 가운데 몸통 칸(가로 가운데 30%, 세로 30~70%)에서 남은 화소 비율. 사람이면 거의 1이다. */
@@ -102,6 +286,23 @@
   function personBox(cut) {
     const w = cut.width || 1
     const h = cut.height || 1
+    if (cut.fromRemote) {
+      const rd = cut.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data
+      let x0 = w
+      let y0 = h
+      let x1 = 0
+      let y1 = 0
+      for (let y = 0; y < h; y += 1) {
+        for (let x = 0; x < w; x += 1) {
+          if (rd[(y * w + x) * 4 + 3] < 40) continue
+          if (x < x0) x0 = x
+          if (y < y0) y0 = y
+          if (x > x1) x1 = x
+          if (y > y1) y1 = y
+        }
+      }
+      if (x1 > x0 && y1 > y0) return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }
+    }
     const ctx = cut.getContext('2d', { willReadFrequently: true })
     const d = ctx.getImageData(0, 0, w, h).data
     let minX = w
@@ -441,6 +642,7 @@
     const maxW = list.length === 1 ? cw * 0.58 : cw * 0.4
     const xs = list.length === 1 ? [0.5] : list.length === 2 ? [0.46, 0.54] : [0.22, 0.5, 0.78]
     const cropPerson = (cut, box) => {
+      const keepColors = Boolean(cut.fromRemote)
       const pad = 6
       const sx = Math.max(0, Math.round(box.x - pad))
       const sy = Math.max(0, Math.round(box.y - pad))
@@ -459,6 +661,7 @@
         for (let x = 0; x < pw; x += 1) {
           const i = (y * pw + x) * 4
           if (pd[i + 3] < 28) continue
+          if (keepColors) continue
           const sat = Math.max(pd[i], pd[i + 1], pd[i + 2]) - Math.min(pd[i], pd[i + 1], pd[i + 2])
           const yv = pd[i] * 0.299 + pd[i + 1] * 0.587 + pd[i + 2] * 0.114
           if (yv > 78 && yv < 175 && sat < 16) pd[i + 3] = 0
