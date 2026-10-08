@@ -262,6 +262,7 @@
         for (let ci = 0; ci < comp.length; ci += 1) take(comp[ci] * 4)
       }
     }
+    trimGlareData(d, w, h)
     // 몸과 이어지지 않고 떠 있는 작은 덩어리(조명 번짐 조각)를 지운다
     const label = new Int32Array(w * h)
     const sizes = [0]
@@ -302,6 +303,110 @@
       if (lb && sizes[lb] < biggest * 0.02) d[k * 4 + 3] = 0
     }
     cctx.putImageData(cd, 0, 0)
+  }
+
+  /**
+   * 머리 뒤 스튜디오 조명이 번진 연한 회색 덩어리가 머리카락에 붙어 남는 것을 지운다.
+   * 머리 구역(위 15%)에서, 바깥(투명)과 맞닿은 연한 무채색 화소의 색을 알아내고,
+   * 그 색과 거의 같은 덩어리만 바깥에서부터 지운다. 머리카락은 결이 있어 그 색과 균일하게 같지 않아 남는다.
+   */
+  function trimGlareData(d, w, h) {
+    const zone = Math.max(1, Math.round(h * 0.15))
+    const lumOf = (i) => d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114
+    const satOf = (i) => Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2])
+    const isClear = (k) => d[k * 4 + 3] < 12
+    const edgeLight = []
+    for (let y = 1; y < zone; y += 1) {
+      for (let x = 1; x < w - 1; x += 1) {
+        const k = y * w + x
+        const i = k * 4
+        if (isClear(k)) continue
+        if (!(isClear(k - 1) || isClear(k + 1) || isClear(k - w) || isClear(k + w))) continue
+        const lum = lumOf(i)
+        if (lum < 180 || lum > 240 || satOf(i) >= 22) continue
+        edgeLight.push(d[i], d[i + 1], d[i + 2])
+      }
+    }
+    if (edgeLight.length < 3 * 150) return
+    const chan = (c) => {
+      const v = []
+      for (let n = c; n < edgeLight.length; n += 3) v.push(edgeLight[n])
+      v.sort((a, b) => a - b)
+      return v[Math.floor(v.length / 2)]
+    }
+    const ref = [chan(0), chan(1), chan(2)]
+    const near = (k) => {
+      const i = k * 4
+      if (d[i + 3] < 12) return false
+      if (satOf(i) >= 22) return false
+      return Math.hypot(d[i] - ref[0], d[i + 1] - ref[1], d[i + 2] - ref[2]) < 16
+    }
+    const seen = new Uint8Array(w * zone)
+    const q = []
+    const tryAdd = (x, y) => {
+      if (x < 0 || y < 0 || x >= w || y >= zone) return
+      const k = y * w + x
+      if (seen[k] || !near(k)) return
+      seen[k] = 1
+      q.push(k)
+    }
+    for (let y = 0; y < zone; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        const k = y * w + x
+        if (!isClear(k)) continue
+        tryAdd(x - 1, y)
+        tryAdd(x + 1, y)
+        tryAdd(x, y - 1)
+        tryAdd(x, y + 1)
+      }
+    }
+    let qi = 0
+    const removed = []
+    while (qi < q.length) {
+      const k = q[qi]
+      qi += 1
+      d[k * 4 + 3] = 0
+      removed.push(k)
+      const x = k % w
+      const y = (k - x) / w
+      tryAdd(x - 1, y)
+      tryAdd(x + 1, y)
+      tryAdd(x, y - 1)
+      tryAdd(x, y + 1)
+    }
+    if (!removed.length) return
+    // 지운 덩어리 둘레에 남는 가는 테두리(조각과 배경이 섞인 흐린 화소)를 2겹 더 지운다
+    let frontier = removed
+    for (let pass = 0; pass < 2; pass += 1) {
+      const next = []
+      for (let n = 0; n < frontier.length; n += 1) {
+        const k = frontier[n]
+        const x = k % w
+        const y = (k - x) / w
+        const nb = [x - 1, y, x + 1, y, x, y - 1, x, y + 1]
+        for (let m = 0; m < 8; m += 2) {
+          const nx = nb[m]
+          const ny = nb[m + 1]
+          if (nx < 0 || ny < 0 || nx >= w || ny >= zone) continue
+          const kk = ny * w + nx
+          const i = kk * 4
+          if (d[i + 3] < 12) continue
+          if (satOf(i) >= 24 || lumOf(i) < 85) continue
+          d[i + 3] = 0
+          next.push(kk)
+        }
+      }
+      frontier = next
+    }
+  }
+
+  /** 시험용: 캔버스에 같은 처리를 한다 */
+  function trimHeadGlare(canvas) {
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })
+    const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    trimGlareData(img.data, canvas.width, canvas.height)
+    ctx.putImageData(img, 0, 0)
+    return canvas
   }
 
   /** 오린 사람 가운데 몸통 칸(가로 가운데 30%, 세로 30~70%)에서 남은 화소 비율. 사람이면 거의 1이다. */
@@ -774,6 +879,7 @@
     composePlate,
     composeSize,
     isolate,
+    trimHeadGlare,
     punchStudioCard,
     lastPlacements: [],
     MAX_EDGE: 1920,
