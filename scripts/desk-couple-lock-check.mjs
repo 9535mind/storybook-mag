@@ -36,7 +36,10 @@ const checks = [
       /Math\.round\(h \* 0\.15\)/.test(pipe) &&
       /^\s+trimGlareData\(d, w, h\)\s*$/m.test(pipe),
   ],
-  ['두 사람 간격 0.8%', /const gap = Math\.round\(cw \* 0\.008\)/.test(pipe)],
+  [
+    '두 사람 윤곽 최단 거리를 CLOSE_PX(5)로 맞춘다',
+    /const CLOSE_PX = 5/.test(pipe) && /const shift = near - CLOSE_PX/.test(pipe) && /rowEdge\(a, 'right'\)/.test(pipe),
+  ],
   ['한 장면은 엔진으로 다시 그리지 않고 composePlate로 붙인다', /DeskPipeline\.composePlate\(/.test(app)],
 ]
 
