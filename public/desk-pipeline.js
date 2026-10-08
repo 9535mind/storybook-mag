@@ -752,7 +752,7 @@
     if (layouts.length === 2) {
       const a = layouts[0]
       const b = layouts[1]
-      const gap = Math.round(cw * 0.028)
+      const gap = Math.round(cw * 0.008)
       const span = a.dw + b.dw + gap
       a.cx = Math.round((cw - span) / 2 + a.dw / 2)
       b.cx = Math.round(a.cx + a.dw / 2 + gap + b.dw / 2)
