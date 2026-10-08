@@ -377,6 +377,13 @@ export async function generateFalImage(options: {
 }
 
 const FAL_BACKGROUND_REMOVAL_TIMEOUT_MS = 25_000
+const FAL_UPSCALE_TIMEOUT_MS = 90_000
+
+type FalUpscaleResponse = {
+  image?: { url?: string; width?: number; height?: number }
+  detail?: string | Array<{ msg?: string }>
+  error?: string
+}
 
 type FalBackgroundRemovalResponse = {
   image?: { url?: string }
@@ -433,6 +440,64 @@ export async function removeFalBackground(options: {
     throw new Error(extractErrorMessage(resultPayload) || 'missing_image_url')
   }
   return { imageUrl }
+}
+
+/**
+ * 화질 올리기 — Real-ESRGAN(fal.ai, fal-ai/esrgan). 얼굴 복원은 하지 않는다(얼굴이 달라지지 않게 face:false).
+ * 결과는 scale 배 큰 PNG 1장. 출력 스키마가 image{} 단일 객체라 removeFalBackground 와 같은 방식으로 제출·폴링한다.
+ */
+export async function upscaleFalImage(options: {
+  falKey: string
+  imageUrl: string
+  scale?: number
+  timeoutMs?: number
+}): Promise<{ imageUrl: string; width?: number; height?: number }> {
+  const startedAt = Date.now()
+  const timeoutMs = options.timeoutMs ?? FAL_UPSCALE_TIMEOUT_MS
+  const endpoint = 'https://queue.fal.run/fal-ai/esrgan'
+  const scale = options.scale && options.scale > 1 && options.scale <= 4 ? options.scale : 2
+
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${options.falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        image_url: options.imageUrl,
+        scale,
+        model: 'RealESRGAN_x4plus',
+        face: false,
+        output_format: 'png',
+      }),
+    },
+    Math.min(timeoutMs, 20_000),
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse
+  if (!submitResponse.ok) {
+    throw new Error(extractErrorMessage(submitPayload))
+  }
+
+  let resultPayload: FalUpscaleResponse
+  if (submitPayload.status_url && submitPayload.response_url) {
+    resultPayload = await pollFalResult<FalUpscaleResponse>(
+      options.falKey,
+      submitPayload.status_url,
+      submitPayload.response_url,
+      startedAt,
+      timeoutMs,
+    )
+  } else {
+    resultPayload = submitPayload as FalUpscaleResponse
+  }
+
+  const imageUrl = resultPayload.image?.url?.trim()
+  if (!imageUrl) {
+    throw new Error(extractErrorMessage(resultPayload) || 'missing_image_url')
+  }
+  return { imageUrl, width: resultPayload.image?.width, height: resultPayload.image?.height }
 }
 
 /** data URI → fal 스토리지 https URL (inpaint 마스크 / 레퍼런스 이미지 업로드 공용). */

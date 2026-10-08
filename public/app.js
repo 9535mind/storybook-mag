@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw233'
+window.__DESK_BUILD = '20261005mw236'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -226,6 +226,10 @@ const removeBgButtons = [
   document.getElementById('remove-bg-button'),
   document.getElementById('remove-bg-button-accepted'),
   document.getElementById('remove-bg-button-revise'),
+].filter(Boolean)
+const upscaleButtons = [
+  document.getElementById('upscale-button'),
+  document.getElementById('upscale-button-accepted'),
 ].filter(Boolean)
 const reviewPanel = document.getElementById('review-panel')
 const revisePanel = document.getElementById('revise-panel')
@@ -2346,6 +2350,79 @@ async function removeBackgroundFromCurrentResult() {
   }
 }
 removeBgButtons.forEach((btn) => btn.addEventListener('click', removeBackgroundFromCurrentResult))
+
+// 화질 올리기 — 결과를 2배로 확대·선명하게(Real-ESRGAN). 얼굴 복원은 쓰지 않아 얼굴은 달라지지 않는다.
+async function upscaleCurrentResult() {
+  if (!currentResult.imageUrl) return
+  if (!isLoggedIn()) {
+    showPinGate('로그인이 필요해요.')
+    return
+  }
+  if (comparingPrevious) exitComparePreview()
+  upscaleButtons.forEach((btn) => {
+    if (btn) btn.disabled = true
+  })
+  const stopTimer = startProgressTimer(setFormStatus, '화질을 올리고 있어요…')
+  try {
+    let src = currentResult.imageUrl
+    if (!/^https:\/\//i.test(src)) {
+      // 1024로 줄여 올리는 기존 업로드와 달리 원래 크기 그대로 올린다(확대할 의미가 없어지지 않게)
+      const dataUrl = src.startsWith('data:') ? src : await globalThis.ensureStableDataUrl(src)
+      const up = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ dataUrl }),
+      })
+      const upData = await up.json().catch(() => ({}))
+      if (!up.ok || !upData?.imageUrl) {
+        throw new Error(upData.message || upData.error || `upload_failed_${up.status}`)
+      }
+      src = upData.imageUrl
+    }
+    const response = await fetch('/api/upscale', {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify({ imageUrl: src, scale: 2 }),
+    })
+    const data = await response.json().catch(() => ({}))
+    stopTimer()
+    if (response.status === 401) {
+      clearAllAuth()
+      showPinGate('세션이 만료됐어요. 다시 로그인해 주세요.')
+      return
+    }
+    if (response.status === 429) {
+      setFormStatus(data.message || '요청이 너무 많아요. 잠시 후 다시 시도해 주세요.', true)
+      return
+    }
+    if (!data.ok || !data.imageUrl) {
+      setFormStatus(`화질 올리기에 실패했어요: ${data.message || data.error || '알 수 없는 오류'}`, true)
+      return
+    }
+    showResult(data.imageUrl, currentResult.engineLabel, currentResult.fallbackUsed, {
+      size: currentResult.size,
+      itemId: currentResult.itemId,
+      prompt: currentResult.prompt,
+      accepted: currentResult.accepted,
+      mood: currentResult.mood,
+      engine: currentResult.engine,
+      genMode: currentResult.genMode,
+      reviseRound: currentResult.reviseRound,
+    })
+    setFormStatus(
+      `화질을 올렸어요${data.width ? ` (${data.width}×${data.height})` : ''}. 「이전과 비교」로 원본과 비교할 수 있어요.`,
+      false,
+    )
+  } catch (error) {
+    setFormStatus(`화질 올리기에 실패했어요: ${error instanceof Error ? error.message : String(error)}`, true)
+  } finally {
+    stopTimer()
+    upscaleButtons.forEach((btn) => {
+      if (btn) btn.disabled = false
+    })
+  }
+}
+upscaleButtons.forEach((btn) => btn.addEventListener('click', upscaleCurrentResult))
 
 /**
  * @typedef {{

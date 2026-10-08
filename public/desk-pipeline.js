@@ -4,6 +4,8 @@
  */
 (function (global) {
   const JPEG = 0.95
+  // 남녀 한 장면에서 두 사람 윤곽이 가장 가까운 지점의 간격(픽셀). 닿지는 않게 둔다
+  const CLOSE_PX = 5
 
   function load(src) {
     return new Promise((resolve, reject) => {
@@ -857,7 +859,7 @@
     if (layouts.length === 2) {
       const a = layouts[0]
       const b = layouts[1]
-      const gap = Math.round(cw * 0.008)
+      const gap = Math.round(cw * 0.003)
       const span = a.dw + b.dw + gap
       a.cx = Math.round((cw - span) / 2 + a.dw / 2)
       b.cx = Math.round(a.cx + a.dw / 2 + gap + b.dw / 2)
@@ -865,6 +867,48 @@
       b.x = Math.round(b.cx - b.dw / 2)
       a.y = ground - a.dh
       b.y = ground - b.dh
+      // 칸(조각) 둘레 여백 때문에 실제 사람 사이가 더 벌어진다. 두 사람 윤곽에서 가장 가까운 지점이 정확히 CLOSE_PX가 되게 맞춘다
+      const rowEdge = (p, side) => {
+        const c = document.createElement('canvas')
+        c.width = cw
+        c.height = ch
+        const x = c.getContext('2d', { willReadFrequently: true })
+        x.drawImage(p.cut, p.x, p.y, p.dw, p.dh)
+        const d = x.getImageData(0, 0, cw, ch).data
+        const edge = new Int32Array(ch).fill(side === 'right' ? -1 : cw + 1)
+        for (let y = 0; y < ch; y += 1) {
+          if (side === 'right') {
+            for (let xx = cw - 1; xx >= 0; xx -= 1) {
+              if (d[(y * cw + xx) * 4 + 3] > 60) {
+                edge[y] = xx
+                break
+              }
+            }
+          } else {
+            for (let xx = 0; xx < cw; xx += 1) {
+              if (d[(y * cw + xx) * 4 + 3] > 60) {
+                edge[y] = xx
+                break
+              }
+            }
+          }
+        }
+        return edge
+      }
+      const ra = rowEdge(a, 'right')
+      const lb = rowEdge(b, 'left')
+      let near = Infinity
+      for (let y = 0; y < ch; y += 1) {
+        if (ra[y] < 0 || lb[y] > cw) continue
+        near = Math.min(near, lb[y] - ra[y])
+      }
+      if (Number.isFinite(near)) {
+        const shift = near - CLOSE_PX
+        a.x += Math.round(shift / 2)
+        b.x -= Math.round(shift / 2)
+        a.cx += Math.round(shift / 2)
+        b.cx -= Math.round(shift / 2)
+      }
     }
     const placements = []
     layouts.forEach((p) => {
