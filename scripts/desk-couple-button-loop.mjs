@@ -120,7 +120,7 @@ const waitDone = async (re, ms) => {
   return f
 }
 if (!process.env.DESK_LOOP_SKIP_BODY) await page.locator('[data-desk-step="body"]').click({ force: true })
-const afterBody = process.env.DESK_LOOP_SKIP_BODY ? await snap() : await waitDone(/이었습니다|전신이 안 붙|다른 사람|저장하지 않습니다|이미 전신/, 420000)
+const afterBody = process.env.DESK_LOOP_SKIP_BODY ? await snap() : await waitDone(/이었습니다|전신이 안 붙|다른 사람|저장하지 않습니다|이미 전신/, 600000)
 await page.screenshot({ path: shot('04-after-body.png'), fullPage: true })
 for (const [k, id] of [['woman', 'desk-cast-woman-img'], ['man', 'desk-cast-man-img']]) {
   const src = await page.evaluate(async (i) => {

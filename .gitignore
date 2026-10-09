@@ -12,3 +12,12 @@ _tmp_bundle/
 _tmp_*.txt
 _tmp_*.mjs
 _tmp_*.cjs
+
+# 작업 잔재·개인 메모 (커밋 금지)
+_worker.bundle
+tmp-faceswap-test/
+오리/
+오리.zip
+핀패스.txt
+scripts/desk-*-probe.mjs
+scripts/desk-look-live.mjs
