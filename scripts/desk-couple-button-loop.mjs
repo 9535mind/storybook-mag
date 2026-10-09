@@ -38,6 +38,32 @@ page.on('pageerror', (err) => {
   pageerrors.push(err.message)
   notes.push(`pageerror: ${err.message}`)
 })
+// DESK_LOOP_TRACE=1 : /api/tale-scene 요청 본문(그림은 파일로)과 응답을 trace-*.json 으로 남긴다
+let traceN = 0
+if (process.env.DESK_LOOP_TRACE) {
+  page.on('request', (req) => {
+    if (req.method() !== 'POST' || !/\/api\/tale-scene$/.test(req.url())) return
+    try {
+      const body = JSON.parse(req.postData() || '{}')
+      const n = ++traceN
+      const imgs = (body.images || []).map((src, i) => {
+        const m = String(src).match(/^data:image\/(\w+);base64,(.+)$/)
+        if (!m) return String(src).slice(0, 200)
+        const f = `trace-${n}-img${i}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`
+        writeFileSync(path.join(OUT, f), Buffer.from(m[2], 'base64'))
+        return f
+      })
+      writeFileSync(path.join(OUT, `trace-${n}-req.json`), JSON.stringify({ ...body, images: imgs }, null, 1))
+    } catch {}
+  })
+  page.on('response', async (res) => {
+    if (!/\/api\/tale-scene(-status)?$/.test(res.url())) return
+    try {
+      const j = await res.json()
+      if (j.prompt || j.imageUrl || j.status === 'failed') notes.push('trace-res ' + JSON.stringify({ u: res.url().split('/').pop(), ...j }).slice(0, 700))
+    } catch {}
+  })
+}
 page.on('console', (msg) => {
   if (msg.type() === 'error') consoleErrors.push(msg.text())
 })

@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw238'
+window.__DESK_BUILD = '20261005mw239'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -18891,6 +18891,14 @@ function initAdultDesk() {
       return
     }
     if (typeof isNearlyBlackImage === 'function' && (await isNearlyBlackImage(stable))) {
+      // 엔진 필터가 가끔 검은 장을 낸다(같은 입력도 다음엔 정상). 자세 단계는 같은 엔진으로 한 번 더 그린다.
+      if (deskStep === 'place' && !opts?.blankRetried && !opts?.forceReplicate) {
+        setFormStatus('엔진이 빈 장을 냈습니다. 같은 엔진으로 한 번 더 그립니다…', false)
+        return runDeskKontextStep(images, description, deskStep, title, doneText, {
+          ...opts,
+          blankRetried: true,
+        })
+      }
       const sitLiePlace =
         deskStep === 'place' && /앉아|앉히|앉힌|앉혀|눕|누워|포옹|안기게|서로 안/i.test(String(description || ''))
       if (!opts?.forceReplicate && ((adultStill && deskStep === 'cut') || sitLiePlace)) {
