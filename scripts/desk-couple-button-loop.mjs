@@ -17,6 +17,7 @@ function loadCreds() {
   const vars = existsSync(path.join(ROOT, '.dev.vars')) ? readFileSync(path.join(ROOT, '.dev.vars'), 'utf8') : ''
   return {
     pin: (note.match(/^핀\s+(\S+)/m) || [])[1]?.trim() || (vars.match(/^ADMIN_PIN=(.*)$/m) || [])[1]?.trim() || '',
+    devPin: (vars.match(/^ADMIN_PIN=(.*)$/m) || [])[1]?.trim().replace(/^["']|["']$/g, '') || '',
     password: (note.match(/패스워드\s+(\S+)/) || [])[1]?.trim() || '',
   }
 }
@@ -73,7 +74,7 @@ notes.push('open ' + JSON.stringify(await snap()))
 const creds = loadCreds()
 if (await page.locator('#pin-gate').isVisible().catch(() => false)) {
   await page.fill('#auth-email', 'admin')
-  await page.fill('#auth-password', creds.password || creds.pin)
+  await page.fill('#auth-password', process.env.DESK_LOOP_USE_PIN ? creds.devPin : creds.password || creds.pin)
   await page.click('#auth-submit')
   await page.waitForTimeout(2500)
 }
@@ -150,6 +151,41 @@ if (resultSrc.startsWith('data:image')) {
   const r = await fetch(resultSrc)
   if (r.ok) writeFileSync(path.join(OUT, 'result.jpg'), Buffer.from(await r.arrayBuffer()))
 }
+// DESK_LOOP_POSES=arm,hug : 한 장면 뒤에 자세 카드를 하나씩 눌러 결과를 pose-<id>.jpg 로 저장한다
+const poseResults = {}
+const savePage = async (file) => {
+  const src = await page.evaluate(() => document.getElementById('result-image')?.src || '')
+  if (src.startsWith('data:image')) {
+    const m = src.match(/^data:image\/\w+;base64,(.+)$/)
+    if (m) writeFileSync(path.join(OUT, file), Buffer.from(m[1], 'base64'))
+  } else if (/^https?:\/\//.test(src)) {
+    const r = await fetch(src)
+    if (r.ok) writeFileSync(path.join(OUT, file), Buffer.from(await r.arrayBuffer()))
+  }
+}
+const poseIds = (process.env.DESK_LOOP_POSES || '').split(',').map((s) => s.trim()).filter(Boolean)
+for (let i = 0; i < poseIds.length; i += 1) {
+  const id = poseIds[i]
+  if (i > 0) {
+    // 앞 자세 결과 위에 겹치지 않게 한 장면부터 다시 만든다(오려 붙이기, 엔진 호출 없음)
+    await together.click({ force: true })
+    await page.waitForTimeout(6000)
+    await waitDone(/한 장면|이었습니다|하지 못|실패|저장하지 않습니다/, 300000)
+  }
+  const card = page.locator(`[data-desk-pick="pose"][data-id="${id}"]`)
+  if (!(await card.isVisible().catch(() => false))) {
+    poseResults[id] = { error: 'card_not_visible' }
+    continue
+  }
+  if (!(await card.evaluate((el) => el.classList.contains('is-on')))) await card.click({ force: true })
+  await page.locator('[data-desk-step="place"]').click({ force: true })
+  await page.waitForTimeout(6000)
+  const after = await waitDone(/자세를 바꿨|바꿨습니다|이었습니다|하지 못|실패|저장하지 않습니다/, 420000)
+  await page.screenshot({ path: shot(`06-pose-${id}.png`), fullPage: true })
+  await savePage(`pose-${id}.jpg`)
+  poseResults[id] = { status: after.status, form: after.form }
+  if (await card.evaluate((el) => el.classList.contains('is-on'))) await card.click({ force: true })
+}
 await browser.close()
 writeFileSync(path.join(OUT, 'notes.txt'), notes.join(String.fromCharCode(10)))
-console.log(JSON.stringify({ afterBody, afterTogether, pageerrors, consoleErrors: consoleErrors.slice(0, 10) }, null, 2))
+console.log(JSON.stringify({ afterBody, afterTogether, poseResults, pageerrors, consoleErrors: consoleErrors.slice(0, 10) }, null, 2))
