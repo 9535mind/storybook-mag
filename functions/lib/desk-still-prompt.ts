@@ -5,7 +5,7 @@ import { wantsExplicitPubicShave, buildStillWomanBustHint } from './nude-anatomy
 export const DESK_STILL_PROMPT_MAX = 420
 
 export type DeskLookKind = 'nude' | 'silk' | 'clothes'
-export type DeskActionKind = 'none' | 'kiss' | 'hug' | 'breast'
+export type DeskActionKind = 'none' | 'kiss' | 'hug' | 'arm' | 'breast'
 export type DeskStillStep = 'look' | 'place' | 'cut' | 'together' | ''
 
 export type DeskIntent = {
@@ -110,10 +110,11 @@ export function parseDeskLookKind(lookId?: string, text = ''): DeskLookKind {
 
 export function parseDeskActionKind(actionId?: string, text = ''): DeskActionKind {
   const id = String(actionId || '').trim()
-  if (id === 'kiss' || id === 'hug' || id === 'breast') return id
+  if (id === 'kiss' || id === 'hug' || id === 'arm' || id === 'breast') return id
   const t = text || ''
   if (/키스|입맞춤|kiss/i.test(t)) return 'kiss'
   if (/포옹|안기게|서로 안|안는다|껴안|\bhug\b/i.test(t)) return 'hug'
+  if (/팔을 걸|팔 걸기|links? (?:her )?arm/i.test(t)) return 'arm'
   if (/가슴|breast/i.test(t)) return 'breast'
   return 'none'
 }
@@ -206,6 +207,7 @@ export function buildDeskStillPrompt(
   const sit = /앉|sit(?:ting)?/i.test(t)
   const stand = /서서|서기|stand(?:ing)?/i.test(t)
   const hug = intent.action === 'hug' || (couple && /포옹|안기게|서로 안|안는다|껴안|\bhug\b/i.test(t))
+  const arm = intent.action === 'arm'
   const sitLie = wantsDeskSitOrLie(t)
 
   if (step === 'together') {
@@ -239,7 +241,9 @@ export function buildDeskStillPrompt(
   }
 
   if (step === 'place') {
-    const action = hug
+    const action = arm
+      ? 'she gently links her arm through his arm. standing side by side, close, shoulders almost touching. both faces. clothes stay.'
+      : hug
       ? 'light hug now. arms around each other. both faces. clothes stay.'
       : lie
         ? couple
@@ -254,7 +258,7 @@ export function buildDeskStillPrompt(
               : couple && stand
                 ? 'BOTH stand near each other. clothes stay.'
                 : 'change only the room. keep the current pose.'
-    const hint = !hug && !sitLie ? userHint(t, 40) : ''
+    const hint = !hug && !arm && !sitLie ? userHint(t, 40) : ''
     return assembleDeskStill([
       { key: 'DO', text: hint ? `${action} User: ${hint}` : action },
       { key: 'KEEP', text: deskKeep(couple, true) },
@@ -319,6 +323,9 @@ export function deskStillNegativePrompt(options: {
   }
   if (/슬립|slip|실크/i.test(t)) {
     return `bra, brassiere, bra straps, underwire, separate panty, camisole, tank top, two-piece lingerie, catalog model, new face, white studio, slim beauty, black panty, black bra, lace teddy, bodysuit, black image, fully naked, child${noGiant}`
+  }
+  if (/팔을 걸|팔 걸기|links? (?:her )?arm/i.test(t)) {
+    return 'standing apart, no contact, hugging, kissing, missing man, new face, extra arms, black image, fully naked, child'
   }
   if (/포옹|안기게|서로 안|안는다|\bhug\b/i.test(t)) {
     return 'standing apart, no contact, side-by-side, missing man, new face, black image, fully naked, child'

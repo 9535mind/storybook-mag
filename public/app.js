@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw237'
+window.__DESK_BUILD = '20261005mw238'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -16940,7 +16940,8 @@ function initAdultDesk() {
     { id: 'stand', label: '서기', text: '서서' },
     { id: 'sit', label: '앉기', text: '앉아' },
     { id: 'lie', label: '눕기', text: '침대에 누워' },
-    { id: 'hug', label: '포옹', text: '서로 안기게' },
+    { id: 'arm', label: '팔 걸기', text: '팔을 걸고' },
+    { id: 'hug', label: '가벼운 포옹', text: '서로 안기게' },
     { id: 'lean', label: '기대기', text: '벽에 기대어' },
     { id: 'window', label: '창가', text: '창가에 서서' },
     { id: 'back', label: '뒤돌아', text: '살짝 뒤돌아보며' },
@@ -17218,17 +17219,19 @@ function initAdultDesk() {
     const sit = state.pose.includes('sit')
     const lie = state.pose.includes('lie')
     const hug = state.pose.includes('hug')
+    const arm = state.pose.includes('arm')
     const extras = state.pose
-      .filter((id) => id !== 'stand' && id !== 'sit' && id !== 'lie' && id !== 'hug')
+      .filter((id) => id !== 'stand' && id !== 'sit' && id !== 'lie' && id !== 'hug' && id !== 'arm')
       .map((id) => pickText(poses, id))
       .filter(Boolean)
     const pose = couple
       ? [
           hug ? '지금 떨어져 선 두 사람을 가볍게 서로 안기게 한다. 옷은 유지. 둘 다 얼굴이 보임.' : '',
-          !hug && stand && sit ? '선 자세를 바꿔 여자는 앉히고 남자는 옆에 서게 한다. 한 장. 둘 다 얼굴이 보임.' : '',
-          !hug && stand && !sit && !lie ? '두 사람 모두 서서. 한 장.' : '',
-          !hug && sit && !stand && !lie ? '지금 선 자세를 바꿔 두 사람 모두 앉힌다. 소파나 침대에 앉아. 서서 유지 금지.' : '',
-          !hug && lie ? '지금 선 자세를 바꿔 두 사람 모두 침대에 눕힌다. 서서 찍기 금지.' : '',
+          arm ? '지금 떨어져 선 두 사람이 나란히 서서 그녀가 그의 팔에 팔을 건다. 옷은 유지. 둘 다 얼굴이 보임.' : '',
+          !hug && !arm && stand && sit ? '선 자세를 바꿔 여자는 앉히고 남자는 옆에 서게 한다. 한 장. 둘 다 얼굴이 보임.' : '',
+          !hug && !arm && stand && !sit && !lie ? '두 사람 모두 서서. 한 장.' : '',
+          !hug && !arm && sit && !stand && !lie ? '지금 선 자세를 바꿔 두 사람 모두 앉힌다. 소파나 침대에 앉아. 서서 유지 금지.' : '',
+          !hug && !arm && lie ? '지금 선 자세를 바꿔 두 사람 모두 침대에 눕힌다. 서서 찍기 금지.' : '',
           ...extras,
         ]
           .filter(Boolean)
@@ -17238,7 +17241,7 @@ function initAdultDesk() {
           lie ? '지금 선 자세를 바꿔 침대에 눕힌다. 전신. 서서 찍기 금지.' : '',
           !sit && !lie
             ? state.pose
-                .filter((id) => id !== 'hug')
+                .filter((id) => id !== 'hug' && id !== 'arm')
                 .map((id) => pickText(poses, id))
                 .filter(Boolean)
                 .join(', ')
@@ -17246,7 +17249,7 @@ function initAdultDesk() {
         ]
           .filter(Boolean)
           .join(', ')
-    return [place, pose, sit || lie || hug ? '얼굴은 같은 사람' : '얼굴은 유지']
+    return [place, pose, sit || lie || hug || arm ? '얼굴은 같은 사람' : '얼굴은 유지']
       .filter(Boolean)
       .join(', ')
   }
@@ -17458,8 +17461,8 @@ function initAdultDesk() {
           } else if (key === 'move' && list.length >= MOVE_MAX) {
             setFormStatus(`움직임은 한 번에 ${MOVE_MAX}개까지입니다. 고른 걸 끄고 다시 고르세요.`, true)
           } else {
-            if (key === 'pose' && (id === 'stand' || id === 'sit' || id === 'lie' || id === 'hug')) {
-              ;['stand', 'sit', 'lie', 'hug'].forEach((drop) => {
+            if (key === 'pose' && (id === 'stand' || id === 'sit' || id === 'lie' || id === 'hug' || id === 'arm')) {
+              ;['stand', 'sit', 'lie', 'hug', 'arm'].forEach((drop) => {
                 if (drop === id) return
                 const dropAt = list.indexOf(drop)
                 if (dropAt >= 0) list.splice(dropAt, 1)
@@ -18820,7 +18823,9 @@ function initAdultDesk() {
         ? opts.deskAction
         : deskStep === 'place' && state.pose.includes('hug')
           ? 'hug'
-          : 'none'
+          : deskStep === 'place' && state.pose.includes('arm')
+            ? 'arm'
+            : 'none'
     const adultStill =
       state.look === 'nude' ||
       state.look === 'silk' ||
@@ -20293,16 +20298,16 @@ function initAdultDesk() {
       [compact],
       description,
       'place',
-      state.pose.includes('sit') || state.pose.includes('lie') || state.pose.includes('hug')
-        ? '앉아·눕기·포옹'
+      state.pose.includes('sit') || state.pose.includes('lie') || state.pose.includes('hug') || state.pose.includes('arm')
+        ? '앉아·눕기·포옹·팔 걸기'
         : '장소',
-      state.pose.includes('sit') || state.pose.includes('lie') || state.pose.includes('hug')
+      state.pose.includes('sit') || state.pose.includes('lie') || state.pose.includes('hug') || state.pose.includes('arm')
         ? '자세를 바꿨습니다. 얼굴은 다시 붙입니다.'
         : '장소를 바꿨습니다. 움직이려면 움직이기를 누르세요.',
       {
         deskLook: deskLookKind(),
         deskCouple: frame.couple,
-        deskAction: state.pose.includes('hug') ? 'hug' : 'none',
+        deskAction: state.pose.includes('hug') ? 'hug' : state.pose.includes('arm') ? 'arm' : 'none',
       },
     )
   }
