@@ -111,6 +111,9 @@
     const cd = cctx.getImageData(0, 0, w, h)
     const od = orig.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, w, h).data
     const d = cd.data
+    // 되살리기 전에 이미 있던 몸(불투명). 되살린 화소만으로 이뤄진 떠 있는 덩어리를 가려내는 데 쓴다
+    const bodyBefore = new Uint8Array(w * h)
+    for (let i = 0; i < w * h; i += 1) bodyBefore[i] = d[i * 4 + 3] >= 128 ? 1 : 0
     const take = (i) => {
       d[i] = od[i]
       d[i + 1] = od[i + 1]
@@ -300,9 +303,14 @@
       sizes.push(size)
     }
     const biggest = Math.max(...sizes)
+    // 원래 몸 화소가 하나도 없는 덩어리 = 얼굴 타원 되살리기가 사람 밖 배경(원본 벽)까지 채워 만든 조각(반달). 크기와 상관없이 지운다
+    const hadBody = new Uint8Array(nextLabel + 1)
+    for (let k = 0; k < w * h; k += 1) {
+      if (label[k] && bodyBefore[k]) hadBody[label[k]] = 1
+    }
     for (let k = 0; k < w * h; k += 1) {
       const lb = label[k]
-      if (lb && sizes[lb] < biggest * 0.02) d[k * 4 + 3] = 0
+      if (lb && (sizes[lb] < biggest * 0.02 || !hadBody[lb])) d[k * 4 + 3] = 0
     }
     cctx.putImageData(cd, 0, 0)
   }
