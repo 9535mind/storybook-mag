@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw241'
+window.__DESK_BUILD = '20261005mw242'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -16041,6 +16041,59 @@ async function deskStampFacesFromSource(srcUrl, outUrl, faces) {
   }
 }
 
+// 자세가 바뀌면 얼굴 위치·크기도 바뀐다. 원본 얼굴 조각을 결과의 얼굴 자리에 맞춰 옮겨 찍는다.
+// 엔진이 다시 그린 얼굴은 쓰지 않는다. 짝은 가로 순서(왼쪽끼리, 오른쪽끼리)로 맞춘다.
+async function deskStampFacesRelocated(srcUrl, outUrl, srcBoxes, outBoxes) {
+  const byX = (a, b) => a.x + a.w / 2 - (b.x + b.w / 2)
+  const src = (srcBoxes || []).slice().sort(byX)
+  const out = (outBoxes || []).slice().sort(byX)
+  if (!srcUrl || !outUrl || !src.length || src.length !== out.length) return outUrl
+  try {
+    const srcImg = await loadDeskImage(srcUrl)
+    const outImg = await loadDeskImage(outUrl)
+    const W = outImg.naturalWidth || 1
+    const H = outImg.naturalHeight || 1
+    const sw0 = srcImg.naturalWidth || 1
+    const sh0 = srcImg.naturalHeight || 1
+    const canvas = document.createElement('canvas')
+    canvas.width = W
+    canvas.height = H
+    const ctx = canvas.getContext('2d')
+    ctx.drawImage(outImg, 0, 0, W, H)
+    for (let i = 0; i < src.length; i += 1) {
+      const kind = src.length > 1 && i === src.length - 1 ? 'man' : src.length > 1 ? 'woman' : 'woman'
+      const sb = deskFacePixelBox(src[i], kind)
+      const ob = deskFacePixelBox(out[i], kind)
+      if (!sb || !ob) continue
+      const dw = Math.max(8, Math.round(ob.w * W))
+      const dh = Math.max(8, Math.round(ob.h * H))
+      const dx = Math.round(ob.x * W)
+      const dy = Math.round(ob.y * H)
+      const patch = document.createElement('canvas')
+      patch.width = dw
+      patch.height = dh
+      const pctx = patch.getContext('2d')
+      pctx.drawImage(srcImg, sb.x * sw0, sb.y * sh0, sb.w * sw0, sb.h * sh0, 0, 0, dw, dh)
+      // 타원 가장자리를 부드럽게 줄여 이음매가 보이지 않게 한다
+      pctx.globalCompositeOperation = 'destination-in'
+      pctx.save()
+      pctx.translate(dw / 2, dh / 2)
+      pctx.scale(dw / 2, dh / 2)
+      const grad = pctx.createRadialGradient(0, 0, 0, 0, 0, 1)
+      grad.addColorStop(0, 'rgba(0,0,0,1)')
+      grad.addColorStop(0.72, 'rgba(0,0,0,1)')
+      grad.addColorStop(1, 'rgba(0,0,0,0)')
+      pctx.fillStyle = grad
+      pctx.fillRect(-1, -1, 2, 2)
+      pctx.restore()
+      ctx.drawImage(patch, dx, dy)
+    }
+    return canvas.toDataURL('image/png')
+  } catch {
+    return outUrl
+  }
+}
+
 async function deskStampManFromSource(srcUrl, outUrl, layout) {
   if (!srcUrl || !outUrl || !layout?.man) return outUrl
   try {
@@ -19012,6 +19065,17 @@ function initAdultDesk() {
                           ? '옷 경계가 이어지지 않아 저장하지 않습니다. 가운데는 원본입니다.'
                           : '얼굴·인원을 확인하지 못해 저장하지 않습니다. 가운데는 원본입니다.'
         setFormStatus(gate.detail ? `${gateWhy} ${gate.detail}` : gateWhy, true)
+        return
+      }
+    }
+    if (deskStep === 'place' && typeof deskStampFacesRelocated === 'function') {
+      // 엔진이 다시 그린 얼굴 대신, 입력 장면에 들어 있는 원본 얼굴을 결과의 얼굴 자리에 그대로 옮겨 찍는다.
+      const srcFaces = await deskStillFaceBoxes(images[0], { couple: expectPeople >= 2 })
+      const outFaces = await deskStillFaceBoxes(shown, { couple: expectPeople >= 2 })
+      if (srcFaces?.length && srcFaces.length === expectPeople && outFaces?.length === expectPeople) {
+        shown = await deskStampFacesRelocated(images[0], shown, srcFaces, outFaces)
+      } else {
+        setFormStatus('얼굴 자리를 찾지 못해 원본 얼굴로 바꾸지 못했습니다. 저장하지 않습니다.', true)
         return
       }
     }
