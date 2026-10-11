@@ -1062,11 +1062,15 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
             500,
           )
         }
-        const useAdultReplicate = deskStillUsesAdultReplicate(
-          step,
-          descriptionKo,
-          Boolean(body.forceReplicate),
-        )
+        // 옷을 유지하는 포옹·팔 걸기는 Kontext 로 그린다(Replicate 는 앉기·눕기·성인 장면용).
+        const keepClothesHug =
+          step === 'place' &&
+          !body.forceReplicate &&
+          intent.look === 'clothes' &&
+          (intent.action === 'hug' || intent.action === 'arm')
+        const useAdultReplicate =
+          !keepClothesHug &&
+          deskStillUsesAdultReplicate(step, descriptionKo, Boolean(body.forceReplicate))
         if (useAdultReplicate) {
           if (!env.REPLICATE_API_TOKEN?.trim()) {
             return jsonResponse({ ok: false, error: 'replicate_token_not_configured' }, 500)

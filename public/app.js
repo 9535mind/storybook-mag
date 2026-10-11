@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw239'
+window.__DESK_BUILD = '20261005mw241'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -18827,11 +18827,12 @@ function initAdultDesk() {
             ? 'arm'
             : 'none'
     const adultStill =
-      state.look === 'nude' ||
-      state.look === 'silk' ||
-      /나체|누드|nude|naked|전라|슬립|slip|실크|노브라|란제리|lingerie|옷벗|벗기|가슴|breast|보지|주무르/i.test(
-        String(description || ''),
-      )
+      deskLook !== 'clothes' &&
+      (state.look === 'nude' ||
+        state.look === 'silk' ||
+        /나체|누드|nude|naked|전라|슬립|slip|실크|노브라|란제리|lingerie|옷벗|벗기|가슴|breast|보지|주무르/i.test(
+          String(description || ''),
+        ))
     let aspectRatio = '3:4'
     try {
       const dim = images[0] && typeof deskImageSize === 'function' ? await deskImageSize(images[0]) : null
@@ -20313,7 +20314,8 @@ function initAdultDesk() {
         ? '자세를 바꿨습니다. 얼굴은 다시 붙입니다.'
         : '장소를 바꿨습니다. 움직이려면 움직이기를 누르세요.',
       {
-        deskLook: deskLookKind(),
+        // 팔 걸기·포옹은 옷을 유지한다. 누드로 보내면 성인 필터가 검은 장을 낸다.
+        deskLook: state.pose.includes('hug') || state.pose.includes('arm') ? 'clothes' : deskLookKind(),
         deskCouple: frame.couple,
         deskAction: state.pose.includes('hug') ? 'hug' : state.pose.includes('arm') ? 'arm' : 'none',
       },
