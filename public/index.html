@@ -181,6 +181,7 @@
             <button type="button" id="desk-cast-paste-m">남 붙이기</button>
             <button type="button" id="desk-scene-paste">장면 붙이기</button>
           </div>
+          <button type="button" id="desk-cast-erase" class="desk-scene-upload">일부 지우기</button>
             <p class="adult-desk__fine">커플 한 장은 여 붙이기만. 남 칸은 비워 둡니다.</p>
           <button type="button" id="desk-scene-new" class="desk-scene-upload">새 장면</button>
           <button type="button" id="desk-scene-upload" class="desk-scene-upload">장면 사진 올리기</button>
@@ -193,6 +194,15 @@
         <div id="adult-desk-stage" class="adult-desk__stage">
           <p id="adult-desk-progress" class="adult-desk__progress" hidden></p>
           <p id="adult-desk-stage-empty" class="adult-desk__stage-empty">CAST에 사람을 넣고, 새 사진을 만들거나 장면 사진을 올리세요.</p>
+          <div id="desk-erase-bar" class="desk-erase-bar" hidden>
+            <p class="adult-desk__fine">감싼 선 안만 지웁니다. 그 자리는 바로 옆 배경으로 메웁니다. 여러 번 됩니다.</p>
+            <div class="desk-erase-bar__row">
+              <button type="button" id="desk-erase-apply">이 선택 지우기</button>
+              <button type="button" id="desk-erase-undo">점 취소</button>
+              <button type="button" id="desk-erase-clear">선택 취소</button>
+              <button type="button" id="desk-erase-done">지우기 끝</button>
+            </div>
+          </div>
         </div>
 
         <aside class="adult-desk__rail">
@@ -1946,14 +1956,14 @@
   <script src="/tale.js?v=20260921attach"></script>
   <script src="/tale-layout.js?v=20260921attach"></script>
   <script src="/observe.js?v=20260921attach"></script>
-  <script src="/poly-lasso.js?v=20260831erase2"></script>
+  <script src="/poly-lasso.js?v=20261017erase3"></script>
   <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.17.3/dist/ort.min.js"></script>
   <script src="/desk-look-models.js?v=20260917vis"></script>
   <script src="/desk-look-preflight.js?v=20261001mw61"></script>
   <script src="/desk-look-onnx.js?v=20260922clothes"></script>
   <script src="/desk-look-runtime.js?v=20260917vis"></script>
-  <script src="/app.js?v=20261005mw243"></script>
-  <script src="/desk-pipeline.js?v=20261005mw243"></script>
-  <script src="/free-studio.js?v=20260930rev1"></script>
+  <script src="/app.js?v=20261005mw247"></script>
+  <script src="/desk-pipeline.js?v=20261005mw245"></script>
+  <script src="/free-studio.js?v=20261017cmd2"></script>
 </body>
 </html>

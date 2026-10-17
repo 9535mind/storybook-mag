@@ -136,7 +136,9 @@ export function wantsDeskSitOrLie(text: string): boolean {
 export function wantsDeskPoseChange(text: string): boolean {
   const t = polishKoreanPromptText(text || '')
   if (wantsDeskSitOrLie(t)) return true
-  return /포옹|안기게|서로 안|안는다|껴안|\bhug\b|embrace/i.test(t)
+  return /포옹|안기게|서로 안|안는다|껴안|\bhug\b|embrace|기대|창가|뒤돌아|숙이|무릎|다리\s*꼬|팔을 걸|팔 걸기|lean|kneel|window/i.test(
+    t,
+  )
 }
 
 export function deskStillUsesAdultReplicate(step: string, text: string, force = false): boolean {

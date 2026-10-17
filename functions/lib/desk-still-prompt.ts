@@ -160,11 +160,11 @@ function assembleDeskStill(sections: Array<{ key: DeskStillKey; text: string }>)
   )
 }
 
-/** 나체 BODY — 검정 팬티로 음모를 가리는 실측, 민무늬 공백, 안개 가짜팬티 */
+/** 나체 BODY — 검정 팬티로 음모를 가리는 실측, 민무늬 공백, 안개 가짜팬티, 배·유두 털 */
 function deskNudeBody(text: string, couple: boolean): string {
   const pubic = wantsExplicitPubicShave(text)
-    ? 'bare crotch, shaved as asked. panty OFF.'
-    : 'bare crotch, Korean-30s pubic curly mons, soft labia, natural cleft. panty OFF.'
+    ? 'bare crotch, shaved as asked. panty OFF. smooth nipples, no hair on breasts.'
+    : 'bare crotch, Korean-30s pubic curly mons only, not belly. no nipple hair. panty OFF.'
   const who = couple ? 'CAST woman-slot only. CAST man-slot stays dressed.' : 'Same woman nude.'
   return `${who} ${buildStillWomanBustHint(text)} ${pubic} FAILED black panty, fog, hairless Barbie, single crease.`
 }
@@ -184,7 +184,7 @@ function deskSlipBody(text = ''): string {
 function deskKeep(couple: boolean, clothesStay: boolean): string {
   const face = couple ? 'same faces. CAST man-slot stays male.' : 'same source face, same hair.'
   const rest = clothesStay
-    ? 'same pose, crop, clothes.'
+    ? 'same pose, crop, clothes. no zoom-in.'
     : couple
       ? 'same pose, crop. hug stays. FORBIDDEN stand apart, two women.'
       : 'same pose, crop, body, room. FORBIDDEN new model, white studio, slim beauty.'
@@ -241,6 +241,13 @@ export function buildDeskStillPrompt(
   }
 
   if (step === 'place') {
+    const lean = /기대|lean/i.test(t)
+    const atWindow = /창가|window/i.test(t)
+    const lookBack = /뒤돌아|look(?:ing)? back/i.test(t)
+    const bend = /숙이|bend|lean(?:ing)? (?:forward|over)/i.test(t)
+    const kneel = /무릎을 꿇|kneel/i.test(t)
+    const cross = /다리\s*꼬|cross(?:ed)? legs?/i.test(t)
+    const extras = lean || atWindow || lookBack || bend || kneel || cross
     const action = arm
       ? 'she gently links her arm through his arm. standing side by side, close, shoulders almost touching. both faces. clothes stay.'
       : hug
@@ -249,16 +256,33 @@ export function buildDeskStillPrompt(
         ? couple
           ? 'BOTH lie on the bed now. not standing.'
           : 'she lies on the bed now. not standing.'
-        : couple && sit && stand
-          ? 'she SITS, he STANDS beside her. she must not stay standing.'
-          : couple && sit
-            ? 'BOTH SIT now. knees bent. not standing.'
-            : sit
-              ? 'she SITS now. knees bent. not standing.'
-              : couple && stand
-                ? 'BOTH stand near each other. clothes stay.'
-                : 'change only the room. keep the current pose.'
-    const hint = !hug && !arm && !sitLie ? userHint(t, 40) : ''
+        : kneel
+          ? couple
+            ? 'BOTH kneel now. not standing tall.'
+            : 'she kneels now. not standing tall.'
+          : cross
+            ? 'she sits with legs crossed now. not standing.'
+            : couple && sit && stand
+              ? 'she SITS, he STANDS beside her. she must not stay standing.'
+              : couple && sit
+                ? 'BOTH SIT now. knees bent. not standing.'
+                : sit
+                  ? 'she SITS now. knees bent. not standing.'
+                  : bend
+                    ? 'she bends slightly at the waist now. same room, same clothes.'
+                    : lean
+                      ? 'she leans on the wall now. same room, same clothes.'
+                      : atWindow
+                        ? 'she stands at the window now. same room, same clothes, same face.'
+                        : lookBack
+                          ? 'she turns slightly looking back. same face, same clothes. not a new model.'
+                          : couple && stand
+                            ? 'BOTH stand near each other. clothes stay.'
+                            : stand
+                              ? 'she stays standing. same room, same clothes.'
+                              : 'do the requested pose now. same room, same clothes, same face.'
+    // 앉아·포옹이어도 기대기·창가 같은 추가 말은 버린다. 방 바꾸기는 장소 칸을 없앤 뒤 폐기.
+    const hint = extras || (!hug && !arm && !sitLie) ? userHint(t, 56) : ''
     return assembleDeskStill([
       { key: 'DO', text: hint ? `${action} User: ${hint}` : action },
       { key: 'KEEP', text: deskKeep(couple, true) },
@@ -318,8 +342,8 @@ export function deskStillNegativePrompt(options: {
   const noGiant = hugeOk ? '' : ', huge breasts, balloon bust, porn-giant chest'
   if (options.nudeStill) {
     return options.couple
-      ? `two women, lesbian, gender swap, feminized man, man with breasts, standing apart, new face, missing man, bra, panty, lingerie, thong, bikini, leftover clothes, fog crotch, hairless crotch, black image, mosaic, child${noGiant}`
-      : `black panty, thong, g-string, bikini, leftover clothes, bra, fog crotch, hairless crotch, black image, mosaic, new face, slim model, white studio, child${noGiant}`
+      ? `two women, lesbian, gender swap, feminized man, man with breasts, standing apart, new face, missing man, bra, panty, lingerie, thong, bikini, leftover clothes, fog crotch, hairless crotch, hairy nipples, areola hair, pubic hair on belly, happy trail, zoom-in, bust close-up, chest crop, black image, mosaic, child${noGiant}`
+      : `black panty, thong, g-string, bikini, leftover clothes, bra, fog crotch, hairless crotch, hairy nipples, areola hair, pubic hair on belly, happy trail, zoom-in, bust close-up, chest crop, black image, mosaic, new face, slim model, white studio, child${noGiant}`
   }
   if (/슬립|slip|실크/i.test(t)) {
     return `bra, brassiere, bra straps, underwire, separate panty, camisole, tank top, two-piece lingerie, catalog model, new face, white studio, slim beauty, black panty, black bra, lace teddy, bodysuit, black image, fully naked, child${noGiant}`

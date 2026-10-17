@@ -315,6 +315,21 @@
     return data.message || `실패: ${code || status}`
   }
 
+  const holdSourceFaces = async (source, result) => {
+    if (!source || !result) return result
+    if (typeof deskStampFacesRelocated !== 'function' || typeof deskStillFaceBoxes !== 'function') return result
+    try {
+      const srcFaces = await deskStillFaceBoxes(source)
+      const outFaces = await deskStillFaceBoxes(result)
+      if (srcFaces?.length && outFaces?.length === srcFaces.length) {
+        return await deskStampFacesRelocated(source, result, srcFaces, outFaces)
+      }
+    } catch (_) {
+      /* 얼굴을 못 찾으면 엔진 결과를 그대로 둔다 */
+    }
+    return result
+  }
+
   const callJson = async (path, payload) => {
     const response = await fetch(path, {
       method: 'POST',
@@ -390,7 +405,7 @@
         const coupleText = looksCoupleMotion(text)
         sourcePeople = photoFaces >= 2 || coupleText ? 2 : 1
         const imageUrl = await hostPhoto()
-        if (sourcePeople === 2) {
+        if (sourcePeople === 2 && (bodyProject || NUDE_WORDS.test(text))) {
           setStatus('올린 원본은 그대로 두고, 여자 옷 칸만 찾아 녹입니다…', false)
           const parse = globalThis.DeskLookOnnx?.parse
           if (typeof parse !== 'function') {
@@ -419,6 +434,17 @@
             baseDescription: '',
             revision: '여자 옷만 녹여 나체. 마스크 밖 얼굴·남자·배경은 원본 그대로.',
             maskDataUrl: mask.dataUrl,
+            sourcePeople: 2,
+            size: sizeValue(),
+            mood: 'clean',
+          })
+        } else if (sourcePeople === 2) {
+          out = await callJson('/api/free-refine', {
+            mode: 'text',
+            genMode: 'fashion',
+            imageUrl,
+            baseDescription: '',
+            revision: text,
             sourcePeople: 2,
             size: sizeValue(),
             mood: 'clean',
@@ -457,8 +483,21 @@
         setStatus('결과를 받지 못했습니다. 같은 단추를 다시 눌러 주세요.', true)
         return
       }
+      const faceSrc = revise
+        ? state.result && state.result !== state.photo && state.result !== state.photoUrl
+          ? state.result
+          : state.photo
+        : state.photo
+      const held = faceSrc ? await holdSourceFaces(faceSrc, url) : url
+      if (faceSrc && typeof deskFrameHolds === 'function') {
+        const frame = await deskFrameHolds(faceSrc, held)
+        if (!frame.ok) {
+          setStatus('줌인해 저장하지 않습니다. 원본 구도로 다시 그려 주세요.', true)
+          return
+        }
+      }
       // 글로 벗긴 경우에도 결과는 나체다 — 움직이기에서 또 벗기지 않게 표시해 둔다.
-      showResult(url, sourcePeople === 2 || bodyProject || NUDE_WORDS.test(text))
+      showResult(held, sourcePeople === 2 || bodyProject || NUDE_WORDS.test(text))
       const label = out.data.engineLabel ? ` (${out.data.engineLabel})` : ''
       setStatus(
         revise

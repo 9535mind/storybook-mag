@@ -958,7 +958,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                 modelOwner: 'lucataco',
                 modelName: 'realistic-vision-v5-inpainting',
                 prompt:
-                  'Photoreal. Edit ONLY the white-masked clothes. Melt those garments to bare adult skin of the same woman. Knit OFF, sweater OFF, skirt OFF, shirt OFF, jeans OFF, panty OFF. Bare breasts with nipples, bare belly, bare hips. Same pose, same crop. No new person, no lingerie, no leotard, no swimsuit.',
+                  'Photoreal. Edit ONLY the white-masked clothes. Melt those garments to bare adult skin of the same woman. Knit OFF, sweater OFF, skirt OFF, shirt OFF, jeans OFF, panty OFF. Bare breasts with nipples, bare belly, bare hips. Same face, same pose, same crop, same camera distance. Head stays in frame. FORBIDDEN zoom-in, bust close-up, chest-only crop. Neat Korean-30s pubic curls on the mons only — not climbing the belly or navel. Smooth nipples and areola, no hair on breasts. No new person, no lingerie, no leotard, no swimsuit.',
                 negativePrompt: deskStillNegativePrompt({
                   couple,
                   nudeStill,
@@ -1275,7 +1275,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
                           ? body.sourceClothHex.trim()
                           : '',
                       )
-                    : description
+                    : `APPLY NOW: ${description}. Same exact faces, same crop, same camera distance as the source photo. Head stays in frame. FORBIDDEN a new face, a new model, a zoom-in, a bust close-up, a chest-only crop.`
         const keepLightRefs = freeLook === 'extend-keep-light' && images.length >= 2
         const submitted = keepLightRefs
           ? await submitFalKontextMultiImage({

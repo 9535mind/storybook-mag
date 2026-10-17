@@ -49,17 +49,19 @@
   "wantsDeskPoseChange/stand-false": false,
   "wantsDeskSitOrLie/앉힌다-true": true,
   "buildDeskStillPrompt/look-nude-short": {
-    "length": 413,
+    "length": 418,
     "underBudget": true,
     "startsWithDo": true,
     "pantyOff": true,
     "blackPantyFail": true,
     "pubic": true,
+    "monsOnly": true,
+    "noNippleHair": true,
     "hasKeep": true,
     "softC": true
   },
   "buildDeskStillPrompt/look-clothes-micro-mini": {
-    "length": 398,
+    "length": 410,
     "underBudget": true,
     "microMini": true,
     "noBlackAline": true,
@@ -71,16 +73,24 @@
     "huge": "fuller bust as asked, still real. not cartoon."
   },
   "buildDeskStillPrompt/place-hug-short": {
-    "length": 151,
+    "length": 163,
     "underBudget": true,
     "startsWithHug": true
   },
   "buildDeskStillPrompt/place-sit-short": {
-    "length": 117,
+    "length": 129,
     "underBudget": true,
     "startsWithSit": true
   },
-  "deskStillUsesAdultReplicate/place-slip-false": false,
+  "deskStillUsesAdultReplicate/place-slip-false": true,
+  "buildDeskStillPrompt/place-lean-keeps-command": {
+    "length": 162,
+    "underBudget": true,
+    "leans": true,
+    "notRoomOnly": true,
+    "hasUser": true
+  },
+  "wantsDeskPoseChange/lean-true": true,
   "deskStillUsesAdultReplicate/cut-slip-false": false,
   "deskStillUsesAdultReplicate/cut-undress-true": true,
   "deskStillUsesAdultReplicate/look-slip-force-true": true,

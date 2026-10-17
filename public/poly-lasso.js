@@ -334,7 +334,7 @@
       const scaleX = outW / canvas.width
       const scaleY = outH / canvas.height
       const expandPx = Math.max(0, Math.round(Number(o.expandPx) || 0))
-      const blurPx = Math.max(0, Number(o.blurPx) || 2.5)
+      const blurPx = o.blurPx == null ? 2.5 : Math.max(0, Number(o.blurPx) || 0)
 
       const mask = document.createElement('canvas')
       mask.width = outW

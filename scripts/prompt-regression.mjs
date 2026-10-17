@@ -134,6 +134,8 @@ const cases = [
         pantyOff: /panty OFF/i.test(p),
         blackPantyFail: /FAILED black panty/i.test(p),
         pubic: /Korean-30s pubic/i.test(p),
+        monsOnly: /mons only/i.test(p),
+        noNippleHair: /no nipple hair/i.test(p),
         hasKeep: /\[KEEP\]/i.test(p),
         softC: /soft C-cup glamour, not huge/i.test(p),
       }
@@ -189,6 +191,23 @@ const cases = [
         startsWithSit: /^\[DO\] she SITS/i.test(p),
       }
     },
+  ],
+  [
+    'buildDeskStillPrompt/place-lean-keeps-command',
+    () => {
+      const p = mod.buildDeskStillPrompt('벽에 기대어, 얼굴은 유지', false, 'place')
+      return {
+        length: p.length,
+        underBudget: p.length <= mod.DESK_STILL_PROMPT_MAX,
+        leans: /leans on the wall/i.test(p),
+        notRoomOnly: !/change only the room/i.test(p),
+        hasUser: /User:/i.test(p),
+      }
+    },
+  ],
+  [
+    'wantsDeskPoseChange/lean-true',
+    () => mod.wantsDeskPoseChange('벽에 기대어, 얼굴은 유지'),
   ],
   [
     'deskStillUsesAdultReplicate/place-slip-false',

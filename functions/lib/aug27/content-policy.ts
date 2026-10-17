@@ -2191,6 +2191,8 @@ export function buildNudeIdentityRefinePrompt(revision: string, baseDescription 
     buildNudeBodyShapeContinuityLock(`${baseDescription || ''} ${rev}`),
     'Keep any other person in the source — only undress the woman.',
     'Same background and framing. Photorealistic adult photo.',
+    'Pubic curls stay on the mons only. FORBIDDEN hair on nipples/areola or climbing the belly.',
+    'Same crop and camera distance. Face stays in frame. FORBIDDEN zoom-in, bust close-up, chest-only crop.',
     rev ? `User: ${rev}.` : '',
   ]
     .filter(Boolean)
@@ -2352,8 +2354,8 @@ export function buildRefinePrompt(input: {
   const cappedBase = capWordsSimple(base, baseBudget)
 
   return [
-    `${imgEditPrefix} ${identityLockSentence}`,
     `${applyPrefix} ${revision}.${cappedAmplify ? ` ${cappedAmplify}.` : ''}`,
+    `${imgEditPrefix} ${identityLockSentence}`,
     framingCastNote,
     bgAndPoseNote,
     bathrobeNote,

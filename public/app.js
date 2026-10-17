@@ -1,5 +1,5 @@
 const SESSION_STORAGE_KEY = 'fashionMagazineSessionToken'
-window.__DESK_BUILD = '20261005mw243'
+window.__DESK_BUILD = '20261005mw247'
 const USER_STORAGE_KEY = 'fashionMagazineUserEmail'
 /** 로그아웃 후에도 로그인 칸에 남길 관리자 아이디 */
 const REMEMBERED_LOGIN_KEY = 'fashionMagazineRememberedLogin'
@@ -1858,13 +1858,14 @@ function updateRegionList() {
 }
 
 /** 닫힌 다각형 합집합 → 마스크(흰=수정, 가장자리 소프트). */
-function buildMaskDataUrlFromRegion() {
+function buildMaskDataUrlFromRegion(opts) {
   const lasso = ensureReviseLasso()
   const erase =
     getSelectedReviseMode() === 'erase' || wantsObjectEraseClient(revisionText?.value || '')
-  return (
-    lasso?.buildMaskDataUrl?.(768, erase ? { expandPx: 32, blurPx: 4 } : undefined) || null
-  )
+  const expandPx = Number.isFinite(opts?.expandPx) ? opts.expandPx : erase ? 32 : 0
+  const blurPx = Number.isFinite(opts?.blurPx) ? opts.blurPx : erase ? 4 : undefined
+  const maxSide = Number.isFinite(opts?.maxSide) ? opts.maxSide : 768
+  return lasso?.buildMaskDataUrl?.(maxSide, { expandPx, blurPx }) || null
 }
 
 function loadImageElement(src) {
@@ -1877,10 +1878,11 @@ function loadImageElement(src) {
 }
 
 /**
- * 마스크 안을 코너·테두리 배경색으로 메움.
- * 옆 사람 피부색을 구멍으로 밀어 넣으면 엔진이 새 얼굴을 복원한다.
+ * 마스크 안을 메움.
+ * fromNeighbors: 선택 테두리의 바로 옆 화소로 안쪽을 채움(감싼 자리만).
+ * 아니면 코너·테두리 한 색(옛 경로 — Flux가 옆 피부로 얼굴을 되살리지 않게).
  */
-async function prefillMaskedHole(imageSrc, maskDataUrl) {
+async function prefillMaskedHole(imageSrc, maskDataUrl, opts) {
   const [img, maskImg] = await Promise.all([loadImageElement(imageSrc), loadImageElement(maskDataUrl)])
   const w = img.naturalWidth
   const h = img.naturalHeight
@@ -1897,6 +1899,67 @@ async function prefillMaskedHole(imageSrc, maskDataUrl) {
   const pix = ctx.getImageData(0, 0, w, h)
   const mask = mctx.getImageData(0, 0, w, h).data
   const data = pix.data
+  if (opts?.fromNeighbors) {
+    const done = new Uint8Array(w * h)
+    const q = []
+    const push = (x, y) => {
+      if (x < 0 || y < 0 || x >= w || y >= h) return
+      const i = y * w + x
+      if (done[i] || mask[i * 4] <= 80) return
+      let r = 0
+      let g = 0
+      let b = 0
+      let n = 0
+      const add = (xx, yy) => {
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) return
+        const k = yy * w + xx
+        if (!done[k]) return
+        const p = k * 4
+        r += data[p]
+        g += data[p + 1]
+        b += data[p + 2]
+        n += 1
+      }
+      add(x - 1, y)
+      add(x + 1, y)
+      add(x, y - 1)
+      add(x, y + 1)
+      if (!n) return
+      const p = i * 4
+      data[p] = r / n
+      data[p + 1] = g / n
+      data[p + 2] = b / n
+      done[i] = 1
+      q.push(i)
+    }
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        if (mask[(y * w + x) * 4] <= 80) done[y * w + x] = 1
+      }
+    }
+    for (let y = 0; y < h; y += 1) {
+      for (let x = 0; x < w; x += 1) {
+        if (done[y * w + x]) continue
+        const edge =
+          (x > 0 && done[y * w + x - 1]) ||
+          (x + 1 < w && done[y * w + x + 1]) ||
+          (y > 0 && done[(y - 1) * w + x]) ||
+          (y + 1 < h && done[(y + 1) * w + x])
+        if (edge) push(x, y)
+      }
+    }
+    for (let qi = 0; qi < q.length; qi += 1) {
+      const i = q[qi]
+      const x = i % w
+      const y = (i - x) / w
+      push(x - 1, y)
+      push(x + 1, y)
+      push(x, y - 1)
+      push(x, y + 1)
+    }
+    ctx.putImageData(pix, 0, 0)
+    return canvas.toDataURL('image/jpeg', 0.94)
+  }
   let sr = 0
   let sg = 0
   let sb = 0
@@ -2056,9 +2119,12 @@ function setReviewChrome(mode) {
       animatePanel.hidden = revising || onEditTab
     }
   }
-  if (!revising && !onEditTab) {
+  if (!revising && !onEditTab && !window.__deskErasing) {
     setPinDrawEnabled(false)
     setRegionDrawEnabled(false)
+  } else if (window.__deskErasing) {
+    setPinDrawEnabled(false)
+    setRegionDrawEnabled(true)
   } else {
     syncReviseModeUi()
   }
@@ -16542,6 +16608,37 @@ async function deskStillFaceBoxes(imageUrl, opts) {
   }
 }
 globalThis.deskStillFaceBoxes = deskStillFaceBoxes
+globalThis.deskStampFacesRelocated = deskStampFacesRelocated
+
+/** 원본에 얼굴이 있으면 결과에도 같은 거리의 얼굴이 있어야 한다. 가슴만 확대된 줌인은 버린다. */
+async function deskFrameHolds(source, result) {
+  if (!source || !result) return { ok: true, skipped: true }
+  const biggest = (boxes) =>
+    (boxes || []).slice().sort((a, b) => b.w * b.h - a.w * a.h)[0] || null
+  try {
+    const srcFaces =
+      typeof deskStillFaceBoxes === 'function' ? await deskStillFaceBoxes(source) : null
+    const outFaces =
+      typeof deskStillFaceBoxes === 'function' ? await deskStillFaceBoxes(result) : null
+    let src = biggest(srcFaces)
+    let out = biggest(outFaces)
+    if (!src && typeof estimateFaceBoxFromImage === 'function') {
+      src = await estimateFaceBoxFromImage(source)
+    }
+    if (!out && typeof estimateFaceBoxFromImage === 'function') {
+      out = await estimateFaceBoxFromImage(result)
+    }
+    if (src && src.h >= 0.04 && !out) return { ok: false, reason: 'zoom' }
+    if (src && out) {
+      if (src.h < 0.3 && out.h >= 0.36) return { ok: false, reason: 'zoom' }
+      if (src.h < 0.28 && out.h > src.h * 1.7) return { ok: false, reason: 'zoom' }
+    }
+    return { ok: true }
+  } catch (_) {
+    return { ok: true, skipped: true }
+  }
+}
+globalThis.deskFrameHolds = deskFrameHolds
 
 async function deskFaceHist(imageUrl, box) {
   if (!imageUrl || !box) return null
@@ -16810,7 +16907,7 @@ async function deskStillPasses(sourceUrl, resultUrl, expectPeople, maskUrl, layo
     pairs.push([srcMain, outMain, work?.womanCastLock?.embed || work?.manCastLock?.embed])
   }
   for (const [srcBox, outBox, castEmbed] of pairs) {
-    if (!protectLocked) {
+    if (!protectLocked && !gateOpts?.loosePose) {
       const dx = srcBox.x + srcBox.w / 2 - (outBox.x + outBox.w / 2)
       const dy = srcBox.y + srcBox.h / 2 - (outBox.y + outBox.h / 2)
       if (Math.hypot(dx, dy) > 0.18) return { ok: false, reason: 'pose' }
@@ -17302,7 +17399,7 @@ function initAdultDesk() {
         ]
           .filter(Boolean)
           .join(', ')
-    return [place, pose, sit || lie || hug || arm ? '얼굴은 같은 사람' : '얼굴은 유지']
+    return [pose, place, sit || lie || hug || arm ? '얼굴은 같은 사람' : '얼굴은 유지']
       .filter(Boolean)
       .join(', ')
   }
@@ -17738,6 +17835,103 @@ function initAdultDesk() {
   })
   document.getElementById('desk-scene-paste')?.addEventListener('click', () => {
     void applyDeskClipboard('scene')
+  })
+
+  let deskEraseTarget = ''
+  const deskEraseBar = document.getElementById('desk-erase-bar')
+  const stopDeskErase = () => {
+    window.__deskErasing = false
+    deskEraseTarget = ''
+    if (deskEraseBar) deskEraseBar.hidden = true
+    if (typeof setRegionDrawEnabled === 'function') setRegionDrawEnabled(false)
+    if (typeof clearAllRegions === 'function') clearAllRegions()
+  }
+  const keepDeskEraseOn = () => {
+    const eraseRadio = document.querySelector('input[name="revise-mode"][value="erase"]')
+    if (eraseRadio) eraseRadio.checked = true
+    if (typeof syncReviseModeUi === 'function') syncReviseModeUi()
+    if (typeof setRegionDrawEnabled === 'function') setRegionDrawEnabled(true)
+    if (deskEraseBar) {
+      deskEraseBar.hidden = false
+      document.getElementById('adult-desk-stage')?.appendChild(deskEraseBar)
+    }
+  }
+  const startDeskErase = async () => {
+    const work = currentDeskWork()
+    const preferMan = window.__deskLastCast === 'man' && work?.man
+    const target = preferMan ? 'man' : work?.woman ? 'woman' : work?.man ? 'man' : ''
+    const src = target === 'man' ? work.man : target === 'woman' ? work.woman : currentResult?.imageUrl || ''
+    if (!src) {
+      setFormStatus('여 칸이나 남 칸에 사진을 넣은 뒤 일부 지우기를 누르세요.', true)
+      return
+    }
+    deskEraseTarget = target || 'scene'
+    window.__deskErasing = true
+    await showDeskStepResult(src, '일부 지우기', '지울 부분만 감싸기', { skipManLock: true, skipUpscale: true })
+    keepDeskEraseOn()
+    setFormStatus('감싼 선 안만 지웁니다. 닫은 뒤 「이 선택 지우기」. 빈 자리는 옆 배경으로 메웁니다.', false)
+  }
+  const applyDeskEraseSelection = async () => {
+    if (!window.__deskErasing) {
+      await startDeskErase()
+      return
+    }
+    const mask =
+      typeof buildMaskDataUrlFromRegion === 'function'
+        ? buildMaskDataUrlFromRegion({ expandPx: 0, blurPx: 0, maxSide: 2048 })
+        : ''
+    if (!mask) {
+      setFormStatus('지울 부분을 점으로 이어서 닫으세요. 마지막 점에서 더블클릭하면 닫힙니다.', true)
+      return
+    }
+    setFormStatus('선택한 자리만 지우고 옆 배경으로 메우는 중…', false)
+    try {
+      const source = await loadCurrentResultDataUrl()
+      const cleaned = await prefillMaskedHole(source, mask, { fromNeighbors: true })
+      const role = deskEraseTarget === 'man' ? 'man' : 'woman'
+      const patch = {
+        [role]: cleaned,
+        [`${role}Face`]: cleaned,
+        [`${role}Full`]: false,
+      }
+      if (role === 'woman') {
+        patch.womanLock = ''
+        patch.peopleCount = 1
+        patch.sourceKind = 'portrait'
+        patch.assembledPair = false
+        patch.sourceCast = ''
+        patch.verifiedSourceCast = ''
+      }
+      updateCurrentDeskWork(patch)
+      if (typeof setTwoPeopleChecked === 'function') setTwoPeopleChecked(false)
+      syncWorkUi()
+      await showDeskStepResult(cleaned, '일부 지움', '옆사람·잘린 부분 삭제', {
+        skipManLock: true,
+        skipUpscale: true,
+      })
+      if (typeof clearAllRegions === 'function') clearAllRegions()
+      keepDeskEraseOn()
+      setFormStatus('감싼 자리만 지웠습니다. 더 있으면 다시 감싸세요. 끝나면 「지우기 끝」.', false)
+      void syncDeskGates()
+    } catch (err) {
+      setFormStatus(`지우지 못했습니다. ${err instanceof Error ? err.message : String(err)}`, true)
+    }
+  }
+  document.getElementById('desk-cast-erase')?.addEventListener('click', () => {
+    void startDeskErase()
+  })
+  document.getElementById('desk-erase-apply')?.addEventListener('click', () => {
+    void applyDeskEraseSelection()
+  })
+  document.getElementById('desk-erase-undo')?.addEventListener('click', () => {
+    if (typeof undoLastRegion === 'function') undoLastRegion()
+  })
+  document.getElementById('desk-erase-clear')?.addEventListener('click', () => {
+    if (typeof clearAllRegions === 'function') clearAllRegions()
+  })
+  document.getElementById('desk-erase-done')?.addEventListener('click', () => {
+    stopDeskErase()
+    setFormStatus('지우기를 끝냈습니다. 이 사진으로 1 몸 잇기를 누르세요.', false)
   })
 
   const wireDeskDrop = (el, onFiles) => {
@@ -18799,7 +18993,7 @@ function initAdultDesk() {
     }
     const couple = Boolean(currentDeskWork()?.woman && currentDeskWork()?.man)
     if (typeof placeAdultDeskNodes === 'function') placeAdultDeskNodes()
-    imageUrl = await deskForceUpscale(imageUrl)
+    if (!opts?.skipUpscale) imageUrl = await deskForceUpscale(imageUrl)
     showResult(imageUrl, title, false, {
       size: assemblingCouple ? 'landscape' : sizeField?.value || (couple ? 'landscape' : 'story'),
       itemId: null,
@@ -19015,6 +19209,20 @@ function initAdultDesk() {
         }
         const faceBoxes = [coupleLayout.woman, coupleLayout.man].filter(Boolean)
         if (faceBoxes.length) shown = await deskStampFacesFromSource(images[0], shown, faceBoxes)
+      } else if (typeof deskStampFacesFromSource === 'function') {
+        const srcFaces = await deskStillFaceBoxes(images[0], { couple: false })
+        if (srcFaces?.length) shown = await deskStampFacesFromSource(images[0], shown, srcFaces)
+      }
+    }
+    if (deskStep === 'place' && typeof deskStampFacesRelocated === 'function') {
+      // 얼굴 검사는 붙인 뒤에 한다. 자세가 바뀌면 엔진 얼굴이 달라져서, 붙이기 전에 막히면 앉기·기대기가 저장되지 않는다.
+      const srcFaces = await deskStillFaceBoxes(images[0], { couple: expectPeople >= 2 })
+      const outFaces = await deskStillFaceBoxes(shown, { couple: expectPeople >= 2 })
+      if (srcFaces?.length && srcFaces.length === expectPeople && outFaces?.length === expectPeople) {
+        shown = await deskStampFacesRelocated(images[0], shown, srcFaces, outFaces)
+      } else {
+        setFormStatus('얼굴 자리를 찾지 못해 원본 얼굴로 바꾸지 못했습니다. 저장하지 않습니다.', true)
+        return
       }
     }
     if (typeof deskStillPasses === 'function' && (deskStep === 'look' || deskStep === 'place')) {
@@ -19024,7 +19232,7 @@ function initAdultDesk() {
         expectPeople,
         opts?.clothesMaskFull || opts?.clothesMask,
         currentDeskWork()?.castLayout,
-        { protectIdentical, nativeIdentity, looseNude: deskLook === 'nude' },
+        { protectIdentical, nativeIdentity, looseNude: deskLook === 'nude', loosePose: deskStep === 'place' },
       )
       const lookRetryOk = { protect: 1, undetected: 1, embed: 1, faces: 1, extra: 1, 'mw-ww': 1, cast_people: 1 }
       // 옷이 안 바뀌는 건 엔진의 무작위라 다시 뽑으면 달라진다.
@@ -19068,16 +19276,19 @@ function initAdultDesk() {
         return
       }
     }
-    if (deskStep === 'place' && typeof deskStampFacesRelocated === 'function') {
-      // 엔진이 다시 그린 얼굴 대신, 입력 장면에 들어 있는 원본 얼굴을 결과의 얼굴 자리에 그대로 옮겨 찍는다.
-      const srcFaces = await deskStillFaceBoxes(images[0], { couple: expectPeople >= 2 })
-      const outFaces = await deskStillFaceBoxes(shown, { couple: expectPeople >= 2 })
-      if (srcFaces?.length && srcFaces.length === expectPeople && outFaces?.length === expectPeople) {
-        shown = await deskStampFacesRelocated(images[0], shown, srcFaces, outFaces)
-      } else {
-        setFormStatus('얼굴 자리를 찾지 못해 원본 얼굴로 바꾸지 못했습니다. 저장하지 않습니다.', true)
-        return
+    const frame = await deskFrameHolds(images[0], shown)
+    if (!frame.ok) {
+      const attempt = Number(opts?._attempt) || 1
+      if (attempt < 2) {
+        setFormStatus('줌인이라 같은 구도로 한 번 더 그립니다.', false)
+        return runDeskKontextStep(images, description, deskStep, title, doneText, {
+          ...opts,
+          _attempt: attempt + 1,
+          _retried: true,
+        })
       }
+      setFormStatus('줌인해 저장하지 않습니다. 가운데는 원본입니다. 같은 버튼을 다시 누르세요.', true)
+      return
     }
     showDeskStepResult(shown, title, description)
     if (deskStep === 'look') {
