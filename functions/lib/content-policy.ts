@@ -1530,6 +1530,11 @@ export function buildAnimationPrompt(input: {
     /(?:가슴|젖|유방|유두|젖꼭지).{0,16}(?:빨아|빨고|빨며|빤다|빤)|(?:빨아|빤다|빨고|빨며).{0,16}(?:가슴|젖|유방|유두|젖꼭지)|suck(?:s|ing)?\s*(?:on\s*)?(?:her\s*)?(?:breast|nipple)/i.test(
       detectionMotion,
     )
+  // 남녀가 함께 있고 여자는 나체, 남자는 옷을 입은 채 — 여자 손이 남자 바지 지퍼 안으로.
+  const wantsHisFly =
+    /지퍼|zipper|\bfly\b/i.test(detectionMotion) &&
+    /손|hand/i.test(detectionMotion) &&
+    /남자|남친|그의|man\b|his\b/i.test(detectionMotion)
 
   // 나체+키스/만짐: 장문 잠금이 Wan에서 키스·나체를 죽이고 "툭 만짐"만 남는 실측
   // → 짧은 동작 타임라인 전용 프롬프트로 보낸다.
@@ -1537,10 +1542,28 @@ export function buildAnimationPrompt(input: {
   // 아래 "기본 경로"(13,000자대 장문)로 빠졌는데, 실측 결과 그 장문 경로는 Wan이 거의
   // 통째로 무시하고 "미소 짓는 클로즈업 인물영상"을 기본값으로 뱉어버려 탈의가 0%였다.
   // → undressAction/staysNude면 동작 유무와 무관하게 전부 이 짧은 경로로 통일한다.
-  const leanIntimate = undressAction || staysNude || wantsBreastSuck
-  const timelineUndress = undressAction || (wantsBreastSuck && !staysNude)
+  const leanIntimate = undressAction || staysNude || wantsBreastSuck || wantsHisFly
+  const timelineUndress = undressAction || ((wantsBreastSuck || wantsHisFly) && !staysNude)
 
   if (leanIntimate) {
+    if (wantsHisFly) {
+      const bounds = timelineUndress ? buildEqualBeatSeconds(input.durationSec, 2) : null
+      const half = bounds ? bounds[1] : 0
+      const total = bounds ? bounds[bounds.length - 1] : Math.max(2, Math.round(Number(input.durationSec) || 15))
+      return [
+        'Adult photorealistic video. Same room, static camera. NO zoom-in, NO zoom-out, NO close-up crop.',
+        'The woman keeps the source face and body. She is fully nude: bare breasts and bare crotch, ZERO panties.',
+        'He stays clothed. His shirt and pants stay on. Only his pants zipper opens. He keeps his own face.',
+        buildCoupleFaceLock(),
+        timelineUndress
+          ? `BEAT 1 (0–${half}s): she removes her clothes. He stays clothed. BEAT 2 (${half}–${total}s): she slides her hand into his open pants zipper and keeps it inside.`
+          : 'For the whole clip she keeps her hand inside his open pants zipper.',
+        'FORBIDDEN undressing the man. FORBIDDEN moving her hand onto her own crotch. FORBIDDEN putting her clothes back on.',
+        motion ? `Motion: ${motion}` : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    }
     const wantsKiss = /키스|입\s*(?:을\s*)?맞추|입맞춤|kiss/i.test(detectionMotion)
     const wantsCrotch =
       intimate.addon.includes('CROTCH FONDLE') ||
@@ -1562,6 +1585,7 @@ export function buildAnimationPrompt(input: {
     // stroking continuously')을 반환해서 항상 truthy다 — touchVerbPhrase 자체로는
     // "터치 동작이 있었는지" 판별할 수 없다. 실제 동작 단어 존재 여부로 직접 판별한다.
     const plainNudeOnly =
+      !wantsHisFly &&
       !intimate.wantsPartner &&
       !intimate.addon &&
       !wantsKiss &&
@@ -1631,7 +1655,9 @@ export function buildAnimationPrompt(input: {
         ? `BEAT 2 (${beat2TimeLabel}): partner hand ON her bare vulva/crotch — ${touchVerbPhrase} the bare genitals with continuous skin contact. ZERO panties. FORBIDDEN hand only on thigh/hip.`
         : `BEAT 2 (${beat2TimeLabel}): her own hand ON her bare vulva/crotch — ${touchVerbPhrase} the bare genitals with continuous skin contact. ZERO panties. FORBIDDEN hand hovering on thigh without touching genitals.`
       : ''
-    const beat2 = wantsBreastSuck
+    const beat2 = wantsHisFly
+      ? `BEAT 2 (${beat2TimeLabel}): she is fully nude and he stays clothed. She slides her hand into his open pants zipper and keeps the hand inside. FORBIDDEN undressing the man. FORBIDDEN moving her hand onto her own crotch.`
+      : wantsBreastSuck
       ? `BEAT 2 (${beat2TimeLabel}): a consenting adult man sucks her bare nipple — his mouth stays sealed on the nipple and sucks continuously, and the breast moves with each suck. FORBIDDEN a hand-only touch. FORBIDDEN a mouth-to-mouth kiss.`
       : kissTargetVulva
       ? `BEAT 2 (${beat2TimeLabel}): a consenting adult partner kisses her bare vulva directly with his mouth — lips and mouth make continuous contact with the bare genitals. This is an ORAL kiss, NOT a hand touch — FORBIDDEN substituting a hand-only fondle for the requested mouth-to-vulva kiss.`
@@ -1654,7 +1680,9 @@ export function buildAnimationPrompt(input: {
     const beat3 = sequentialBreastThenKiss
       ? `BEAT 3 (${beat3TimeLabel}): the hand leaves her breast and the partner leans in for a deep mouth-to-mouth kiss — lips locked together, continuous kissing for the rest of the clip until the very last frame.`
       : ''
-    const lastFrame = wantsBreastSuck
+    const lastFrame = wantsHisFly
+      ? 'LAST FRAME: she is still fully nude, he is still clothed, her hand still inside his open pants zipper. Do NOT return to the opening still pose.'
+      : wantsBreastSuck
       ? 'LAST FRAME: fully nude, ZERO panties, his mouth still sealed on her bare nipple. Do NOT return to the opening still pose.'
       : sequentialBreastThenKiss
       ? 'LAST FRAME: still fully nude, still deep-kissing her mouth (the breast fondling beat has ended, this frame shows kissing, NOT a hand on the breast). Do NOT return to the opening still pose.'
@@ -1677,13 +1705,16 @@ export function buildAnimationPrompt(input: {
       clipRole === 'single'
         ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
         : '',
-      timelineUndress && coupleRequested && !wantsBreastSuck
+      timelineUndress && coupleRequested && !wantsBreastSuck && !wantsHisFly
         ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
         : '',
       wantsBreastSuck
         ? 'A consenting adult man leans in to suck her breast. Her face and body stay the source woman.'
         : '',
-      twoPeopleInSource ? buildCoupleFaceLock() : '',
+      wantsHisFly
+        ? 'She is the nude woman from the source. He is the clothed man from the source. His shirt and pants stay on. Only his pants zipper opens so her hand can go inside.'
+        : '',
+      wantsHisFly || twoPeopleInSource ? buildCoupleFaceLock() : '',
       sequentialBreastThenKiss
         ? `THREE-BEAT TIMELINE ("3등분 약속" — equal thirds) — do not merge or skip a beat:`
         : timelineUndress

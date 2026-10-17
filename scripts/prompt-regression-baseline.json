@@ -243,6 +243,14 @@
     "noTajeom": true,
     "stillNude": true
   },
+  "buildAnimationPrompt/woman-hand-in-his-fly": {
+    "len": 948,
+    "herHand": true,
+    "sheNude": true,
+    "heClothed": true,
+    "notHerCrotch": true,
+    "faces": true
+  },
   "buildAnimationPrompt/man-sucks-breast": {
     "len": 1726,
     "sucks": true,

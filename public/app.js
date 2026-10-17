@@ -405,6 +405,7 @@ const BUILTIN_MOTION_PRESETS = [
   '남녀가 가볍게 포옹한다',
   '남녀가 백허그한다',
   '남자가 여자의 가슴을 빤다',
+  '여자가 남자 바지 지퍼에 손을 넣는다',
 ]
 
 function loadCustomMotionPresets() {

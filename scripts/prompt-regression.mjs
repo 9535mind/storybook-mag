@@ -182,6 +182,23 @@ const cases = [
     },
   ],
   [
+    'buildAnimationPrompt/woman-hand-in-his-fly',
+    () => {
+      const prompt = mod.buildAnimationPrompt({
+        motion: '여자가 남자 바지 지퍼에 손을 넣는다',
+        prompt: '나체 여성과 옷을 입은 남성이 함께 서 있다',
+      })
+      return {
+        len: prompt.length,
+        herHand: prompt.includes('hand into his open pants zipper'),
+        sheNude: /fully nude/i.test(prompt),
+        heClothed: /he stays clothed/i.test(prompt),
+        notHerCrotch: prompt.includes('FORBIDDEN moving her hand onto her own crotch'),
+        faces: prompt.includes('TWO PEOPLE, TWO SEPARATE FACES'),
+      }
+    },
+  ],
+  [
     'buildAnimationPrompt/man-sucks-breast',
     () => {
       const prompt = mod.buildAnimationPrompt({
