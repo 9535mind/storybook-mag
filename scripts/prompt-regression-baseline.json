@@ -260,10 +260,20 @@
     "hasMotion": true,
     "noNudeLock": true
   },
-  "buildAnimationPrompt/clothed-solo-short": {
-    "len": 567,
+  "buildAnimationPrompt/clothed-light-hug": {
+    "len": 1009,
     "under1500": true,
-    "hasFace": true,
+    "hasFaceLock": true,
+    "lightHug": true,
+    "notBackHug": true,
+    "noNudeLock": true
+  },
+  "buildAnimationPrompt/clothed-back-hug": {
+    "len": 1024,
+    "under1500": true,
+    "hasFaceLock": true,
+    "backHug": true,
+    "notFrontHug": true,
     "noNudeLock": true
   },
   "buildAnimationPrompt/dress-action-short": {

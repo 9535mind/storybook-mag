@@ -1331,6 +1331,18 @@ export function buildRefinePrompt(input: {
 // 정체성·의상·배경 같은 핵심만 남기고, 뒤에 누적된 최근 수정 문구의 비중을 줄인다.
 const CLOTHED_CONTINUITY_MAX_CHARS = 140
 
+/** 옷 입은 커플 쇼츠 — 허그는 한 줄만. 백허그를 정면 포옹으로 바꾸지 않는다. */
+function clothedCoupleHugLine(motion: string): string {
+  const t = motion || ''
+  if (/백\s*허그|등\s*뒤에서\s*안|뒤에서\s*(?:안|포옹|허그)|back\s*hug/i.test(t)) {
+    return 'ACTION: back hug. One adult stands behind the other and wraps both arms around their waist. The front person faces forward. Both faces stay visible and unchanged. Clothes stay on. Not a face-to-face hug.'
+  }
+  if (/가벼운\s*(?:허그|포옹)|살짝\s*(?:안|포옹)|허그|포옹|껴안|\bhug\b|embrace|light\s*hug/i.test(t)) {
+    return 'ACTION: light face-to-face hug. Both adults step closer, arms rest loosely around shoulders or waist, small smile, both faces visible. Clothes stay on. Not a kiss and not a tight crush.'
+  }
+  return ''
+}
+
 function truncateContinuityText(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text
   const slice = text.slice(0, maxLen)
@@ -1711,6 +1723,7 @@ export function buildAnimationPrompt(input: {
     dressAction
       ? 'CLOTHES: start as the source, then put on the garment named in the motion. End dressed. Same face and body underneath.'
       : 'CLOTHES: keep the source outfit on for the whole clip. Do not undress and do not add or remove lingerie.',
+    clothedCoupleHugLine(motion),
     motionCore ? `MOTION (this is the point of the clip): ${motionCore}` : 'MOTION: small natural movement only. Stay in the source pose.',
     continuityHint ? `Continuity: ${continuityHint}` : '',
   ].filter(Boolean)

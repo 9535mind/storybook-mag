@@ -220,16 +220,35 @@ const cases = [
     },
   ],
   [
-    'buildAnimationPrompt/clothed-solo-short',
+    'buildAnimationPrompt/clothed-light-hug',
     () => {
       const prompt = mod.buildAnimationPrompt({
-        motion: '창밖을 바라보며 커피잔을 든다',
-        prompt: '20대 여성이 카페 창가에 앉아 있다',
+        motion: '남녀가 가볍게 포옹한다',
+        prompt: '20대 남녀가 옷을 입은 채 서 있다',
       })
       return {
         len: prompt.length,
         under1500: prompt.length <= 1500,
-        hasFace: prompt.includes('FACE:'),
+        hasFaceLock: prompt.includes('TWO PEOPLE, TWO SEPARATE FACES'),
+        lightHug: prompt.includes('light face-to-face hug'),
+        notBackHug: !prompt.includes('ACTION: back hug'),
+        noNudeLock: !/PANTY BAN|BREAST PIXEL|pubic hair|NUDE HOLD/i.test(prompt),
+      }
+    },
+  ],
+  [
+    'buildAnimationPrompt/clothed-back-hug',
+    () => {
+      const prompt = mod.buildAnimationPrompt({
+        motion: '남녀가 백허그한다',
+        prompt: '20대 남녀가 옷을 입은 채 서 있다',
+      })
+      return {
+        len: prompt.length,
+        under1500: prompt.length <= 1500,
+        hasFaceLock: prompt.includes('TWO PEOPLE, TWO SEPARATE FACES'),
+        backHug: prompt.includes('ACTION: back hug'),
+        notFrontHug: !prompt.includes('light face-to-face hug'),
         noNudeLock: !/PANTY BAN|BREAST PIXEL|pubic hair|NUDE HOLD/i.test(prompt),
       }
     },

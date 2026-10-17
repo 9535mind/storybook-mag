@@ -401,7 +401,7 @@ function setBodyProjectButtonUi(mode) {
 
 /** 기본 모션 예시 + 사용자가 저장한 예시 (로컬) */
 const MOTION_PRESET_KEY = 'storymag.motionPresets.v1'
-const BUILTIN_MOTION_PRESETS = []
+const BUILTIN_MOTION_PRESETS = ['남녀가 가볍게 포옹한다', '남녀가 백허그한다']
 
 function loadCustomMotionPresets() {
   try {
@@ -5732,7 +5732,10 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
   const SCENE_PRESET_DESCRIPTIONS = {
     arm_in_arm:
       'young korean man and woman couple, walking arm in arm on city street, woman holding man arm with both hands, shoulders leaning together, looking at each other smiling, casual clothes, daytime, full bodies facing camera, photorealistic fashion photo, no stiff passport pose, no arms hanging at sides',
-    hug: 'young korean man and woman couple hugging face to face, arms wrapped around back and waist, bodies pressed close, heads tilted toward each other, casual clothes, indoor or street, photorealistic fashion photo, no stiff side-by-side passport pose',
+    light_hug:
+      'young korean man and woman, light face-to-face hug, arms loosely around shoulders, both faces visible, soft smile, casual clothes, photorealistic, no kiss, no stiff arms-down pose',
+    back_hug:
+      'young korean man and woman, back hug, one stands behind and wraps both arms around the other waist, front person faces camera, both faces visible, casual clothes, photorealistic, not a face-to-face hug',
     kiss: 'young korean man and woman couple kissing on the lips, bodies leaning in, arms around waist or face, lips touching, casual clothes, photorealistic fashion photo, no stiff standing-apart pose',
   }
 
