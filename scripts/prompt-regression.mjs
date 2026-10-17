@@ -167,14 +167,35 @@ const cases = [
     () => mod.buildNudeBecomesDefinitionLock('', landmarksSample, 'mid'),
   ],
   [
-    'buildAnimationPrompt/body-project-shorts',
-    () =>
-      mod.buildAnimationPrompt({
+    'buildAnimationPrompt/body-project-landmarks-skipped',
+    () => {
+      const prompt = mod.buildAnimationPrompt({
         motion: '몸매 투영',
-        baseDescription: '흰 블라우스를 입은 20대 여성이 서 있다',
         bodyProject: true,
+        landmarks: landmarksSample,
         bustHeight: 'low',
-      }),
+      })
+      return {
+        noTajeom: !/TAJEOM|landmark reveal/i.test(prompt),
+        stillNude: /bare breasts/i.test(prompt),
+      }
+    },
+  ],
+  [
+    'buildAnimationPrompt/man-sucks-breast',
+    () => {
+      const prompt = mod.buildAnimationPrompt({
+        motion: '남자가 여자의 가슴을 빤다',
+        prompt: '20대 여성이 옷을 입고 서 있다',
+      })
+      return {
+        len: prompt.length,
+        sucks: prompt.includes('sucks her bare nipple'),
+        undress: prompt.includes('pulls off ALL clothes'),
+        notHandOnly: prompt.includes('FORBIDDEN a hand-only touch'),
+        manNotFrozen: !prompt.includes('he stays exactly as he is'),
+      }
+    },
   ],
   [
     'buildAnimationPrompt/kiss-breast-touch-lips',

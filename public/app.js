@@ -401,7 +401,11 @@ function setBodyProjectButtonUi(mode) {
 
 /** 기본 모션 예시 + 사용자가 저장한 예시 (로컬) */
 const MOTION_PRESET_KEY = 'storymag.motionPresets.v1'
-const BUILTIN_MOTION_PRESETS = ['남녀가 가볍게 포옹한다', '남녀가 백허그한다']
+const BUILTIN_MOTION_PRESETS = [
+  '남녀가 가볍게 포옹한다',
+  '남녀가 백허그한다',
+  '남자가 여자의 가슴을 빤다',
+]
 
 function loadCustomMotionPresets() {
   try {

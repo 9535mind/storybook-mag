@@ -1477,7 +1477,6 @@ export function buildAnimationPrompt(input: {
 }): string {
   const fullOriginal = polishKoreanPromptText(input.prompt ?? '')
   const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
-  const landmarks = input.landmarks ? normalizeBodyLandmarks(input.landmarks) : null
   // 참고문은 짧게 줄여서 모션 힌트와의 경쟁을 줄이지만, 누드/탈의 판별(sourceIsNude)은
   // 원문 전체로 해야 한다 — 여러 번 수정을 거치며 누적된 텍스트는 "누드로 바꿔줘" 같은
   // 문구가 뒤쪽(잘려 나가는 부분)에 있을 수 있어서, 잘린 텍스트만 보면 이미 누드인 원본을
@@ -1526,18 +1525,11 @@ export function buildAnimationPrompt(input: {
       structureCorpus,
     )
 
-  // 몸매 투영 전용 — 버튼(bodyProject) 또는 유효 타점이 있을 때만 become 단축.
-  // 모션 문구에 「몸매 투영」이 남아 있어도 키스/애무 leanIntimate를 가로채지 않는다.
-  if (input.bodyProject === true || landmarks) {
-    return buildNudeBecomesAnimationPrompt({
-      motion: motion || '몸매 투영',
-      clipRole,
-      prompt: fullOriginal,
-      landmarks,
-      durationSec: input.durationSec,
-      bustHeight: input.bustHeight,
-    })
-  }
+  // 몸매 투영 버튼·타점 단축은 제거했다. 버튼이나 타점이 있어도 여기서 별도 프롬프트로 빠지지 않는다.
+  const wantsBreastSuck =
+    /(?:가슴|젖|유방|유두|젖꼭지).{0,16}(?:빨아|빨고|빨며|빤다|빤)|(?:빨아|빤다|빨고|빨며).{0,16}(?:가슴|젖|유방|유두|젖꼭지)|suck(?:s|ing)?\s*(?:on\s*)?(?:her\s*)?(?:breast|nipple)/i.test(
+      detectionMotion,
+    )
 
   // 나체+키스/만짐: 장문 잠금이 Wan에서 키스·나체를 죽이고 "툭 만짐"만 남는 실측
   // → 짧은 동작 타임라인 전용 프롬프트로 보낸다.
@@ -1545,7 +1537,8 @@ export function buildAnimationPrompt(input: {
   // 아래 "기본 경로"(13,000자대 장문)로 빠졌는데, 실측 결과 그 장문 경로는 Wan이 거의
   // 통째로 무시하고 "미소 짓는 클로즈업 인물영상"을 기본값으로 뱉어버려 탈의가 0%였다.
   // → undressAction/staysNude면 동작 유무와 무관하게 전부 이 짧은 경로로 통일한다.
-  const leanIntimate = undressAction || staysNude
+  const leanIntimate = undressAction || staysNude || wantsBreastSuck
+  const timelineUndress = undressAction || (wantsBreastSuck && !staysNude)
 
   if (leanIntimate) {
     const wantsKiss = /키스|입\s*(?:을\s*)?맞추|입맞춤|kiss/i.test(detectionMotion)
@@ -1622,7 +1615,7 @@ export function buildAnimationPrompt(input: {
     // "3등분 약속": undress가 필요하면 그 자체로 1개 동작 + 이어지는 행동(들) — 3개
     // 순차 동작(탈의·가슴·키스)이면 균등 3등분, 2개 동작(탈의 + 단일 지속 행동)이면
     // 균등 반반. 이미 나체(staysNude)면 탈의 비트가 없어 분할이 필요 없다.
-    const beatBounds = undressAction
+    const beatBounds = timelineUndress
       ? buildEqualBeatSeconds(input.durationSec, sequentialBreastThenKiss ? 3 : 2)
       : null
     const beat1TimeLabel = beatBounds ? `first ${beatBounds[1]}s, 0–${beatBounds[1]}s` : 'first third'
@@ -1638,7 +1631,9 @@ export function buildAnimationPrompt(input: {
         ? `BEAT 2 (${beat2TimeLabel}): partner hand ON her bare vulva/crotch — ${touchVerbPhrase} the bare genitals with continuous skin contact. ZERO panties. FORBIDDEN hand only on thigh/hip.`
         : `BEAT 2 (${beat2TimeLabel}): her own hand ON her bare vulva/crotch — ${touchVerbPhrase} the bare genitals with continuous skin contact. ZERO panties. FORBIDDEN hand hovering on thigh without touching genitals.`
       : ''
-    const beat2 = kissTargetVulva
+    const beat2 = wantsBreastSuck
+      ? `BEAT 2 (${beat2TimeLabel}): a consenting adult man sucks her bare nipple — his mouth stays sealed on the nipple and sucks continuously, and the breast moves with each suck. FORBIDDEN a hand-only touch. FORBIDDEN a mouth-to-mouth kiss.`
+      : kissTargetVulva
       ? `BEAT 2 (${beat2TimeLabel}): a consenting adult partner kisses her bare vulva directly with his mouth — lips and mouth make continuous contact with the bare genitals. This is an ORAL kiss, NOT a hand touch — FORBIDDEN substituting a hand-only fondle for the requested mouth-to-vulva kiss.`
       : kissTargetBreast
         ? `BEAT 2 (${beat2TimeLabel}): a consenting adult partner kisses her bare breast and nipple directly with his mouth — lips make continuous contact with the nipple. This is an ORAL kiss on the breast, NOT a hand-only touch.`
@@ -1659,7 +1654,9 @@ export function buildAnimationPrompt(input: {
     const beat3 = sequentialBreastThenKiss
       ? `BEAT 3 (${beat3TimeLabel}): the hand leaves her breast and the partner leans in for a deep mouth-to-mouth kiss — lips locked together, continuous kissing for the rest of the clip until the very last frame.`
       : ''
-    const lastFrame = sequentialBreastThenKiss
+    const lastFrame = wantsBreastSuck
+      ? 'LAST FRAME: fully nude, ZERO panties, his mouth still sealed on her bare nipple. Do NOT return to the opening still pose.'
+      : sequentialBreastThenKiss
       ? 'LAST FRAME: still fully nude, still deep-kissing her mouth (the breast fondling beat has ended, this frame shows kissing, NOT a hand on the breast). Do NOT return to the opening still pose.'
       : kissTargetVulva
         ? 'LAST FRAME: fully nude, ZERO panties, mouth/lips still in contact with the bare vulva. Do NOT return to the opening still pose.'
@@ -1680,16 +1677,19 @@ export function buildAnimationPrompt(input: {
       clipRole === 'single'
         ? 'NO zoom-in, NO push-in, NO close-up crop — keep the exact source framing from first frame to last frame.'
         : '',
-      undressAction && coupleRequested
+      timelineUndress && coupleRequested && !wantsBreastSuck
         ? 'If a man is also visible in the source photo, he stays exactly as he is, fully clothed and unchanged — only the adult woman becomes nude.'
+        : '',
+      wantsBreastSuck
+        ? 'A consenting adult man leans in to suck her breast. Her face and body stay the source woman.'
         : '',
       twoPeopleInSource ? buildCoupleFaceLock() : '',
       sequentialBreastThenKiss
         ? `THREE-BEAT TIMELINE ("3등분 약속" — equal thirds) — do not merge or skip a beat:`
-        : undressAction
+        : timelineUndress
           ? `TWO-BEAT TIMELINE ("3등분 약속" — 2 actions = half each) — do not merge or skip a beat:`
           : '',
-      undressAction
+      timelineUndress
         ? `BEAT 1 (${beat1TimeLabel}): she pulls off ALL clothes together — top, bra, pants/skirt, AND panties (not just the top) — fully nude; breasts stay at the SAME height as before undressing (do NOT lift higher); bare nipples/crotch, any outfit style. ZERO panties left at any point, ZERO fog.`
         : 'BEAT 1: she is already fully nude — bare breasts at the same height as the clothed source (not lifted higher), clear bare crotch, ZERO panties, ZERO fog.',
       'Pubic hair on the mons: a compact, neatly-contained patch of dense dark curly coils — NOT wide straggly wisps spreading onto the thighs, NOT a flat painted patch.',
