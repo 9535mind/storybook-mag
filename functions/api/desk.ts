@@ -53,8 +53,8 @@ function taleFallback(): string {
     '### [4. 다시 쓸 방향]',
     '교훈 문장을 지우고, 마지막에 주인공이 한 행동만 남기세요.',
     '',
-    '### [5. 아이 독자 반응]',
-    '교훈 선언에서 흥미를 잃고, 구체적인 행동 장면에서 붙잡힙니다.',
+    '### [5. 성인 독자 반응]',
+    '교훈 선언에서 흥미를 잃고, 구체적인 행동·감각 장면에서 붙잡힙니다.',
   ].join('\n')
 }
 
@@ -226,7 +226,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           source,
           model,
           debugError,
-          grade: grade || '초등 3~4학년',
+          grade: grade || '성인 일반 독자',
         },
         200,
       )

@@ -510,7 +510,7 @@
     persist()
   })
 
-  // ---- 그림책 템플릿 ----
+  // ---- 페이지 템플릿 ----
   function findFirstLayerOnPage(pageIdx, type) {
     return pages[pageIdx].layers.find((l) => l.type === type) || null
   }

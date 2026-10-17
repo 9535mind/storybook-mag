@@ -45,7 +45,9 @@
       const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
       if (!data) return
       if (draftEl && data.draft) draftEl.value = data.draft
-      if (gradeEl && data.grade) gradeEl.value = data.grade
+      if (gradeEl && data.grade && [...gradeEl.options].some((option) => option.value === data.grade)) {
+        gradeEl.value = data.grade
+      }
       if (revisionEl && data.revision) revisionEl.value = data.revision
       if (finalEl && data.final) finalEl.value = data.final
       if (data.critiqueText && critiqueEl && critiqueWrap) {
@@ -222,7 +224,7 @@
   downloadBtn?.addEventListener('click', () => {
     const blob = new Blob(
       [
-        `# AI 동화 편집 기록\n학년: ${gradeEl?.value || ''}\n도움 요청: ${state.helpCount}회\n\n## 초안\n${draftEl?.value || ''}\n\n## 편집\n${state.critiqueText}\n\n## 수정고\n${revisionEl?.value || ''}\n\n## 최종\n${finalEl?.value || ''}\n`,
+        `# AI 동화 편집 기록\n독자: ${gradeEl?.value || ''}\n도움 요청: ${state.helpCount}회\n\n## 초안\n${draftEl?.value || ''}\n\n## 편집\n${state.critiqueText}\n\n## 수정고\n${revisionEl?.value || ''}\n\n## 최종\n${finalEl?.value || ''}\n`,
       ],
       { type: 'text/markdown;charset=utf-8' },
     )

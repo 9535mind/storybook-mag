@@ -77,7 +77,7 @@ const APP_AREA_META = {
   studio: { title: null, subtitle: null },
   admin: { title: null, subtitle: null },
   essay: { title: '에세이 아키텍트', subtitle: '냉혹한 편집장 · 출간 수준 해체' },
-  tale: { title: 'AI 동화 편집', subtitle: '초등 눈높이 · 사건과 행동으로' },
+  tale: { title: 'AI 동화 편집', subtitle: '성인 독자 · 사건과 감각으로' },
   observe: { title: '그림관찰과 표현', subtitle: '보이는 것을 정확하게' },
 }
 

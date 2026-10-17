@@ -161,8 +161,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       : [
           description,
           '',
-          'Keep the same characters, faces, art style, coloring, and mood as the reference illustrations.',
-          'This new scene must look like it belongs in the same picture-book/illustration series as the references.',
+          'Keep the same adult characters, faces, art style, coloring, and mood as the reference illustrations.',
+          'This new scene must look like it belongs in the same adult illustrated series as the references. Do not restyle it into a children\'s picture book.',
         ].join('\n')
 
     try {

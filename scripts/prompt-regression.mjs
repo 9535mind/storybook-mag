@@ -12,7 +12,7 @@
  * 목적: content-policy.ts를 여러 파일로 쪼개거나 로직을 통합할 때, "겉보기엔 순수 이동인데
  * 실제로는 동작이 바뀌었는지"를 사람이 눈으로 다시 검증하지 않고 자동으로 잡아낸다.
  */
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
@@ -26,8 +26,21 @@ const BASELINE_FILE = path.join(__dirname, 'prompt-regression-baseline.json')
 
 if (!existsSync(BUNDLE_DIR)) mkdirSync(BUNDLE_DIR, { recursive: true })
 
-execSync(
-  `node_modules\\.bin\\esbuild "functions/lib/content-policy.ts" --bundle --platform=node --format=cjs --outfile="${BUNDLE_FILE}"`,
+const esbuildBin = path.join(
+  ROOT,
+  'node_modules',
+  '.bin',
+  process.platform === 'win32' ? 'esbuild.cmd' : 'esbuild',
+)
+execFileSync(
+  esbuildBin,
+  [
+    path.join(ROOT, 'functions/lib/content-policy.ts'),
+    '--bundle',
+    '--platform=node',
+    '--format=cjs',
+    `--outfile=${BUNDLE_FILE}`,
+  ],
   { cwd: ROOT, stdio: 'inherit' },
 )
 
@@ -60,8 +73,8 @@ const cases = [
   ['evaluateContentPolicy/minor-blocked', () => mod.evaluateContentPolicy('여고생이 나체로')],
   ['evaluateContentPolicy/nonconsensual-blocked', () => mod.evaluateContentPolicy('강간 장면')],
   ['evaluateContentPolicy/negated-minor-ok', () => mod.evaluateContentPolicy('not a teen, adult woman')],
-  ['evaluateTaleScenePolicy/child-ok', () => mod.evaluateTaleScenePolicy('어린이가 토끼와 논다')],
-  ['evaluateTaleScenePolicy/adult-blocked', () => mod.evaluateTaleScenePolicy('나체로 섹스하는 장면')],
+  ['evaluateTaleScenePolicy/child-blocked', () => mod.evaluateTaleScenePolicy('어린이가 토끼와 논다')],
+  ['evaluateTaleScenePolicy/adult-nude-ok', () => mod.evaluateTaleScenePolicy('나체로 섹스하는 장면')],
 
   // --- korean text polishing ---
   ['polishKoreanPromptText/typo-fix', () => mod.polishKoreanPromptText('가습을 만져본다 하고 잇다')],
@@ -188,6 +201,53 @@ const cases = [
         motion: '나체로 여자의 가슴을 만지고 입술에 딮키스한다',
         baseDescription: '나체 상태의 20대 여성',
       }).includes('TWO PEOPLE, TWO SEPARATE FACES'),
+  ],
+  // 옷 입은 일반 경로는 나체 락을 싣지 않고 1,500자 안에 둔다.
+  [
+    'buildAnimationPrompt/clothed-couple-date-short',
+    () => {
+      const prompt = mod.buildAnimationPrompt({
+        motion: '남녀가 팔짱을 끼고 걷는다',
+        prompt: '20대 남녀 커플이 도심 거리에서 팔짱을 끼고 데이트하는 모습',
+      })
+      return {
+        len: prompt.length,
+        under1500: prompt.length <= 1500,
+        hasFaceLock: prompt.includes('TWO PEOPLE, TWO SEPARATE FACES'),
+        hasMotion: prompt.includes('팔짱'),
+        noNudeLock: !/PANTY BAN|BREAST PIXEL|pubic hair|NUDE HOLD/i.test(prompt),
+      }
+    },
+  ],
+  [
+    'buildAnimationPrompt/clothed-solo-short',
+    () => {
+      const prompt = mod.buildAnimationPrompt({
+        motion: '창밖을 바라보며 커피잔을 든다',
+        prompt: '20대 여성이 카페 창가에 앉아 있다',
+      })
+      return {
+        len: prompt.length,
+        under1500: prompt.length <= 1500,
+        hasFace: prompt.includes('FACE:'),
+        noNudeLock: !/PANTY BAN|BREAST PIXEL|pubic hair|NUDE HOLD/i.test(prompt),
+      }
+    },
+  ],
+  [
+    'buildAnimationPrompt/dress-action-short',
+    () => {
+      const prompt = mod.buildAnimationPrompt({
+        motion: '가운을 입는다',
+        prompt: '20대 여성이 방에 서 있다',
+      })
+      return {
+        len: prompt.length,
+        under1500: prompt.length <= 1500,
+        dresses: prompt.includes('put on the garment'),
+        noNudeLock: !/PANTY BAN|BREAST PIXEL|pubic hair/i.test(prompt),
+      }
+    },
   ],
 ]
 

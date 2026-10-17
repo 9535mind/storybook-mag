@@ -21,17 +21,17 @@
     "blockedReason": null,
     "matchedSignals": []
   },
-  "evaluateTaleScenePolicy/child-ok": {
+  "evaluateTaleScenePolicy/child-blocked": {
+    "allowed": false,
+    "blockedReason": "blocked-minor-reference",
+    "matchedSignals": [
+      "minor-reference"
+    ]
+  },
+  "evaluateTaleScenePolicy/adult-nude-ok": {
     "allowed": true,
     "blockedReason": null,
     "matchedSignals": []
-  },
-  "evaluateTaleScenePolicy/adult-blocked": {
-    "allowed": false,
-    "blockedReason": "blocked-adult-content",
-    "matchedSignals": [
-      "adult-content"
-    ]
   },
   "polishKoreanPromptText/typo-fix": "가슴을 만져본다 하고 있다",
   "polishKoreanPromptText/empty": "",
@@ -252,5 +252,24 @@
     "hash": "3888864febcc8e54"
   },
   "buildAnimationPrompt/couple-clothed-date-has-face-lock": true,
-  "buildAnimationPrompt/solo-implied-partner-no-couple-face-lock": false
+  "buildAnimationPrompt/solo-implied-partner-no-couple-face-lock": false,
+  "buildAnimationPrompt/clothed-couple-date-short": {
+    "len": 839,
+    "under1500": true,
+    "hasFaceLock": true,
+    "hasMotion": true,
+    "noNudeLock": true
+  },
+  "buildAnimationPrompt/clothed-solo-short": {
+    "len": 567,
+    "under1500": true,
+    "hasFace": true,
+    "noNudeLock": true
+  },
+  "buildAnimationPrompt/dress-action-short": {
+    "len": 567,
+    "under1500": true,
+    "dresses": true,
+    "noNudeLock": true
+  }
 }

@@ -1329,7 +1329,7 @@ export function buildRefinePrompt(input: {
 // 동작 문구) 실제로 요청한 모션 힌트와 은근히 경쟁하며 순응도를 떨어뜨리는 사고가 실측으로
 // 확인됐다("2차/3차 수정 이후 만든 쇼츠일수록 모션이 잘 안 먹힌다"). 참고문은 짧게 잘라서
 // 정체성·의상·배경 같은 핵심만 남기고, 뒤에 누적된 최근 수정 문구의 비중을 줄인다.
-const ANIMATION_CONTINUITY_MAX_CHARS = 260
+const CLOTHED_CONTINUITY_MAX_CHARS = 140
 
 function truncateContinuityText(text: string, maxLen: number): string {
   if (text.length <= maxLen) return text
@@ -1466,7 +1466,6 @@ export function buildAnimationPrompt(input: {
   const fullOriginal = polishKoreanPromptText(input.prompt ?? '')
   const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
   const landmarks = input.landmarks ? normalizeBodyLandmarks(input.landmarks) : null
-  const endCloseUp = wantsEndCloseUp(input.motion ?? '')
   // 참고문은 짧게 줄여서 모션 힌트와의 경쟁을 줄이지만, 누드/탈의 판별(sourceIsNude)은
   // 원문 전체로 해야 한다 — 여러 번 수정을 거치며 누적된 텍스트는 "누드로 바꿔줘" 같은
   // 문구가 뒤쪽(잘려 나가는 부분)에 있을 수 있어서, 잘린 텍스트만 보면 이미 누드인 원본을
@@ -1693,209 +1692,27 @@ export function buildAnimationPrompt(input: {
     return beats.join(' ')
   }
 
-  // 나체 유지/탈의 시 continuity에 남은 "wearing…"·바지 서술이 옷을 다시 입힘(실측) → 제거
-  let original = truncateContinuityText(fullOriginal, ANIMATION_CONTINUITY_MAX_CHARS)
-  if (staysNude || undressAction) {
-    original = original
-      .replace(/\b(?:wearing|wears|dressed in|clothed in|in a|in an)\s+[^.,;]+/gi, 'bare skin')
-      .replace(
-        /(?:가운|로브|드레스|스웨터|니트|브라|팬티|속옷|바지|반바지|청바지|핫팬츠|팬츠|슬랙스|레깅스|치마|치마바지|스커트|bathrobe|robe|sweater|lingerie|pants|jeans|shorts|leggings|trousers|skirt)\s*(?:을|를|만)?\s*(?:입은|걸친|착용)?/gi,
-        '',
-      )
-      .replace(/\b(?:pants|jeans|trousers|panties|bra|skirt)\b/gi, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-    original = truncateContinuityText(original, ANIMATION_CONTINUITY_MAX_CHARS)
-  }
-
-  // 모션 지시는 맨 앞에 CRITICAL로 강조한다. 예전엔 긴 "원본 연속성" 문단(원본 이미지
-  // 프롬프트 전체) 뒤에 짧게 붙어 있어서, Wan I2V가 앞부분의 장문 설명에 가중치를 두고
-  // 사용자가 요청한 모션(예: 특정 동작·전환)을 잘 따라가지 않는 문제가 있었다.
-  const parts = ['Premium photorealistic adult short-form video.']
-  // 줌 금지는 프롬프트 맨 앞에서도 한 번 더 — 뒤쪽 buildShortsCameraLock()과 중복되지만,
-  // 긴 프롬프트에서 뒤쪽 지시가 묻혀 줌인이 새는 실측이 있어 앞뒤로 강조한다.
-  // 줌 기능 전면 삭제(2026-08-28)로 clipRole과 무관하게 항상 넣는다.
-  parts.push(
-    'CAMERA PRIORITY (read first): absolutely NO zoom-in, NO zoom-out, NO push-in, NO close-up crop for this entire clip — keep the exact source framing from the first frame to the last frame.',
-  )
-  if (staysNude || undressAction) {
-    parts.push(buildSingleContinuousShotLock(coupleRequested))
-  }
-  // 나체 유지는 모션보다 앞에 — Wan이 뒤쪽 누드 락을 무시하고 옷을 입히던 실측
-  const koreanLook = buildKoreanTwentiesLookLock(structureCorpus)
-  if (koreanLook) parts.push(koreanLook)
-  // 커플(2인) 소스는 나체 여부와 무관하게 얼굴 드리프트 위험 — 증명사진이 아니라 전신/반신
-  // 합성 사진(얼굴이 작게 나옴)일 때 특히 실측됨. staysNude/undressAction 분기 밖에서
-  // 한 번만 넣어 옷을 입은 커플 데이트 쇼츠에도 항상 적용되게 한다.
-  if (twoPeopleInSource) parts.push(buildCoupleFaceLock())
-  if (staysNude || undressAction) {
-    parts.push(buildFemaleAdultAnatomyLock(structureCorpus))
-  }
-  if (staysNude || undressAction) {
-    if (isBodyProjectRequest(motion)) {
-      parts.push(buildNudeBecomesDefinitionLock(`${fullOriginal} ${motion}`))
-    }
-    // 팬티 잔존·뿌연 검열이 최우선 실패 모드 — 얼굴/랜드마크보다 앞에 짧게 고정
-    parts.push(
-      'PANTY BAN: crotch and hips stay bare — ZERO panties, ZERO thong, ZERO briefs, ZERO lingerie bottoms, ZERO bikini bottoms in EVERY frame after undress begins. Pull underwear fully OFF the body (not left on, not at ankles).',
-    )
-    parts.push(buildNudeCensorFogBanLock())
-    parts.push(buildFaceFrozenLock())
-    parts.push(buildBodyLandmarkNudeRevealLock())
-  }
-  if (staysNude) {
-    parts.push(
-      'NUDE HOLD FIRST: source is already fully nude adult woman — bare female breasts with visible nipples, clear bare crotch, no clothing and no foggy censor patch in any frame.',
-      'Keep the same body landmarks (breasts, waist, navel, hips) — only motion, not a new body.',
-    )
-  } else if (undressAction) {
-    parts.push(
-      'UNDRESS = clothing removal over a remembered body: dissolve/remove fabric while FACE stays the source face untouched.',
-      'UNDRESS FIRST (while WIDE): early in the clip pull off sweater/cardigan AND whatever covers her legs (jeans/pants/shorts/leggings/skirt) AND panties/underwear completely — garments leave the body and exit the frame. This applies regardless of garment style: ordinary clothes, dress/gown, robe, cloak/cape, corset, costume, or any fantasy/decorative outfit (shell top, jeweled/veiled wrap, etc.) — treat it exactly like normal clothing and remove ALL of it, it is NOT a fixed part of her body or character design.',
-      'End state: fully nude adult woman with soft female breasts and visible nipples — ZERO bra, ZERO panties, ZERO jeans, ZERO skirt, ZERO milky fog over crotch (not at ankles, not bunched, not half-on, not blurred).',
-      'Body form memory: waist, breast size/placement, navel height match the clothed source — redraw nude skin on those anchors only.',
-      'Do NOT interpret this as “already nude with panties still on” or “nude with fog covering crotch” — panties and fog must come off.',
-    )
-    // 소스에 남성 등 두 번째 인물이 함께 있는 사진(예: 커플 사진)일 때만 이 문구를 넣는다.
-    // coupleRequested==false(솔로 사진/솔로 요청)에도 무조건 넣었더니, "두 번째 인물"·
-    // "do NOT undress him" 같은 무관한 부정 문구가 프롬프트를 오염시켜 솔로 탈의 자체가
-    // 아예 안 되는 회귀가 실측됐다 — 커플 신호가 있을 때만 넣어 모호함 해소 효과만 남긴다.
-    if (coupleRequested) {
-      parts.push(
-        'IF a second person (e.g., a man) is also visible in the source photo: he stays exactly as he is, fully clothed, unchanged — do NOT undress him. Only the adult woman becomes nude per the instructions above, unless the motion text below explicitly says otherwise. This is a single clear instruction, not a refusal — the undress MUST still happen for her.',
-      )
-    }
-  }
-  if (motion) {
-    parts.push(
-      `CRITICAL MOTION — this is the main point of the clip, follow it exactly: ${motion}.`,
-    )
-    if (intimate.addon) {
-      parts.push(`ACTION DETAIL (must be visible on screen): ${intimate.addon}.`)
-    }
-  } else {
-    parts.push('Natural movement, soft hair and fabric motion, confident pose.')
-  }
-  // "subtle camera motion"이 Wan에서 조기 줌인·클로즈업으로 해석되는 실측 → 잠금 구도일 때는 쓰지 않음
-  const lockCameraForUndress = undressAction || staysNude
-  if (clipRole === 'single' || (clipRole === 'dual-a' && undressAction)) {
-    parts.push('Cinematic lighting; LOCKED camera — subject moves, framing does not tighten.')
-  } else if (intimate.wantsPoseChange || intimate.wantsPartner) {
-    parts.push('Cinematic lighting; subjects move within a stable frame.')
-  } else {
-    parts.push('Cinematic lighting, very slight steadiness — no push-in.')
-  }
-  // 줌/클로즈업: 공통 헬퍼 — become/leanIntimate 조기 return과 동일 규칙
-  parts.push(
-    buildShortsCameraLock({
-      clipRole,
-      undressOrNude: lockCameraForUndress,
-      endCloseUp,
-    }),
-  )
-  // 키스·애무·탈의도 포즈 변경 허용 — limbs-only면 원자세로 되돌아가는 실측
-  const allowPoseChange =
-    intimate.wantsPoseChange || intimate.wantsPartner || undressAction || staysNude
-  parts.push(
-    buildAdultStructureLock(structureCorpus, {
-      forNudeHold: undressAction || staysNude,
-      allowPoseChange,
-      // koreanLook(3063)·buildFemaleAdultAnatomyLock(3066)를 이미 앞에서 넣었음 — 중복 방지
-      skipIdentityAndSexLocks: true,
-      bustHeight: input.bustHeight,
-    }),
-  )
-  if (original) {
-    if (staysNude || undressAction) {
-      parts.push(
-        `Subject continuity from source (FACE + BODY SHAPE only — IGNORE any clothing/lingerie in this text; motion requires FULL nude, no panties): ${original}`,
-      )
-    } else {
-      parts.push(
-        `Subject/appearance continuity from source image (identity/outfit reference only — the motion instruction above always takes priority): ${original}`,
-      )
-    }
-  }
-  if (undressAction) {
-    parts.push(
-      'TIMELINE (must all happen in this clip): (1) early — clothes/bra/panties come OFF to full nude; (2) mid-to-end — requested intimate action WHILE nude; (3) LAST FRAME still nude in that intimate pose.',
-      'CRITICAL: do not skip step (1). Do not fondle over panties. Bare breasts and bare crotch before/during the action.',
-      'If breast touch was requested: hand on her bare breast — visible every second of the intimate part.',
-      'If crotch/보지 touch was requested: hand ON bare vulva/crotch with continuous skin contact — FORBIDDEN hand only on thigh; FORBIDDEN panties left on.',
-      'Do NOT freeze clothed. ZERO panties/bra/jeans at the end. FORBIDDEN: snap back to the original source standing pose in the last frames.',
-    )
-  } else if (dressAction) {
-    parts.push(
-      'CRITICAL ADULT MOTION: the subject starts bare-skinned/nude and puts on or wraps herself in a garment (robe, dress, or clothing) during the clip; end state is dressed as requested.',
-      'Do NOT freeze the subject fully nude for the whole clip. Do NOT keep bare skin visible at the end if the motion asks her to get dressed.',
-      'Smooth dressing action, fabric sliding on and settling naturally onto the body.',
-      'While dressing, keep the same face and body type as the source until fabric covers them.',
-    )
-  } else if (staysNude) {
-    parts.push(
-      'CRITICAL: the subject should be fully nude / bare-skinned for the entire clip.',
-      'If the source still shows panties, thong, briefs, underwear, OR a foggy/milky blur patch over the crotch, REMOVE that cover in the first frames — then keep sharp bare crotch for the rest of the clip.',
-      'She STAYS fully nude — do NOT add, invent, fade in, or generate ANY clothing, underwear, bra, panties, lingerie, robe, dress, or censor fog.',
-      'No garments and no cloudy obstacles ever appear during the motion. Sharp bare skin remains visible in every single frame.',
-      'Keep the same breasts and hips as the source — no censor blur, no invented lingerie patch, no steam smudge.',
-      'Visible nipples; mandatory natural adult pubic hair (curly strands on mons) — uncensor, no mosaic, no frosted haze, no hairless doll crotch unless user asked to shave.',
-      'FORBIDDEN: keeping source panties on; foggy panty-shaped blur; anyone putting bra or panties on her; clothes reappearing mid-clip.',
-    )
-  }
-  // 솔로 나체: 파트너 요청이 없을 때만 2인물 금지.
-  // 빨기·올라타기·눕히기는 파트너가 필요해서 CAST LOCK이 동작을 죽이던 실측 → 그때는 허용.
-  if ((undressAction || staysNude) && !coupleRequested) {
-    parts.push(
-      'CAST LOCK: only the single person from the input photo. FORBIDDEN inventing a second person, man partner, or stranger who dresses her.',
-    )
-  } else if (intimate.wantsPartner) {
-    parts.push(
-      'CAST: a second consenting adult may appear only to perform the requested intimate action.',
-      'IDENTITY LOCK: the woman from the source photo keeps the SAME face, same haircut, same body type and proportions — do NOT morph her into a more muscular, taller, or different-looking woman.',
-      'FACE WHILE NUDE/KISS: while undressing and kissing, facial identity stays the same; only a light smile, light blushing shyness, or soft pleasure — never a distorted kissing grimace that changes who she is. Deep kiss = strong lips/mouth/cheek movement on that same face.',
-      'BODY WHILE PARTNER/KISS: her breast size and breast position on the torso stay identical to the source image — the partner must not cause a different bust size or relocated bust.',
-      buildKoreanMaleBodyHairLock(),
-      'If the partner is a man from the source: keep HIS face — Korean adult man, smooth nearly hairless chest/abdomen when shirtless/nude.',
-    )
-  }
-  if ((undressAction || staysNude) && intimate.wantsPartner) {
-    parts.push(
-      'NUDE COUPLE LOCK: while kissing or intimate, the woman stays fully nude — bare crotch, no panties/thong/underwear for a “tasteful fashion” look.',
-      'FORBIDDEN: keeping panties on during a nude kiss; sheer lingerie remnant; fashion-magazine underwear holdout.',
-      'BREAST LOCK DURING KISS: match source breast size AND placement height exactly — not bigger, not smaller, not higher, not lower than the source still.',
-      buildKoreanMaleBodyHairLock(),
-      'Any nude/shirtless man: smooth Korean male torso — FORBIDDEN dense chest hair or thick belly trail.',
-    )
-  }
-  if (/패션|매거진|magazine|editorial|haute\s*couture|하이엔드/i.test(structureCorpus) && (undressAction || staysNude)) {
-    parts.push(
-      'Even if the brief says fashion-magazine style, when nude/undress is requested the end state is FULL nude — magazine lighting/mood only, NOT lingerie left on.',
-    )
-  }
-  parts.push('Follow the source image identity, including adult content when requested — do not sanitize.')
-  // 맨 앞의 CRITICAL MOTION 하나만으로는, 그 뒤에 붙는 연속성/누드 관련 문단들이 길어질수록
-  // (특히 여러 차례 수정을 거친 이미지) 모션 순응도가 흐려지는 경우가 실측으로 확인됐다.
-  // 문장 끝에서 재강조해 최근 지시 우선(recency) 효과를 노리되, 예전처럼 motion 전체
-  // (탈의 지시 전체, 최대 1500자+)를 통째로 복붙하면 프롬프트가 15,000자대까지 부풀어
-  // 오히려 Wan I2V가 얼굴을 녹이거나 엉뚱한 그래픽을 그리는 붕괴로 이어짐(실측) — 짧은
-  // 재강조 문장만 남긴다.
-  if (motion) {
-    parts.push(
-      'REMINDER (recency — re-read the CRITICAL MOTION line above and follow it exactly): do not let the setup/lock paragraphs above override it — stay fully nude if that was requested, keep the intimate action clearly visible, and do NOT revert to the clothed opening pose.',
-    )
-    if (intimate.addon) {
-      parts.push(`ACTION REMINDER: ${intimate.addon}.`)
-    }
-  }
-  parts.push(
-    'FINAL POSE LOCK: the last frame keeps the intimate action pose (kiss lean-in, hands where requested) — FORBIDDEN resetting to the opening source still pose.',
-  )
-  if (undressAction || staysNude) {
-    parts.push(
-      'FINAL LOCK: last frame fully nude — bare breasts and uncensored bare hips/crotch with natural adult pubic hair visible, ZERO bra, ZERO panties, ZERO foggy blur over genitals. Same face identity, same breast size/placement as source silhouette.',
-      'FINAL FACE: soft natural mouth, slight teeth OK if parted.',
-      buildNudeCensorFogBanLock(),
-    )
-  }
-  return parts.join(' ')
+  // 옷 입은 일반 경로. 나체·탈의·몸매 투영은 위에서 이미 짧은 프롬프트로 return 한다.
+  // 여기까지 내려온 경우는 옷을 유지하는 쇼츠이거나, 옷을 입는 동작뿐이다.
+  // 나체가 잘 안 될 때마다 붙인 가슴·속옷·음모·인종 장문이 이 경로에까지 남아
+  // 4,000~4,800자가 되었다. Wan 2.2 I2V fast는 대략 1,500자를 넘기면 모션을 버린다.
+  // 얼굴·프레이밍·옷·요청 동작만 남긴다.
+  const motionCore = motion.trim().slice(0, 420)
+  const continuityHint = truncateContinuityText(fullOriginal, CLOTHED_CONTINUITY_MAX_CHARS)
+  const clothed = [
+    'Adult photorealistic image-to-video. Same room, static camera.',
+    twoPeopleInSource
+      ? 'Same two adults as the source photo. Each keeps their own face, body, and clothes.'
+      : 'Same adult as the source photo: same face, same body, same clothes unless the motion changes them.',
+    'NO zoom-in, NO zoom-out, NO push-in, NO close-up crop — keep the exact source framing from the first frame to the last frame.',
+    twoPeopleInSource
+      ? buildCoupleFaceLock()
+      : 'FACE: copy the source face exactly. Do not beautify, age, Westernize, or replace it.',
+    dressAction
+      ? 'CLOTHES: start as the source, then put on the garment named in the motion. End dressed. Same face and body underneath.'
+      : 'CLOTHES: keep the source outfit on for the whole clip. Do not undress and do not add or remove lingerie.',
+    motionCore ? `MOTION (this is the point of the clip): ${motionCore}` : 'MOTION: small natural movement only. Stay in the source pose.',
+    continuityHint ? `Continuity: ${continuityHint}` : '',
+  ].filter(Boolean)
+  return clothed.join(' ')
 }
