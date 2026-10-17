@@ -140,7 +140,9 @@
     try {
       const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
       if (!data) return
-      if (gradeEl && data.grade) gradeEl.value = data.grade
+      if (gradeEl && data.grade && [...gradeEl.options].some((option) => option.value === data.grade)) {
+        gradeEl.value = data.grade
+      }
       if (observationEl && data.observation) observationEl.value = data.observation
       if (data.imageDataUrl) setImageDataUrl(data.imageDataUrl)
       if (data.critiqueText && critiqueEl && critiqueWrap) {

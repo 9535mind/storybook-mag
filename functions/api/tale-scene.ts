@@ -127,18 +127,25 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       .filter(Boolean)
       .join(' ')
     const wantsKissAction = /키스|입맞춤|입\s*(?:을\s*)?맞추|kiss/i.test(description)
-    const wantsHugAction = !wantsKissAction && /포옹|안(?:다|고|은|아)|껴안|hug|embrace/i.test(description)
+    const wantsBackHug = /백\s*허그|back\s*hug|from behind|등\s*뒤에서|뒤에서\s*(?:안|포옹|허그)/i.test(description)
+    const wantsHugAction =
+      !wantsKissAction && !wantsBackHug && /포옹|안(?:다|고|은|아)|껴안|hug|embrace/i.test(description)
     const actionReinforcement = wantsKissAction
       ? [
           'CRITICAL ACTION (this is the main subject of the photo, not a side detail): Person A and Person B are kissing on the lips right now — their faces are turned toward each other, heads tilted, eyes closed or nearly closed, and their lips are actually touching/pressed together.',
           'FORBIDDEN: both people facing the camera; FORBIDDEN: faces not touching; FORBIDDEN: any gap between their mouths; FORBIDDEN: looking at the camera instead of each other.',
         ]
-      : wantsHugAction
+      : wantsBackHug
         ? [
-            'CRITICAL ACTION (this is the main subject of the photo, not a side detail): Person A and Person B are hugging each other right now — at least one arm of each person is wrapped around the other person\'s back/shoulders, and their chests/bodies are pressed close together.',
-            'FORBIDDEN: both people facing the camera with arms at their sides; FORBIDDEN: standing apart without any arm contact.',
+            'CRITICAL ACTION: this is a back hug. One person stands directly behind the other and wraps both arms around the front person\'s waist. The front person faces the camera. Both faces stay visible.',
+            'FORBIDDEN: turning this into a face-to-face hug; FORBIDDEN: standing side by side with arms down; FORBIDDEN: a kiss.',
           ]
-        : []
+        : wantsHugAction
+          ? [
+              'CRITICAL ACTION (this is the main subject of the photo, not a side detail): Person A and Person B share a light face-to-face hug — arms rest loosely around shoulders or waist, bodies close, both faces visible.',
+              'FORBIDDEN: a tight crush, a kiss, or standing apart with arms at their sides.',
+            ]
+          : []
     const prompt = body.photoreal
       ? [
           `Edit these two reference photos into one single new photorealistic photo: ${description}`,
@@ -161,8 +168,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       : [
           description,
           '',
-          'Keep the same characters, faces, art style, coloring, and mood as the reference illustrations.',
-          'This new scene must look like it belongs in the same picture-book/illustration series as the references.',
+          'Keep the same adult characters, faces, art style, coloring, and mood as the reference illustrations.',
+          'This new scene must look like it belongs in the same adult illustrated series as the references. Do not restyle it into a children\'s picture book.',
         ].join('\n')
 
     try {

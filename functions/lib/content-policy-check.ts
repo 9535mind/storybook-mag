@@ -78,36 +78,10 @@ export function evaluateContentPolicy(
   return { allowed: true, blockedReason: null, matchedSignals: [] }
 }
 
-const ADULT_CONTENT_PATTERNS: Array<{ label: string; pattern: RegExp }> = [
-  {
-    label: 'adult-content',
-    pattern:
-      /누드|나체|섹스|성기|자위|전라|속옷\s*제거|란제리|nsfw|nude|naked|porn|explicit|sexual/i,
-  },
-]
-
 /**
- * 동화 삽화(캐릭터 일관성) 전용 정책 — 화보 스튜디오와 달리 "아이/어린이" 묘사는
- * 이 기능의 정상적인 사용 목적(어린이 그림책)이므로 차단하지 않는다.
- * 실존 인물·비동의 폭력·성적 콘텐츠만 차단한다.
+ * 동화·장면 편집도 성인 스튜디오의 본편 정책과 같다.
+ * 미성년 지칭·비동의·실존 인물은 막고, 성인 나체·성적 묘사는 허용한다.
  */
 export function evaluateTaleScenePolicy(promptText: string): ContentPolicyVerdict {
-  const text = promptText ?? ''
-
-  const realPerson = matchAny(text, REAL_PERSON_PATTERNS)
-  if (realPerson.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-real-person', matchedSignals: realPerson }
-  }
-
-  const nonConsensual = matchAny(text, NON_CONSENSUAL_PATTERNS)
-  if (nonConsensual.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-non-consensual', matchedSignals: nonConsensual }
-  }
-
-  const adult = matchAny(text, ADULT_CONTENT_PATTERNS)
-  if (adult.length > 0) {
-    return { allowed: false, blockedReason: 'blocked-adult-content', matchedSignals: adult }
-  }
-
-  return { allowed: true, blockedReason: null, matchedSignals: [] }
+  return evaluateContentPolicy(promptText)
 }

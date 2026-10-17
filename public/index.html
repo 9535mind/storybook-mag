@@ -379,7 +379,7 @@
           </div>
           <p class="review-panel__hint">
             시계·귀걸이는 「찍어서 붙이기」, 옷·구도는 「텍스트」, 부분만은 「올가미」.
-            체형 유지 탈의 영상은 아래 「몸매 투영 쇼츠」를 쓰세요.
+            나체 동작 영상은 아래 쇼츠 모션에 적으세요.
           </p>
 
           <div id="pin-toolbar" class="pin-toolbar" hidden>
@@ -425,7 +425,7 @@
             placeholder="예: 옷 색 하나로 통일 / 목걸이 제거 / 나체가 되어"
           ></textarea>
           <p class="review-panel__hint">
-            일반 나체는 「누드」「나체가 되어」등. 체형 유지 탈의 영상은 「몸매 투영 쇼츠」.
+            일반 나체는 「누드」「나체가 되어」등. 나체 동작 영상은 아래 쇼츠 모션에 적으세요.
             <strong>진짜 두 칸</strong>만 아래 자르기.
           </p>
           <div class="form__field" style="margin-top: 0.5rem">
@@ -565,20 +565,8 @@
           </p>
         </div>
         <div class="animate-panel__actions">
-          <button
-            id="body-project-shorts-button"
-            class="animate-panel__body-project"
-            type="button"
-            title="타점(유두)을 먼저 맞춘 뒤, 그 자리에 유방을 그리고 옷만 약하게 녹이는 쇼츠"
-          >
-            몸매 투영
-          </button>
           <button id="animate-button" class="form__submit animate-panel__main" type="button">쇼츠 비디오 만들기</button>
         </div>
-        <p class="form__hint" style="margin-top: 6px">
-          <strong>몸매 투영 쇼츠</strong> = 편집 화면에서만 타점을 보고, 실제 옷 위 가슴에 정확히 맞춘 뒤
-          그 좌표로 유방·유두를 그리고 옷만 약하게 녹여 드러냅니다. 점·원은 원본·영상에 그려지지 않습니다.
-        </p>
         <p id="animate-status" class="form__status" hidden></p>
 
         <div id="video-result" class="video-result" hidden>
@@ -707,7 +695,8 @@
         <label class="form__label" for="admin-faceswap-scene-preset">기본 사진이 없다면 — 장면부터 AI로 만들기</label>
         <select id="admin-faceswap-scene-preset" class="form__select">
           <option value="arm_in_arm" selected>팔짱 끼고 데이트</option>
-          <option value="hug">서로 포옹</option>
+          <option value="light_hug">남녀 가벼운 허그</option>
+          <option value="back_hug">백허그</option>
           <option value="kiss">서로 키스</option>
         </select>
         <button type="button" id="admin-faceswap-scene-photoreal" class="form__submit">
@@ -861,7 +850,7 @@
           class="form__select"
           type="text"
           maxlength="120"
-          placeholder="예: 초등 6학년, 30대 직장인, 문예지 투고용 — 비우면 일반 성인 에세이 독자"
+          placeholder="예: 30대 직장인, 문예지 투고용, 성인 독자 — 비우면 일반 성인 에세이 독자"
         />
 
         <div class="field-head">
@@ -986,24 +975,24 @@
         <header class="essay-panel__head">
           <h2 class="essay-panel__title">AI 동화 편집</h2>
           <p class="essay-panel__lead">
-            초등 눈높이 동화 편집장. 교훈 선언·AI 클리셰는 자르고, 사건과 행동으로 다시 쓰게 합니다.
+            성인 독자용 편집장. 교훈 선언·AI 클리셰는 자르고, 사건과 감각이 보이게 다시 쓰게 합니다.
           </p>
         </header>
 
-        <label class="form__label" for="tale-grade">대상 학년</label>
+        <label class="form__label" for="tale-grade">대상 독자</label>
         <select id="tale-grade" class="form__select">
-          <option value="초등 1~2학년">초등 1~2학년</option>
-          <option value="초등 3~4학년" selected>초등 3~4학년</option>
-          <option value="초등 5~6학년">초등 5~6학년</option>
+          <option value="성인 일반 독자" selected>성인 일반 독자</option>
+          <option value="성인 문학">성인 문학</option>
+          <option value="성인 화보·서사">성인 화보·서사</option>
         </select>
 
-        <label class="form__label" for="tale-draft">동화 초안</label>
+        <label class="form__label" for="tale-draft">초안</label>
         <textarea
           id="tale-draft"
           class="form__textarea essay-textarea"
           rows="12"
           maxlength="12000"
-          placeholder="아이가 쓴 동화 초안을 붙여 넣으세요."
+          placeholder="성인 독자용 초안을 붙여 넣으세요."
         ></textarea>
 
         <div class="essay-actions">
@@ -1025,7 +1014,7 @@
         <header class="essay-panel__head">
           <h3 class="essay-panel__title essay-panel__title--sub">그림 편집 <span class="tale-img-badge">1단계</span></h3>
           <p class="essay-panel__lead">
-            동화에 쓸 그림을 불러와 크기·위치·회전을 맞춰보세요. 컷아웃·배경 흐리기·페이지 배치는 다음 단계에서 추가됩니다.
+            장면에 쓸 그림을 불러와 크기·위치·회전을 맞춰보세요. 컷아웃·배경 흐리기·페이지 배치는 다음 단계에서 추가됩니다.
           </p>
         </header>
 
@@ -1135,7 +1124,7 @@
             class="form__textarea"
             rows="3"
             maxlength="800"
-            placeholder="예: 나무 아래에서 낮잠을 자고 있는 토끼, 같은 그림책 화풍으로"
+            placeholder="예: 같은 성인 인물이 창가에서 코트 단추를 푸는 장면, 같은 화풍으로"
           ></textarea>
 
           <div class="essay-actions">
@@ -1183,7 +1172,7 @@
         <header class="essay-panel__head">
           <h3 class="essay-panel__title essay-panel__title--sub">페이지 조판 <span class="tale-img-badge">3단계</span></h3>
           <p class="essay-panel__lead">
-            그림과 글을 페이지에 배치해 그림책 스프레드를 만들어 보세요. 여러 페이지를 만들면 한 번에 PDF로 내보낼 수 있어요.
+            그림과 글을 페이지에 배치해 성인 서사 면을 만들어 보세요. 여러 페이지를 만들면 한 번에 PDF로 내보낼 수 있어요.
           </p>
         </header>
 
@@ -1211,7 +1200,7 @@
           <button id="layout-add-text" class="review-panel__secondary" type="button">+ 텍스트 상자</button>
         </div>
 
-        <div class="tale-img-divider"><span>그림책 템플릿</span></div>
+        <div class="tale-img-divider"><span>페이지 템플릿</span></div>
         <label class="tale-img-control tale-img-control--checkbox">
           <input id="layout-template-spread" type="checkbox" />
           <span>맞쪽(이 페이지 + 다음 페이지)에 적용</span>
@@ -1294,11 +1283,9 @@
 
         <label class="form__label" for="observe-grade">대상</label>
         <select id="observe-grade" class="form__select">
-          <option value="초등 1~2학년">초등 1~2학년</option>
-          <option value="초등 3~4학년" selected>초등 3~4학년</option>
-          <option value="초등 5~6학년">초등 5~6학년</option>
-          <option value="중·고등학생">중·고등학생</option>
-          <option value="일반(성인) 어휘 훈련">일반(성인) 어휘 훈련</option>
+          <option value="성인 일반" selected>성인 일반</option>
+          <option value="성인 정밀 묘사">성인 정밀 묘사</option>
+          <option value="문예 비평 어휘">문예 비평 어휘</option>
         </select>
 
         <label class="form__label" for="observe-image-input">그림 업로드</label>
@@ -1405,10 +1392,10 @@
   <script src="/youtube-shorts.js?v=20260719am"></script>
   <script src="/bgm-mixer.js?v=20260722a"></script>
   <script src="/essay.js?v=20260720c"></script>
-  <script src="/tale.js?v=20260720e"></script>
+  <script src="/tale.js?v=20261017adult1"></script>
   <script src="/tale-layout.js?v=20260720d"></script>
-  <script src="/observe.js?v=20260722b"></script>
+  <script src="/observe.js?v=20261017adult1"></script>
   <script src="/poly-lasso.js?v=20260802lasso4"></script>
-  <script src="/app.js?v=20260822faceswapfix1"></script>
+  <script src="/app.js?v=20261017fly1"></script>
 </body>
 </html>
