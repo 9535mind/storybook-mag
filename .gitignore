@@ -13,6 +13,9 @@ _tmp_*.txt
 _tmp_*.mjs
 _tmp_*.cjs
 
+# 개인 목소리 원본 — 배포 폴더에만 두고 커밋하지 않는다
+public/voices/
+
 # 작업 잔재·개인 메모 (커밋 금지)
 _worker.bundle
 tmp-faceswap-test/

@@ -106,6 +106,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     /** 증명/상반신 소스면 벗기 때 줌아웃으로 전신을 연다 */
     sourceBust?: boolean
     genMode?: 'free' | 'fashion'
+    /** 줌인 칸. 끄면 모션 문구와 상관없이 줌인 금지. */
+    zoomIn?: boolean
   }
   try {
     body = await request.json()
@@ -235,7 +237,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       ].join(' ')
     : 'body-projection full nude reveal. Remove bra, brown waist belt, pants, and all panties.'
   const continuityForVideo = (promptForVideo || continuitySource).trim()
-  const prompt = bodyProjectFlag
+  const promptBuilt = bodyProjectFlag
     ? buildAnimationPrompt({
         prompt: '',
         motion: landmarkMotion,
@@ -244,6 +246,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         bodyProject: true,
         durationSec: approxDurationSec,
         bustHeight,
+        zoomIn: false,
       })
     : buildAnimationPrompt({
         prompt: continuityForVideo,
@@ -257,7 +260,26 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         sourceCast,
         sourceBust,
         genMode: body.genMode === 'fashion' ? 'fashion' : body.genMode === 'free' ? 'free' : undefined,
+        zoomIn: false,
       })
+  const zoomOn = false
+  const faceZoomHead = zoomOn
+    ? 'FACE: exact source face every frame. FORBIDDEN a new face or a new model. SKIN: no dots under the nipples. PUBIC: curls on the mons only, below the navel. ZOOM-IN on, slow only.\n'
+    : 'FACE: exact source face every frame. FORBIDDEN a new face, a new model, or a different person. SKIN: underbust and belly smooth, ZERO dots under the nipples. PUBIC: curls on the mons only, below the navel. ZERO hair above the navel. NO zoom-in. Exact source crop.\n'
+  const promptBody = zoomOn
+    ? promptBuilt
+        .replace(/NO zoom-in[^.\n]*/gi, 'Slow zoom-in is allowed')
+        .replace(/FORBIDDEN zoom-in[^.\n]*/gi, 'Slow zoom-in is allowed')
+        .replace(/FORBIDDEN zoom(?!-out)[^.\n]*/gi, 'Slow zoom-in is allowed')
+    : promptBuilt
+        .replace(/begin a SLOW gradual zoom-in[^.\n]*/gi, 'Keep the exact source crop')
+        .replace(/Any zoom only in the late portion, slow and slight/gi, 'No zoom-in')
+        .replace(/slowly push in[^.\n]*/gi, 'do not zoom in')
+        .replace(/ZOOM-IN is ON[^.\n]*/gi, 'NO zoom-in. Exact source crop')
+  const prompt =
+    faceZoomHead.length + promptBody.length <= 1500
+      ? faceZoomHead + promptBody
+      : (faceZoomHead + promptBody).slice(0, 1500)
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
   const requested = requestedDurationSec

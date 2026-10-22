@@ -224,6 +224,27 @@ if (!/mouth stays on her bare breast/i.test(fromPhoto)) fails.push('커플 영�
 if (/already fully nude/i.test(fromPhoto)) fails.push('옷 입은 원본인데 이미 나체라고 거짓말함')
 if (fromPhoto.length > 1500) fails.push(`커플 영상 프롬프트가 ${fromPhoto.length}자`)
 
+const shortNude = policy.buildShortActionScript('나체로 자신의 가슴을 만진다', 10)
+if (!shortNude) fails.push('나체+가슴 짧은 스크립트가 비었다')
+if (shortNude && !/Bare hips, bare crotch, skin only/i.test(shortNude)) {
+  fails.push(`짧은 나체 스크립트에 맨살 밑이 없음: ${shortNude}`)
+}
+if (shortNude && shortNude.length > 900) {
+  fails.push(`짧은 나체 스크립트가 ${shortNude.length}자 — 앞 잠금이 다시 길어졌다`)
+}
+if (/black panty/i.test(shortNude || '')) {
+  fails.push('짧은 나체 스크립트에 black panty 가 들어가 그걸 그린다')
+}
+const idNude = policy.buildShortPlainNudeScript(15)
+if (!idNude) fails.push('증명사진 나체 짧은 글이 비었다')
+if (idNude.length > 500) fails.push(`증명사진 나체가 ${idNude.length}자 — 어제 짧은 길을 넘었다`)
+if (!/clothes melt off/i.test(idNude) || !/Fully nude/i.test(idNude)) {
+  fails.push(`증명사진 나체에 벗기가 없음: ${idNude}`)
+}
+if (/FACE HOLD|chin tucked|black panty|C-to-D/i.test(idNude)) {
+  fails.push(`증명사진 나체에 장문 잠금이 다시 붙음: ${idNude}`)
+}
+
 const fromNudeStill = coupleLib.buildFreeCoupleVideoPrompt(holdNude('나체로 가슴에 키스한다', true), {
   alreadyNude: true,
 })

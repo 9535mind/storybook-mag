@@ -108,7 +108,7 @@ export function buildFacePreserveBodyMaskDataUrl(options?: {
 }): string {
   const width = Math.max(64, Math.min(1536, options?.width ?? 768))
   const height = Math.max(64, Math.min(1536, options?.height ?? 1024))
-  const faceKeepRatio = Math.min(0.48, Math.max(0.22, options?.faceKeepRatio ?? 0.34))
+  const faceKeepRatio = Math.min(0.72, Math.max(0.22, options?.faceKeepRatio ?? 0.34))
   const cutY = Math.floor(height * faceKeepRatio)
   const pixels = new Uint8Array(width * height)
   for (let y = 0; y < height; y++) {
@@ -192,22 +192,47 @@ export function buildPubicRegionMaskDataUrl(options?: {
 }): string {
   const width = Math.max(64, Math.min(1536, options?.width ?? 768))
   const height = Math.max(64, Math.min(1536, options?.height ?? 1024))
-  const y0 = Math.floor(height * Math.min(0.7, Math.max(0.4, options?.yStartRatio ?? 0.52)))
-  const y1 = Math.floor(height * Math.min(0.98, Math.max(0.75, options?.yEndRatio ?? 0.9)))
+  const yStart = Math.min(0.82, Math.max(0.28, options?.yStartRatio ?? 0.6))
+  const yEnd = Math.min(0.94, Math.max(yStart + 0.08, options?.yEndRatio ?? 0.72))
+  const y0 = Math.floor(height * yStart)
+  const y1 = Math.floor(height * yEnd)
   const x0 = Math.floor(
     width *
       Math.min(
         1,
-        Math.max(0, options?.xStartRatio ?? (options?.rightHalfOnly ? 0.5 : 0)),
+        Math.max(0, options?.xStartRatio ?? (options?.rightHalfOnly ? 0.5 : 0.32)),
       ),
   )
-  const x1 = Math.floor(width * Math.min(1, Math.max(x0 + 1, options?.xEndRatio ?? 1)))
+  const x1 = Math.floor(
+    width * Math.min(1, Math.max(x0 / width + 0.02, options?.xEndRatio ?? (options?.rightHalfOnly ? 1 : 0.68))),
+  )
   const pixels = new Uint8Array(width * height)
   for (let y = 0; y < height; y++) {
     const row = y * width
     for (let x = 0; x < width; x++) {
       pixels[row + x] = y >= y0 && y < y1 && x >= x0 && x < x1 ? 255 : 0
     }
+  }
+  const png = encodeGrayPng(width, height, pixels)
+  return `data:image/png;base64,${bytesToBase64(png)}`
+}
+
+/**
+ * 가슴·배 점·털만 수정 — 얼굴(위)과 치골(아래)은 검정.
+ */
+export function buildTorsoSkinMaskDataUrl(options?: {
+  width?: number
+  height?: number
+}): string {
+  const width = Math.max(64, Math.min(1536, options?.width ?? 768))
+  const height = Math.max(64, Math.min(1536, options?.height ?? 1024))
+  const y0 = Math.floor(height * 0.22)
+  const y1 = Math.floor(height * 0.82)
+  const x0 = Math.floor(width * 0.12)
+  const x1 = Math.floor(width * 0.88)
+  const pixels = new Uint8Array(width * height)
+  for (let y = y0; y < y1; y++) {
+    pixels.fill(255, y * width + x0, y * width + x1)
   }
   const png = encodeGrayPng(width, height, pixels)
   return `data:image/png;base64,${bytesToBase64(png)}`

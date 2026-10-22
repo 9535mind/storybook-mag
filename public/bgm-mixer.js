@@ -204,7 +204,7 @@ async function mixVideoWithBgm(videoUrl, audioBlob, options = {}) {
 
   const audio = document.createElement('audio')
   audio.src = localAudioUrl
-  audio.loop = true
+  audio.loop = options.loop !== false
   audio.preload = 'auto'
 
   try {

@@ -35,7 +35,7 @@ export const FREE_COUPLE_CAM =
   'CAST LOCK: input-photo people only, same two people from THIS photo, same place. BOTH visible. Never zoom. FORBIDDEN new faces, Caucasian, bathroom, bathtub, tiles, fashion model. '
 
 export const FREE_BREAST_KISS_CAM =
-  'CAST LOCK: same two people from the input photo, same place. Intimate chest two-shot: his mouth on her bare breast, both faces visible. FORBIDDEN a different couple, Caucasian, bathroom, bathtub, tiles, new faces. '
+  'CAST LOCK: same two people from the input photo, same place. His mouth on her bare breast, both faces visible. Exact source crop. FORBIDDEN zoom-in, chest close-up, a different couple, Caucasian, bathroom, bathtub, tiles, new faces. '
 
 const BEAT2_BREAST_KISS =
   'the same source man leans in and kisses her bare breast with his mouth — lips stay on her nipple/breast, continuous oral contact, not a peck, not a hand-only touch, not mouth-to-mouth. Both source faces stay recognizable. Woman stays fully nude. Man keeps his source face and age. FORBIDDEN a different couple, Caucasian faces, bathroom, dropping either person.'
@@ -67,23 +67,74 @@ export function wantsCoupleBreastTouch(text: string): boolean {
   return BREAST_RE.test(text || '') && !SELF_SOLO_RE.test(text || '')
 }
 
+export function buildFreeGroupVideoPrompt(
+  motion: string,
+  opts?: { zoomIn?: boolean; people?: number; becomeNude?: boolean },
+): string {
+  const n = Math.max(3, Math.min(8, opts?.people || 3))
+  const zoom = opts?.zoomIn === true
+  const cam = zoom
+    ? 'Slow zoom-in only. Every person stays in frame.'
+    : `ALL ${n} WOMEN stay full length, same size, same places. FORBIDDEN a close-up of one woman, orbiting one face, cropping the others out.`
+  const cast = `Keep all ${n} people solid, not transparent. Same faces, same order. Backdrop poster stays flat on the wall. FORBIDDEN a giant body behind them, a ghost overlay, a new face, dropping anyone.`
+  const nude = opts?.becomeNude
+    ? 'Clothes may melt in place. Do not crop onto one chest. Pubic hair is a small patch on the mons only, below the navel. No strands toward the navel. No dots under the nipples. Faces stay the source faces.'
+    : 'Do not undress. Do not invent a kiss. Do not leave this photo.'
+  const move = (motion || '').replace(/\s+/g, ' ').slice(0, 180)
+  const end =
+    'LAST 4 SECONDS: freeze the changed state. Do not restore the opening clothed group photo. No fade back. No ghost overlay.'
+  return [cam, cast, nude, move ? `MOTION: ${move}` : '', end].filter(Boolean).join(' ')
+}
+
 export function buildFreeCoupleVideoPrompt(
   motion: string,
-  opts?: { alreadyNude?: boolean },
+  opts?: { alreadyNude?: boolean; zoomIn?: boolean; becomeNude?: boolean },
 ): string {
   const breastKiss = isFreeBreastKissMotion(motion)
   const kissOnly = !breastKiss && KISS_RE.test(motion) && !wantsCoupleBreastTouch(motion)
+  const intimate = breastKiss || kissOnly || isFreeCoupleIntimateMotion(motion)
   const alreadyNude =
     opts?.alreadyNude === true || /이미\s*완전\s*나체|already fully nude/i.test(motion || '')
+  const zoom = opts?.zoomIn === true
+  const framing = zoom
+    ? 'Slow zoom-in is allowed.'
+    : 'Same crop. Both full heads stay in frame. If more people are in the photo, keep them too. FORBIDDEN zoom-in, chest close-up, cutting a head off, a new wall.'
+  if (!intimate) {
+    const place =
+      'IMAGE-TO-VIDEO of THIS photo only. Keep every person already in the photo, same faces, same backdrop, same floor. FORBIDDEN a solo close-up, dropping a person, a new wall, a new pattern, a new model.'
+    const end =
+      'Last frame holds the changed state. Do not fade back to the opening photo. Do not put the original clothes back on.'
+    if (opts?.becomeNude && !alreadyNude) {
+      return [
+        framing,
+        place,
+        'Clothes melt in place only. Do not crop onto one chest. Pubic hair is a small patch on the mons only, below the navel. No strands toward the navel. No dots under the nipples.',
+        end,
+      ].join(' ')
+    }
+    const move = (motion || '').replace(/\s+/g, ' ').slice(0, 180)
+    return [
+      framing,
+      place,
+      alreadyNude
+        ? 'She is already nude in this photo. Keep that. Do not put clothes back. Do not crop in.'
+        : 'Do not undress. Do not invent a kiss.',
+      move ? `MOTION: ${move}` : '',
+      end,
+    ]
+      .filter(Boolean)
+      .join(' ')
+  }
   const action = breastKiss
-    ? 'ACTION: he leans to her chest and his mouth stays on her bare breast (lips on nipple), continuous, not a peck, not mouth-to-mouth. Intimate chest two-shot, both source faces visible.'
+    ? `ACTION: he leans to her chest and his mouth stays on her bare breast (lips on nipple), continuous, not a peck, not mouth-to-mouth. Both full heads stay the same size as the photo. Do not crop in on the chest. ${framing}`
     : kissOnly
-      ? 'ACTION: he deep mouth-to-mouth kisses her. Both source faces visible.'
-      : 'ACTION: he mouth-to-mouth kisses her and his hand stays on her bare breast. Both source faces visible.'
+      ? `ACTION: he deep mouth-to-mouth kisses her. Both full heads stay visible at the same size. ${framing}`
+      : `ACTION: he mouth-to-mouth kisses her and his hand stays on her bare breast. Both full heads stay the same size as the photo. Do not crop in on the chest. ${framing}`
   const nudeLine = alreadyNude
     ? 'She is already fully nude in THIS photo. Keep that same nude woman and the same clothed man. Do NOT undress. Do NOT replace bodies or faces.'
     : 'She becomes fully nude. He stays the same man from the photo (same face, same hair). Same room as the photo.'
   return [
+    framing,
     'IMAGE-TO-VIDEO of THIS photo only. Copy both faces exactly from the input: the same East-Asian Korean man and the same East-Asian Korean woman, same ages, same hair, same place as this photo. Do not move them to a studio.',
     nudeLine,
     action,

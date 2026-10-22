@@ -7,7 +7,7 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Storymag</title>
-  <link rel="stylesheet" href="/style.css?v=20261004mw107" />
+  <link rel="stylesheet" href="/style.css?v=20261018cast2" />
 </head>
 <body>
   <div id="pin-gate" class="pin-gate">
@@ -94,7 +94,7 @@
         </div>
         <div class="app__area-bar" role="tablist" aria-label="작업 영역">
           <button type="button" class="app__area-btn app__area-btn--active" data-app-area="studio" role="tab" aria-selected="true">
-            일러스트
+            자유 일러스트
           </button>
           <button type="button" class="app__area-btn" data-app-area="essay" role="tab" aria-selected="false">
             에세이
@@ -106,7 +106,7 @@
             그림관찰과 표현
           </button>
           <button type="button" class="app__area-btn app__area-btn--admin" id="app-area-admin" data-app-area="admin" role="tab" aria-selected="false" hidden>
-            Desk
+            DECK
           </button>
           <button type="button" class="app__area-btn app__area-btn--admin" id="app-area-free" data-app-area="free" role="tab" aria-selected="false" hidden>
             자유 스튜디오
@@ -151,6 +151,7 @@
     <section id="adult-desk" class="adult-desk" hidden>
       <nav class="adult-desk__nav" role="tablist" aria-label="Desk">
         <button type="button" class="adult-desk__nav-btn is-on" data-desk-view="make" role="tab" aria-selected="true">만들기</button>
+        <button type="button" class="adult-desk__nav-btn" data-desk-view="shorts-make" role="tab" aria-selected="false">쇼츠 만들기</button>
         <button type="button" class="adult-desk__nav-btn" data-desk-view="keep" role="tab" aria-selected="false">보관함</button>
       </nav>
 
@@ -602,7 +603,7 @@
             placeholder="후반 예: 이미 나체 유지. 옷벗김은 전반에"
           />
           <p id="dual-frame-hint" class="form__hint" style="margin-top: 6px">
-            전반 → 후반을 이어 붙입니다. 줌인·클로즈업은 모션에 「줌인」또는 「클로즈업」을 적을 때만 켭니다.
+            전반 → 후반을 이어 붙입니다. 화면은 원본 구도 그대로입니다.
           </p>
         </div>
         <div class="form__field" style="margin-top: 0.75rem">
@@ -1818,34 +1819,140 @@
             <h2 class="essay-panel__title">자유 스튜디오</h2>
             <button id="free-reset" class="app__new-shoot" type="button">비우기</button>
           </div>
-          <p class="essay-panel__lead">
-            <b>8월 27일자 완성본</b>을 그대로 얼려 둔 칸입니다. 그날의 프롬프트·엔진을 씁니다.
-            걸음도, 옷 마스크도, 저장 거부 검사도 없습니다. Desk 와 일러스트는 여기와 무관합니다.
+          <p class="essay-panel__lead" id="free-area-lead">
+            중간 장 없이, 사진 올리고 움직이기. 8월 26일 길입니다.
           </p>
           <ol class="free-guide">
-            <li><b>벗기고 싶으면</b> — 사진을 올리고 <b>몸매 투영</b>을 누르세요. 원래 체형을 지키며 벗깁니다. 그날 가장 잘 되던 길입니다.</li>
-            <li><b>사진을 고치고 싶으면</b> — 사진을 올리고 고칠 말을 적은 뒤 <b>수정하기</b>. 옷 갈아입히기도 여기입니다. Desk가 아닙니다.</li>
-            <li><b>맨바닥에서 그리려면</b> — 사진 없이 말만 적고 <b>한 장 만들기</b>.</li>
-            <li><b>영상만 필요하면</b> — 사진을 올리고 아래 <b>움직이기</b>에 동작만 적으세요. 그림은 안 만들어도 됩니다.</li>
-            <li>결과가 아쉬우면 같은 단추를 다시 누르세요. 매번 달라집니다.</li>
+            <li><b>1. 사진</b> — 올리기</li>
+            <li><b>2. 쇼츠</b> — 움직이기에 <b>나체 가슴</b>을 적고 <b>움직이기</b></li>
           </ol>
         </header>
 
-        <label class="form__label" for="free-photo">사진 (없어도 됩니다)</label>
-        <div id="free-photo-drop" class="attach-drop free-photo-drop">
-          <div class="essay-actions">
-            <label class="ai-help-btn" for="free-photo">파일 선택</label>
-            <button id="free-photo-paste" class="ai-help-btn" type="button">붙이기</button>
+        <div class="free-steps" id="free-subtabs" hidden>
+          <button id="free-tab-make" class="form__submit" type="button">1. 장 만들기</button>
+          <button id="free-tab-continue" class="review-panel__secondary" type="button">2. 이어서 고치기</button>
+        </div>
+
+        <div id="free-make-pane">
+        <label class="form__label" for="free-photo">1) 사진</label>
+        <div class="free-cast-row">
+          <div id="free-photo-drop" class="attach-drop free-photo-drop">
+            <p class="form__hint">나</p>
+            <div class="essay-actions">
+              <label class="ai-help-btn" for="free-photo">파일 선택</label>
+              <button id="free-photo-paste" class="ai-help-btn" type="button">붙이기</button>
+            </div>
+            <input id="free-photo" class="form__input" type="file" accept="image/*" hidden />
+            <div id="free-photo-wrap" class="free-photo-wrap" hidden>
+              <img id="free-photo-preview" class="free-photo-preview" alt="나" />
+              <button id="free-photo-clear" class="review-panel__secondary" type="button">빼기</button>
+            </div>
           </div>
-          <input id="free-photo" class="form__input" type="file" accept="image/*" hidden />
-          <p class="form__hint">파일 선택 · 끌어다 놓기 · 복사 후 Ctrl+V · 붙이기. 결과 그림은 Ctrl+C 로 복사됩니다.</p>
-          <div id="free-photo-wrap" class="free-photo-wrap" hidden>
-            <img id="free-photo-preview" class="free-photo-preview" alt="올린 사진" />
-            <button id="free-photo-clear" class="review-panel__secondary" type="button">사진 빼기</button>
+          <div id="free-him-drop" class="attach-drop free-photo-drop">
+            <p class="form__hint">남친</p>
+            <div class="essay-actions">
+              <label class="ai-help-btn" for="free-him-photo">파일 선택</label>
+              <button id="free-him-paste" class="ai-help-btn" type="button">붙이기</button>
+            </div>
+            <input id="free-him-photo" class="form__input" type="file" accept="image/*" hidden />
+            <div id="free-him-wrap" class="free-photo-wrap" hidden>
+              <img id="free-him-preview" class="free-photo-preview" alt="남친" />
+              <button id="free-him-clear" class="review-panel__secondary" type="button">빼기</button>
+            </div>
+          </div>
+        </div>
+        <p class="form__hint">나와 남친을 나란히 올린 뒤 한 장면으로 합칩니다. 반신이면 전신으로 이은 다음 붙입니다.</p>
+        <div class="essay-actions">
+          <button id="free-compose" class="form__submit" type="button">한 장면으로 합치기</button>
+        </div>
+        <p id="free-compose-status" class="form__status" hidden></p>
+
+        <!-- 중간 장 없이 곧장 쇼츠. Wan wan-2.2-i2v-fast 는 그대로. -->
+        <div id="free-move-wrap" class="essay-output-wrap" hidden>
+          <div class="field-head">
+            <h3 class="essay-output__heading">2. 쇼츠</h3>
+          </div>
+          <p id="free-move-from" class="form__hint"></p>
+          <label class="form__label" for="free-move-text">어떤 움직임</label>
+          <textarea
+            id="free-move-text"
+            class="form__textarea"
+            rows="3"
+            placeholder="나체 가슴"
+          ></textarea>
+          <p class="form__hint">요구가 둘이면 15초를 반반, 셋이면 3등분. 예: 나체가 된다, 그리고 가슴을 만진다. 한 장 만들기는 누르지 마세요.</p>
+
+          <label class="form__label" for="free-move-sec">길이</label>
+          <select id="free-move-sec" class="form__select">
+            <option value="10">10초 (가장 안정)</option>
+            <option value="12">12초</option>
+            <option value="15" selected>15초</option>
+            <option value="18">18초 (뒷부분 흐트러질 수 있음)</option>
+            <option value="24">24초 (12+12 이어 붙이기)</option>
+            <option value="30">30초 (15+15 이어 붙이기)</option>
+          </select>
+
+          <div id="free-move-dual" hidden>
+            <label class="form__label" for="free-move-text2">후반 움직임</label>
+            <textarea
+              id="free-move-text2"
+              class="form__textarea"
+              rows="2"
+              placeholder="예: 이미 완전 나체인 채로 천천히 돌아선다"
+            ></textarea>
+          </div>
+
+          <label class="form__checkbox">
+            <input id="free-move-project" type="checkbox" />
+            몸매 투영 쇼츠 (체형 유지 탈의)
+          </label>
+          <div class="essay-actions">
+            <button id="free-move-run" class="form__submit" type="button">움직이기</button>
+          </div>
+          <p id="free-move-status" class="form__status" hidden></p>
+
+          <div id="free-video-wrap" hidden>
+            <video id="free-video" class="free-result" controls playsinline loop></video>
+            <div class="essay-actions">
+              <button id="free-video-save" class="form__submit" type="button">영상 저장</button>
+              <button id="free-still-save" class="review-panel__secondary" type="button">마지막 장 저장</button>
+            </div>
+            <label class="form__label" for="free-move-next">이어서 할 움직임</label>
+            <textarea
+              id="free-move-next"
+              class="form__textarea"
+              rows="2"
+              placeholder="예: 나체로 춤춘다"
+            ></textarea>
+            <p class="form__hint">횟수 제한 없이 잇습니다. 2번·3번·N번 모두 처음 올린 얼굴만 씁니다. 직전 얼굴을 복사하지 않습니다.</p>
+            <div class="essay-actions">
+              <button id="free-move-next-run" class="form__submit" type="button">쇼츠 잇기</button>
+            </div>
+            <p class="form__hint">18초는 같은 장수를 느리게 트는 것이라 뒷부분이 흐트러집니다. 더 길게는 24초를 권합니다.</p>
+            <label class="form__label" for="free-voice-text">대사 (들을 말)</label>
+            <textarea
+              id="free-voice-text"
+              class="form__textarea"
+              rows="2"
+              placeholder="보고 싶어. 사랑해. 진짜 진짜 사랑해. 내가 자기 좋아하는지 알지? 오늘은 자기랑 진하게 키스하고 싶어. 이따 밤에 만나서 하고 싶은 거 있어? 내가 다 해줄게. 뭐든지 말만 해봐요."
+            >보고 싶어. 사랑해. 진짜 진짜 사랑해. 내가 자기 좋아하는지 알지? 오늘은 자기랑 진하게 키스하고 싶어. 이따 밤에 만나서 하고 싶은 거 있어? 내가 다 해줄게. 뭐든지 말만 해봐요.</textarea>
+            <p class="form__hint">나는 확정-2번 목소리로 고정입니다. 남친만 녹음·파일로 넣습니다. 대사 입히기는 고른 칸으로 붙입니다.</p>
+            <div class="essay-actions">
+              <button id="free-voice-who-me" class="form__submit" type="button">나</button>
+              <button id="free-voice-who-him" class="review-panel__secondary" type="button">남친</button>
+            </div>
+            <div class="essay-actions">
+              <button id="free-voice-record" class="review-panel__secondary" type="button">이 칸에 녹음</button>
+              <label class="ai-help-btn" for="free-voice-file">이 칸에 파일</label>
+              <input id="free-voice-file" type="file" accept="audio/*" hidden />
+              <button id="free-voice-run" class="form__submit" type="button">대사 입히기</button>
+            </div>
+            <p id="free-voice-file-name" class="form__hint" hidden></p>
+            <p id="free-voice-status" class="form__status" hidden></p>
           </div>
         </div>
 
-        <label class="form__label" for="free-text">무엇을 만들까요</label>
+        <label class="form__label" for="free-text">장에 쓸 말 (쇼츠 다음에만)</label>
         <div id="free-text-drop" class="attach-drop free-text-drop">
           <div class="essay-actions">
             <label class="ai-help-btn" for="free-photo">파일 선택</label>
@@ -1854,10 +1961,9 @@
           <textarea
             id="free-text"
             class="form__textarea"
-            rows="5"
+            rows="4"
             placeholder="예: 이 사람 그대로, 검은 원피스로 갈아입히고 호텔 창가에 세워줘"
           ></textarea>
-          <p class="form__hint">글을 적거나, 그림을 이 칸에 끌어다 놓거나 복사한 뒤 Ctrl+V 로 붙이세요.</p>
         </div>
 
         <label class="form__label" for="free-size">화면 비율</label>
@@ -1875,74 +1981,32 @@
             몸매 투영 (벗기기)
           </button>
         </div>
-        <p class="form__hint">
-          「몸매 투영」은 적은 말을 쓰지 않습니다. 올린 사진의 체형을 그대로 지키며 벗깁니다.
-        </p>
+        <p class="form__hint">벗기기는 <b>몸매 투영</b>. 글을 바꿔 고치려면 <b>수정하기</b>.</p>
+        </div>
+
         <p id="free-status" class="form__status" hidden></p>
 
         <div id="free-result-wrap" class="essay-output-wrap" hidden>
           <div class="field-head">
-            <h3 class="essay-output__heading">결과</h3>
+            <h3 class="essay-output__heading">나온 장</h3>
             <button id="free-download" class="ai-help-btn" type="button">내려받기</button>
           </div>
           <img id="free-result" class="free-result" alt="만든 그림" />
-          <p class="form__hint">
-            마음에 들면 내려받으세요. 더 고치려면 고칠 말을 적고 <b>수정하기</b>를 누르세요. 방금 나온 장을 이어서 고칩니다.
-          </p>
-        </div>
-
-        <!-- 움직이기: 쇼츠 파이프라인(Wan wan-2.2-i2v-fast)은 그대로 쓰고 Desk 걸음만 뺀다. -->
-        <div id="free-move-wrap" class="essay-output-wrap" hidden>
-          <div class="field-head">
-            <h3 class="essay-output__heading">움직이기 (쇼츠)</h3>
-          </div>
-          <p id="free-move-from" class="form__hint"></p>
-          <label class="form__label" for="free-move-text">어떤 움직임</label>
-          <textarea
-            id="free-move-text"
-            class="form__textarea"
-            rows="3"
-            placeholder="예: 나체로 키스하면서 가슴 만지기"
-          ></textarea>
-          <p class="form__hint">
-            벗기는 말이 들어 있고 아직 나체 그림이 없으면, <b>나체 한 장을 먼저 만든 뒤</b> 그 프레임에서
-            움직입니다. 옷 입은 사진으로 한 번에 시키면 뒤쪽에서 옷이 되살아나기 때문입니다.
-          </p>
-
-          <label class="form__label" for="free-move-sec">길이</label>
-          <select id="free-move-sec" class="form__select">
-            <option value="10">10초 (가장 안정)</option>
-            <option value="12">12초</option>
-            <option value="15" selected>15초</option>
-            <option value="18">18초 (뒷부분 흐트러질 수 있음)</option>
-            <option value="24">24초 (12+12 이어 붙이기)</option>
-            <option value="30">30초 (15+15 이어 붙이기)</option>
-          </select>
-
-          <!-- 24/30초만 두 클립이다. 후반 움직임을 따로 받는다. -->
-          <div id="free-move-dual" hidden>
-            <label class="form__label" for="free-move-text2">후반 움직임</label>
-            <textarea
-              id="free-move-text2"
-              class="form__textarea"
-              rows="2"
-              placeholder="예: 이미 완전 나체인 채로 천천히 돌아선다"
-            ></textarea>
-          </div>
-
-          <label class="form__checkbox">
-            <input id="free-move-project" type="checkbox" />
-            몸매 투영 쇼츠 (체형 유지 탈의)
-          </label>
-
-          <div class="essay-actions">
-            <button id="free-move-run" class="form__submit" type="button">움직이기</button>
-          </div>
-          <p id="free-move-status" class="form__status" hidden></p>
-
-          <div id="free-video-wrap" hidden>
-            <video id="free-video" class="free-result" controls playsinline loop></video>
-            <p class="form__hint">18초는 같은 장수를 느리게 트는 것이라 뒷부분이 흐트러집니다. 더 길게는 24초를 권합니다.</p>
+          <div id="free-continue-pane">
+            <p id="free-continue-need" hidden></p>
+            <div id="free-continue-ready">
+              <label class="form__label" for="free-continue-text">이어서 고치기</label>
+              <textarea
+                id="free-continue-text"
+                class="form__textarea"
+                rows="3"
+                placeholder="예: 상의만 벗고, 하의는 스커트. 침대에 그대로 누워 있다"
+              ></textarea>
+              <div class="essay-actions">
+                <button id="free-continue-run" class="form__submit" type="button">이 장 잇기</button>
+              </div>
+            </div>
+            <p id="free-continue-status" class="form__status" hidden></p>
           </div>
         </div>
       </section>
@@ -1951,7 +2015,7 @@
 
   <script src="/attach-image.js?v=20260924drop"></script>
   <script src="/youtube-shorts.js?v=20260719am"></script>
-  <script src="/bgm-mixer.js?v=20260722a"></script>
+  <script src="/bgm-mixer.js?v=20261018voice1"></script>
   <script src="/essay.js?v=20260921attach"></script>
   <script src="/tale.js?v=20260921attach"></script>
   <script src="/tale-layout.js?v=20260921attach"></script>
@@ -1962,8 +2026,8 @@
   <script src="/desk-look-preflight.js?v=20261001mw61"></script>
   <script src="/desk-look-onnx.js?v=20260922clothes"></script>
   <script src="/desk-look-runtime.js?v=20260917vis"></script>
-  <script src="/app.js?v=20261005mw247"></script>
+  <script src="/app.js?v=20261018direct1"></script>
   <script src="/desk-pipeline.js?v=20261005mw245"></script>
-  <script src="/free-studio.js?v=20261017cmd2"></script>
+  <script src="/free-studio.js?v=20261023me2"></script>
 </body>
 </html>

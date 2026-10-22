@@ -182,7 +182,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   if (limited) return limited
 
   if (!(env.ANTHROPIC_API_KEY || '').trim()) {
-    return jsonResponse({ ok: false, error: 'anthropic_not_configured' }, 500)
+    return jsonResponse({ ok: false, error: 'anthropic_not_configured' }, 200)
   }
 
   let body: { imageUrl?: string; imageDataUrl?: string; multi?: boolean }

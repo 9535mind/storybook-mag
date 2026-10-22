@@ -164,7 +164,7 @@ function assembleDeskStill(sections: Array<{ key: DeskStillKey; text: string }>)
 function deskNudeBody(text: string, couple: boolean): string {
   const pubic = wantsExplicitPubicShave(text)
     ? 'bare crotch, shaved as asked. panty OFF. smooth nipples, no hair on breasts.'
-    : 'bare crotch, Korean-30s pubic curly mons only, not belly. no nipple hair. panty OFF.'
+    : 'bare crotch. Pubic curls ONLY on the mons. Belly, navel, underbust hairless. ZERO hair reaching the breasts. no nipple hair. panty OFF.'
   const who = couple ? 'CAST woman-slot only. CAST man-slot stays dressed.' : 'Same woman nude.'
   return `${who} ${buildStillWomanBustHint(text)} ${pubic} FAILED black panty, fog, hairless Barbie, single crease.`
 }
@@ -182,7 +182,9 @@ function deskSlipBody(text = ''): string {
 }
 
 function deskKeep(couple: boolean, clothesStay: boolean): string {
-  const face = couple ? 'same faces. CAST man-slot stays male.' : 'same source face, same hair.'
+  const face = couple
+    ? 'same source faces, not new faces. CAST man-slot stays male.'
+    : 'exact source face, same hair. FORBIDDEN a new face or a different model.'
   const rest = clothesStay
     ? 'same pose, crop, clothes. no zoom-in.'
     : couple
@@ -342,8 +344,8 @@ export function deskStillNegativePrompt(options: {
   const noGiant = hugeOk ? '' : ', huge breasts, balloon bust, porn-giant chest'
   if (options.nudeStill) {
     return options.couple
-      ? `two women, lesbian, gender swap, feminized man, man with breasts, standing apart, new face, missing man, bra, panty, lingerie, thong, bikini, leftover clothes, fog crotch, hairless crotch, hairy nipples, areola hair, pubic hair on belly, happy trail, zoom-in, bust close-up, chest crop, black image, mosaic, child${noGiant}`
-      : `black panty, thong, g-string, bikini, leftover clothes, bra, fog crotch, hairless crotch, hairy nipples, areola hair, pubic hair on belly, happy trail, zoom-in, bust close-up, chest crop, black image, mosaic, new face, slim model, white studio, child${noGiant}`
+      ? `two women, lesbian, gender swap, feminized man, man with breasts, standing apart, new face, missing man, bra, panty, lingerie, thong, bikini, leftover clothes, fog crotch, hairless crotch, hairy nipples, areola hair, dots under breasts, speckles on belly, moles under nipples, pubic hair on belly, pubic hair above navel, pubic hair on abdomen, pubic hair under breasts, hair from crotch to chest, happy trail, zoom-in, bust close-up, chest crop, black image, mosaic, child${noGiant}`
+      : `black panty, thong, g-string, bikini, leftover clothes, bra, fog crotch, hairless crotch, hairy nipples, areola hair, dots under breasts, speckles on belly, moles under nipples, pubic hair on belly, pubic hair above navel, pubic hair on abdomen, pubic hair under breasts, hair from crotch to chest, happy trail, zoom-in, bust close-up, chest crop, black image, mosaic, new face, different face, new model, slim model, white studio, child${noGiant}`
   }
   if (/슬립|slip|실크/i.test(t)) {
     return `bra, brassiere, bra straps, underwire, separate panty, camisole, tank top, two-piece lingerie, catalog model, new face, white studio, slim beauty, black panty, black bra, lace teddy, bodysuit, black image, fully naked, child${noGiant}`

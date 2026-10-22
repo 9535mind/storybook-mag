@@ -19,9 +19,11 @@ export function wantsPubicHairOnlyRefine(revision: string): boolean {
   return /음모|치모|체모|곱슬\s*음모|pubic\s*hair|\bbush\b/i.test(t)
 }
 
-/** 기본 음모 — 치골에만 정돈된 한국 30대. 20대보다 조금 더 있고, 넓은 역삼각은 금지. */
+/** 기본 음모 — 치골에만. 배·배꼽·가슴 아래로 올라가는 털은 실패. */
 export const KOREAN_THIRTIES_PUBIC =
-  'neat Korean-30s pubic: sparse dark-brown curls on the mons only (한국 30대, slightly fuller than a 20s). FORBIDDEN painted triangle, CGI bush, hairless blank'
+  'neat Korean-30s pubic: small dark-brown curls on the mons only, low and compact (한국 30대). Skin from under the breasts through the navel and belly stays completely hairless. FORBIDDEN hair climbing to the underbust or breasts, happy trail, belly hair, painted triangle, CGI bush, hairless blank'
+export const PUBIC_NOT_ON_BELLY =
+  'Pubic hair is only a low patch on the mons. FORBIDDEN any hair on the lower belly, navel, abdomen, or under the breasts.'
 export const KOREAN_TWENTIES_PUBIC = KOREAN_THIRTIES_PUBIC
 
 /** 「민무늬 금지」「역삼각 금지」는 제모·삼각 요청이 아니라 음모 유지. */
@@ -75,12 +77,13 @@ export function buildAdultPubicHairLock(text = ''): string {
   return [
     `MANDATORY ${KOREAN_THIRTIES_PUBIC}`,
     'hair looks like real soft coils in a neat 30s patch — a bit fuller than early-20s, still contained — NOT grainy stipple, NOT sandpaper, NOT a painted ink blob',
-    'SHAPE: low on the mons, neatly contained — typical Korean woman in her thirties',
-    'SOFT-FULL volume: more settled than a 20s wisp, not a dense black bush, not hairless, not a harsh horizontal band',
+    'SHAPE: low on the mons only, neatly contained — typical Korean woman in her thirties',
+    PUBIC_NOT_ON_BELLY,
+    'SOFT-FULL volume: more settled than a 20s wisp, not a dense black bush, not hairless, not a tall column up the stomach',
     'vulva anatomy realistic for an adult woman: soft natural labia, gentle cleft — NOT clamped tightly shut, NOT oversized sealed Barbie seam, NOT cartoon slit',
     'CRITICAL SAFETY: FORBIDDEN hairless/smooth blank crotch that reads as non-adult',
     'FORBIDDEN: fabric underwear, thong, briefs, lace bottoms covering the crotch — bare skin + natural hair only',
-    'not a male happy trail to the navel',
+    'not a male happy trail, and not hair running from the mons up to the navel or the breasts',
   ].join('. ')
 }
 
@@ -94,15 +97,15 @@ export function buildWanPubicLine(text = ''): string {
     return 'Pubic: smooth shaved as requested. ZERO panties/fog.'
   }
   if (/넓은\s*음모|사타구니\s*까지|허벅지\s*(?:안|쪽)|wide\s*(?:bush|pubic)/i.test(t)) {
-    return 'Pubic: fuller dark curly bush on mons (slightly wider as requested). ZERO panties/fog.'
+    return 'Pubic: fuller dark curls on the mons only (wider as asked). Still ZERO hair on belly or under the breasts. ZERO panties/fog.'
   }
   if (/얇은\s*음모|희미한\s*음모|sparse|thin\s*(?:bush|pubic)/i.test(t)) {
-    return 'Pubic: thin sparse dark curls on mons only. ZERO panties/fog.'
+    return 'Pubic: thin sparse dark curls on the mons only. Belly and underbust hairless. ZERO panties/fog.'
   }
   if (/역삼각|삼각형\s*음모|landing\s*strip|brazilian/i.test(t)) {
-    return 'Pubic: neat triangular dark curls centered on mons. ZERO panties/fog.'
+    return 'Pubic: neat triangular dark curls centered on the mons only. ZERO hair climbing to the breasts. ZERO panties/fog.'
   }
-  return `Pubic: ${KOREAN_THIRTIES_PUBIC}. ZERO panties.`
+  return 'Pubic: small dark curls on the mons only. Belly, navel, and underbust hairless. ZERO hair up to the breasts. ZERO panties.'
 }
 
 /** 정지 이미지(Flux/inpaint)용 한 줄 — 민무늬 기본값이 소아로 오인되는 사고 방지. 쇼츠 Wan 경로는 쓰지 않음. */
@@ -211,7 +214,7 @@ export function buildRealisticPubicHairRefinePrompt(revision: string): string {
     ].join(' ')
   }
   return [
-    'Local edit of the masked pubic area only.',
+    'Local edit of the masked pubic area only. Hair stays a low patch on the mons. The navel and the belly above the mons stay bare. FORBIDDEN hair climbing to the navel.',
     `Photorealistic refine: ${KOREAN_THIRTIES_PUBIC}. Replace grainy/stubble faux-hair with real soft coils.`,
     'Relax an overly clamped/sealed vulva seam into a soft natural adult labial contour — modest and realistic, not exaggerated.',
     buildAdultPubicHairLock(t),

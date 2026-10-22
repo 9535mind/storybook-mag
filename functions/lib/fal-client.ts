@@ -89,6 +89,158 @@ type FalVideoResultResponse = {
 
 /** ffmpeg 병합 — 쇼츠 두 클립 이어 붙이기 */
 export const FAL_VIDEO_MERGE_TIMEOUT_MS = 90_000
+const FAL_TTS_TIMEOUT_MS = 28_000
+
+type FalAudioResultResponse = {
+  audio?: { url?: string }
+  audio_url?: string | { url?: string }
+  custom_voice_id?: string
+  detail?: string | Array<{ msg?: string }>
+  error?: string
+}
+
+async function runFalQueueAudio(
+  falKey: string,
+  falModel: string,
+  body: Record<string, unknown>,
+  timeoutMs: number = FAL_TTS_TIMEOUT_MS,
+): Promise<{ audioUrl: string }> {
+  const startedAt = Date.now()
+  const endpoint = `https://queue.fal.run/${falModel}`
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+    Math.min(timeoutMs, 20_000),
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse
+  if (!submitResponse.ok) throw new Error(extractErrorMessage(submitPayload))
+  let resultPayload: FalAudioResultResponse
+  if (submitPayload.status_url && submitPayload.response_url) {
+    resultPayload = await pollFalResult<FalAudioResultResponse>(
+      falKey,
+      submitPayload.status_url,
+      submitPayload.response_url,
+      startedAt,
+      timeoutMs,
+    )
+  } else {
+    resultPayload = submitPayload as FalAudioResultResponse
+  }
+  const audioUrl =
+    resultPayload.audio?.url?.trim() ||
+    (typeof resultPayload.audio_url === 'string'
+      ? resultPayload.audio_url.trim()
+      : resultPayload.audio_url?.url?.trim()) ||
+    ''
+  if (!audioUrl) throw new Error(extractErrorMessage(resultPayload) || 'missing_audio_url')
+  return { audioUrl }
+}
+
+/** 한국어 대사 TTS. 영상 엔진(Wan)은 건드리지 않는다. */
+export async function synthesizeFalSpeech(options: {
+  falKey: string
+  text: string
+  voiceId?: string
+}): Promise<{ audioUrl: string; voiceId: string }> {
+  const text = String(options.text || '').trim()
+  if (!text) throw new Error('speech_text_required')
+  const voiceId = String(options.voiceId || '').trim() || 'Wise_Woman'
+  const body = {
+    text,
+    voice_setting: { voice_id: voiceId, speed: 1, vol: 1, pitch: 0 },
+    language_boost: 'Korean',
+  }
+  try {
+    const out = await runFalQueueAudio(options.falKey, 'fal-ai/minimax/preview/speech-2.6-turbo', body)
+    return { ...out, voiceId }
+  } catch {
+    const out = await runFalQueueAudio(options.falKey, 'fal-ai/minimax/speech-02-hd', body)
+    return { ...out, voiceId }
+  }
+}
+
+/** 올린 목소리 샘플을 기준으로 대사를 읽는다. MiniMax 기계음보다 원본 톤에 가깝다. */
+export async function synthesizeFalSpeechFromSample(options: {
+  falKey: string
+  text: string
+  audioDataUrl: string
+}): Promise<{ audioUrl: string; voiceId?: string }> {
+  const text = String(options.text || '').trim()
+  if (!text) throw new Error('speech_text_required')
+  const refUrl = await uploadDataUrlToFal(options.falKey, options.audioDataUrl, 'voice-ref.wav', {
+    maxBytes: 10_000_000,
+    tooLargeError: 'voice_sample_too_large',
+  })
+  try {
+    return await runFalQueueAudio(options.falKey, 'fal-ai/f5-tts', {
+      gen_text: text,
+      ref_audio_url: refUrl,
+      model_type: 'F5-TTS',
+      remove_silence: true,
+    })
+  } catch {
+    /* F5가 거절하면 다음 엔진 */
+  }
+  try {
+    return await runFalQueueAudio(options.falKey, 'fal-ai/chatterbox/text-to-speech', {
+      text,
+      audio_url: refUrl,
+      exaggeration: 0.2,
+      temperature: 0.5,
+      cfg: 0.4,
+    })
+  } catch {
+    /* Chatterbox 실패 시 MiniMax */
+  }
+  const endpoint = 'https://queue.fal.run/fal-ai/minimax/voice-clone'
+  const startedAt = Date.now()
+  const submitResponse = await fetchWithTimeout(
+    endpoint,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Key ${options.falKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        audio_url: refUrl,
+        text,
+        model: 'speech-02-hd',
+        noise_reduction: true,
+        need_volume_normalization: true,
+      }),
+    },
+    20_000,
+  )
+  const submitPayload = (await submitResponse.json().catch(() => ({}))) as FalQueueSubmitResponse
+  if (!submitResponse.ok) throw new Error(extractErrorMessage(submitPayload))
+  const resultPayload = submitPayload.status_url && submitPayload.response_url
+    ? await pollFalResult<FalAudioResultResponse>(
+        options.falKey,
+        submitPayload.status_url,
+        submitPayload.response_url,
+        startedAt,
+        FAL_TTS_TIMEOUT_MS,
+      )
+    : (submitPayload as FalAudioResultResponse)
+  const previewUrl =
+    resultPayload.audio?.url?.trim() ||
+    (typeof resultPayload.audio_url === 'string'
+      ? resultPayload.audio_url.trim()
+      : resultPayload.audio_url?.url?.trim()) ||
+    ''
+  const voiceId = String(resultPayload.custom_voice_id || '').trim()
+  if (previewUrl) return { audioUrl: previewUrl, voiceId: voiceId || undefined }
+  if (!voiceId) throw new Error(extractErrorMessage(resultPayload) || 'voice_clone_failed')
+  return synthesizeFalSpeech({ falKey: options.falKey, text, voiceId })
+}
 
 function extractErrorMessage(payload: {
   error?: string

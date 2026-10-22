@@ -9,7 +9,7 @@ const TOUCH_RE =
   /만지|만져|만진|만졌|주무르|주물러|애무|쓰다듬|knead|squeez|fondl|caress|stroke|touch/i
 
 const SELF_BEAT =
-  'BOTH her own hands knead and squeeze her own bare breasts — nipples stay visible between fingers. FORBIDDEN a partner, modest covering, palms hiding nipples, or standing idle.'
+  'BOTH her own hands knead and squeeze her own bare breasts — nipples stay visible between fingers. Same source crop. FORBIDDEN zoom-in. FORBIDDEN a partner, modest covering, palms hiding nipples, or standing idle.'
 
 const SELF_LAST =
   'LAST FRAME: still fully nude, BOTH her own hands still kneading her bare breasts. Do NOT return to the opening still pose. Do NOT put clothes back on.'

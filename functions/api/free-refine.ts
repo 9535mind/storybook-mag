@@ -55,6 +55,7 @@ import {
   buildFacePreserveBodyMaskDataUrl,
   buildNeckJewelryMaskDataUrl,
   buildPubicRegionMaskDataUrl,
+  buildTorsoSkinMaskDataUrl,
   buildWristAndNeckJewelryMaskDataUrl,
   buildWristJewelryMaskDataUrl,
 } from '../lib/face-preserve-mask'
@@ -121,6 +122,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     regionCount?: number
     /** 2면 커플. 솔로 얼굴마스크 탈의를 쓰지 않는다. */
     sourcePeople?: number
+    /** 자유 스튜디오 이어 만들기. 전신 탈의를 다시 돌리지 않는다. */
+    continueLast?: boolean
+    /** 이미 나체인 장. 옷을 다시 입히지 않는다. */
+    stayNude?: boolean
+    /** 얼굴 하단(0~1). 앉은 사진은 0.42면 턱이 마스크 밖으로 새 여자가 된다. */
+    faceKeepRatio?: number
   }
   try {
     body = await request.json()
@@ -131,6 +138,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   const bodyProjectFlag = body.bodyProject === true
   const sourcePeople = body.sourcePeople === 2 ? 2 : 1
   const coupleShot = sourcePeople === 2
+  const faceKeepRatioRaw = Number(body.faceKeepRatio)
+  const faceKeepRatio = Number.isFinite(faceKeepRatioRaw)
+    ? Math.min(0.72, Math.max(0.22, faceKeepRatioRaw))
+    : 0
   const mode = body.mode === 'region' ? 'region' : 'text'
   // 화보 모드는 아래의 화보 전용 img2img/재생성 경로를 타야 하므로, genMode='fashion'이면
   // 자유 장면 재생성 블록을 건너뛰게 한다(예전엔 여기서 무조건 'free'로 강제해서, 화보
@@ -151,11 +162,29 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // 「같은 얼굴 유지」「한 명만」은 프롬프트 조립(buildIroncladIdentityLock 등)이 기본 적용 —
   // 사용자 입력에서 제거해 변경 지시만 남긴다.
   // 몸매 투영 버튼은 고정 revision — 매직 문구(나체가 된다.) 불필요.
-  const revision = coupleShot
+  const continueLast = body.continueLast === true
+  const stayNude = body.stayNude === true
+  const continueLock = continueLast
+    ? [
+        stayNude
+          ? 'ALREADY NUDE. Stay fully nude. FORBIDDEN clothes, bra, panties, or reverting to the clothed photo.'
+          : 'Same person and same crop. Apply only the user change.',
+        'FACE: keep the original face. FORBIDDEN a new model, a fuller face, an older face.',
+        stayNude
+          ? 'SKIN: erase dark dots, moles, and speckles on the breasts, under the nipples, and the belly. PUBIC: short compact dark curls on the mons only, well below the navel.'
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+    : ''
+  const userRevision = coupleShot
     ? (body.revision || '').trim() || COUPLE_NUDE_STILL_REVISION
     : bodyProjectFlag
       ? BODY_PROJECT_REVISION
       : stripDefaultContinuityEchoes(body.revision ?? '')
+  const revision = continueLast
+    ? `${continueLock} ${userRevision}`.trim().slice(0, 800)
+    : userRevision
   const attempts: Array<{ engine: string; error: string }> = []
 
   const urlErr = mediaUrlError(imageUrl)
@@ -188,20 +217,159 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // 있으니, 번역 전 원문 한국어 텍스트로 먼저 판별해서 아래 img2img 경로 전체에 재사용한다.
   const animalSubject = describesAnimalSubject(`${baseDescription} ${revision}`)
 
+  const inpaintSize = () => ({
+    width: size === 'portrait' || size === 'story' ? 768 : 1024,
+    height: size === 'story' ? 1344 : size === 'portrait' ? 1024 : 768,
+  })
+
+  /** 배꼽에서 내려오는 음모 줄을 지운다. 새 털을 그리지 않는다. */
+  const eraseBellyTrail = async (srcUrl: string) => {
+    const { imageUrl: cleared } = await refineFalInpaint({
+      falKey: env.FAL_KEY as string,
+      imageUrl: srcUrl,
+      maskUrl: buildPubicRegionMaskDataUrl({
+        ...inpaintSize(),
+        yStartRatio: 0.48,
+        yEndRatio: 0.88,
+        xStartRatio: 0.26,
+        xEndRatio: 0.74,
+      }),
+      prompt:
+        'ERASE every hair on the belly and below the navel. Smooth bare skin. One clean navel. FORBIDDEN happy trail, midline hair, pubic hair climbing toward the navel. Do not paint any new hair. Do not change the face or the breasts.',
+      negativePrompt:
+        'hair, happy trail, pubic hair, midline hair, stubble, trail to navel, different face',
+      strength: 0.88,
+    })
+    return cleared
+  }
+
+  /** 가슴·배의 점·털을 지운다. 얼굴·치골은 마스크 밖. */
+  const cleanBelly = async (srcUrl: string) => {
+    const dims = inpaintSize()
+    let { imageUrl: torso } = await refineFalInpaint({
+      falKey: env.FAL_KEY as string,
+      imageUrl: srcUrl,
+      maskUrl: buildTorsoSkinMaskDataUrl(dims),
+      prompt:
+        'Smooth bare skin on the breasts, under the nipples, the belly, and around the navel. Erase every mole, dark dot, speckle, freckle, and hair in this area. Keep the same breast shape and plain nipples with no hair. One normal navel only — no second hole or dark mark below it. Do not change the face, hair, or the crotch.',
+      negativePrompt:
+        'dots, speckles, moles, stipple, dirt spots, freckle field, hair, happy trail, pubic hair, second navel, different face',
+      strength: 0.8,
+    })
+    try {
+      const { imageUrl: navel } = await refineFalInpaint({
+        falKey: env.FAL_KEY as string,
+        imageUrl: torso,
+        maskUrl: buildPubicRegionMaskDataUrl({
+          ...dims,
+          yStartRatio: 0.46,
+          yEndRatio: 0.84,
+          xStartRatio: 0.26,
+          xEndRatio: 0.74,
+        }),
+        prompt:
+          'Smooth belly skin. One clean navel. Erase every mole, dark dot, second hole, crease, and hair around and below the navel. Bare skin only. Do not paint pubic hair. Do not change the face.',
+        negativePrompt:
+          'mole, dark dot, second navel, extra hole, hair, happy trail, pubic hair, dirt spot, different face',
+        strength: 0.82,
+      })
+      torso = navel
+    } catch {
+      /* 배꼽 띠가 실패해도 가슴 정리는 이어 간다 */
+    }
+    try {
+      const { imageUrl: breasts } = await refineFalInpaint({
+        falKey: env.FAL_KEY as string,
+        imageUrl: torso,
+        maskUrl: buildBreastDetailMaskDataUrl(dims),
+        prompt:
+          'Keep the same breasts and nipples. Erase every mole, dark dot, speckle, and hair on the breast skin and under the nipples. Smooth even skin. No nipple hair. Do not change the face.',
+        negativePrompt: 'dots, speckles, moles, nipple hair, different face, different breasts',
+        strength: 0.72,
+      })
+      return breasts
+    } catch {
+      return torso
+    }
+  }
+
+  /** 전신 탈의 직후 치골만 — 배꼽보다 아래. 마스크 위쪽(배)은 맨살. */
+  const finishPubicHair = async (
+    srcUrl: string,
+    span?: boolean | { rightHalfOnly?: boolean; xStartRatio?: number; xEndRatio?: number },
+  ) => {
+    const extra = span === true ? { rightHalfOnly: true } : span || {}
+    const pubicPrompt = [
+      'Hair ONLY as a low compact patch on the mons, at the bottom of the mask. The navel and the whole belly stay bare skin. FORBIDDEN a trail of hair up to the navel.',
+      buildRealisticPubicHairRefinePrompt(
+        'neat Korean-30s curly mons, slightly fuller than 20s, visible coils, not a thin line, not a triangle',
+      ),
+      'Paint a real adult vulva now: soft outer labia, a natural vertical cleft, modest inner-labia hint.',
+      'Paint a dark-brown CURLY mons patch with separate coils. FAILED hairless Barbie mound, single pencil crease, smooth blank crotch, hair on the belly.',
+    ].join(' ')
+    const { imageUrl: finished } = await refineFalInpaint({
+      falKey: env.FAL_KEY as string,
+      imageUrl: srcUrl,
+      maskUrl: buildPubicRegionMaskDataUrl({
+        ...inpaintSize(),
+        ...extra,
+        yStartRatio: 0.82,
+        yEndRatio: 0.92,
+        xStartRatio: extra.rightHalfOnly ? 0.5 : 0.32,
+        xEndRatio: extra.rightHalfOnly ? 1 : 0.68,
+      }),
+      prompt: pubicPrompt,
+      negativePrompt:
+        'thin midline hair, landing strip, ink-blob triangle, shaved, hairless doll, barbie mound, single crease, jet black ink blob, male happy trail, hair on belly, hair on navel, hair up to navel, pubic hair on abdomen, panties, clothes, different face, grainy stubble',
+      strength: 0.82,
+    })
+    return finished
+  }
+
+  const polishSkinDots = async (srcUrl: string) => {
+    if (!env.FAL_KEY?.trim()) return srcUrl
+    let next = srcUrl
+    try {
+      next = await cleanBelly(next)
+    } catch (error) {
+      attempts.push({
+        engine: 'fal-belly-clean',
+        error: error instanceof Error ? error.message : 'failed',
+      })
+    }
+    try {
+      next = await eraseBellyTrail(next)
+    } catch (error) {
+      attempts.push({
+        engine: 'fal-belly-trail',
+        error: error instanceof Error ? error.message : 'failed',
+      })
+    }
+    return next
+  }
+
   // ═══════════════════════════════════════════════════════════
   // 지시형 수정: Flux Kontext (쇼츠 Wan≠이미지편집 — 편집 전용 엔진)
   // 마스크 추측 inpaint보다 "문장으로 고쳐줘"에 맞음. 실패 시 아래 기존 경로.
   // ═══════════════════════════════════════════════════════════
   // 무릎·전신 확장은 진짜 아웃페인트가 맞음 — Kontext가 장면을 새로 그리면 얼굴이 바뀜
-  const skipKontextForFraming = isFramingExtendRevision(revision)
-  // 커플은 전신 Kontext 금지. 서양인 스톡으로 얼굴이 바뀐다. 여자 옷만 inpaint.
+  // 이어 만들기 잠금에 navel/배꼽이 들어 있어도 아웃페인트로 보내지 않는다.
+  // 나체 유지 잠금이 wantsFullNude를 켜서 Kontext를 건너뛰던 것도 막는다.
+  const framingSource = continueLast ? userRevision : revision
+  const skipKontextForFraming = isFramingExtendRevision(framingSource)
+  const continueClothesEdit =
+    continueLast &&
+    (wantsNudeOrUndress(userRevision) || isClothingChangeRevision(userRevision))
+  // 8월 27일(7b98822): 커플이어도 적은 말을 Kontext에 그대로 보낸다.
+  // 나중에 넣은 "커플 금지"는 앉기·키스 같은 명령을 거절하게 만들었다.
+  // 상의 벗김·스커트 교체는 Kontext 필터가 검은 장을 내므로 얼굴잠금 inpaint로 보낸다.
   if (
     mode === 'text' &&
-    !coupleShot &&
     env.FAL_KEY?.trim() &&
     !skipKontextForFraming &&
-    !wantsFullNude(revision, baseDescription) &&
-    !wantsNudeOrUndress(revision)
+    !continueClothesEdit &&
+    (continueLast ||
+      (!wantsFullNude(revision, baseDescription) && !wantsNudeOrUndress(revision)))
   ) {
     const { text: revisionForKontext } = await translateDescriptionForImagePrompt(revision, env)
     const fuseSeamPolish =
@@ -209,10 +377,14 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         revision,
       )
     const kontextPrompt = [
+      'CAMERA FIRST: keep the EXACT same crop, distance, and framing as the input photo. Head stays in frame. FORBIDDEN zoom-in, bust close-up, chest-only crop, cutting the head.',
       'Edit this existing photo. Apply ONLY this change:',
       revisionForKontext || revision,
-      'Keep the same person identity, face, body proportions, and camera framing unless the edit requires expanding the crop.',
-      'Do not invent a different person. Photorealistic result.',
+      'FACE: keep the exact same face as the input photo — same jaw, same cheeks, same age, same slimness. FORBIDDEN a fuller face, an older face, a different woman, a new model.',
+      'Keep the same person identity and body proportions. Same camera. Do not invent a different person. Photorealistic result.',
+      stayNude || /점|주근깨|mole|dot/i.test(revision)
+        ? 'SKIN: erase moles, dark dots, and speckles on the breasts, under the nipples, and the belly. Smooth skin. Do not change the face.'
+        : '',
       fuseSeamPolish
         ? 'CRITICAL QUALITY: preserve the input photo sharpness and resolution. Do NOT re-render the whole image soft/muddy/low-res. Only local seam/neck/edge fixes. Keep fabric weave and facial micro-detail.'
         : '',
@@ -226,10 +398,24 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         prompt: kontextPrompt,
         tier: 'pro',
       })
+      let polished = nextUrl
+      if (stayNude || /점|주근깨|mole|dot/i.test(userRevision)) {
+        polished = await polishSkinDots(polished)
+      }
+      if (continueLast && stayNude && !wantsExplicitPubicShave(userRevision)) {
+        try {
+          polished = await finishPubicHair(polished)
+        } catch (error) {
+          attempts.push({
+            engine: 'fal-pubic-finish',
+            error: error instanceof Error ? error.message : 'failed',
+          })
+        }
+      }
       return jsonResponse(
         {
           ok: true,
-          imageUrl: nextUrl,
+          imageUrl: polished,
           prompt: kontextPrompt,
           mode,
           genMode,
@@ -442,7 +628,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // 무관한 순수 프레이밍·구도 변경만 이 분기(T2I 재생성)를 탄다.
   const clothingChangeRevision = isClothingChangeRevision(`${baseDescription} ${revision}`)
   // 「허리/무릎/발목까지」류는 T2I·일반 img2img 금지 — 진짜 아웃페인트로 아래로 확장(얼굴 유지)
-  const framingExtendRevision = mode === 'text' && isFramingExtendRevision(revision)
+  const framingExtendRevision = mode === 'text' && isFramingExtendRevision(framingSource)
   if (framingExtendRevision && env.FAL_KEY?.trim()) {
     try {
       const expand = resolveFramingExpandPixels(revision)
@@ -811,35 +997,86 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   // ── 화보 모드: 탈의/나체
   // 몸매 투영은 Flux inpaint 1순위 금지 — 착의+웃음만 바꾸고 성공으로 끝나는
   // 회귀가 있었음 → Replicate 정밀 img2img를 먼저, Flux는 폴백.
+  if (continueClothesEdit && env.FAL_KEY?.trim()) {
+    try {
+      const maskDataUrl = buildFacePreserveBodyMaskDataUrl({
+        width: size === 'portrait' || size === 'story' ? 768 : 1024,
+        height: size === 'story' ? 1344 : size === 'portrait' ? 1024 : 768,
+        faceKeepRatio: size === 'landscape' ? 0.4 : 0.42,
+      })
+      const { text: clothesEn } = await translateDescriptionForImagePrompt(userRevision, env)
+      const clothesPrompt = [
+        'CAMERA: exact same crop. Head stays in frame. FORBIDDEN zoom-in.',
+        'Local edit ONLY the masked white body. Keep the unmasked face pixels exact — same face, same hair, same age.',
+        'Stay in the same pose and the same bed or room.',
+        clothesEn || userRevision,
+        'If the top comes off, keep a skirt on the lower body. She is not fully nude unless the user asked for full nude.',
+        'FORBIDDEN new face, older face, fuller face, bathroom, black image, catalog model.',
+        'Photorealistic.',
+      ].join(' ')
+      const { imageUrl: nextUrl } = await refineFalInpaint({
+        falKey: env.FAL_KEY as string,
+        imageUrl,
+        maskUrl: maskDataUrl,
+        prompt: clothesPrompt,
+        negativePrompt:
+          'different face, new person, older face, fuller face, bathroom, black image, catalog model, zoom-in',
+        strength: 0.82,
+      })
+      return jsonResponse(
+        {
+          ok: true,
+          imageUrl: nextUrl,
+          prompt: clothesPrompt,
+          mode,
+          genMode,
+          engine: 'fal',
+          engineLabel: 'fal.ai · 이어서 옷만 (얼굴 잠금)',
+          autoFacePreserveMask: true,
+          message: '얼굴은 두고 옷만 고쳤습니다.',
+          attempts: attempts.length ? attempts : undefined,
+        },
+        200,
+      )
+    } catch (error) {
+      attempts.push({
+        engine: 'fal-continue-clothes',
+        error: error instanceof Error ? error.message : 'failed',
+      })
+    }
+  }
+
   const autoUndressInpaint =
     mode === 'text' &&
     genMode === 'fashion' &&
     !animalSubject &&
     !coupleShot &&
+    !continueLast &&
     wantsFullNude(revision, baseDescription)
 
   const runFacePreserveUndress = async () => {
     const maskDataUrl = buildFacePreserveBodyMaskDataUrl({
       width: size === 'portrait' || size === 'story' ? 768 : 1024,
       height: size === 'story' ? 1344 : size === 'portrait' ? 1024 : 768,
-      // 사무실 상반신은 얼굴이 위 40%에 있다. 33%면 안경·이마가 마스크 밖으로 새 사람이 된다.
-      faceKeepRatio: size === 'landscape' ? 0.4 : 0.42,
+      // 앉은 사진·셀카는 얼굴이 가운데 있다. 0.42면 턱이 녹아 새 여자가 된다.
+      faceKeepRatio: faceKeepRatio || (size === 'landscape' ? 0.4 : 0.42),
     })
     const inpaintPrompt = nudeBecomesHit
       ? [
+          'CAMERA: exact same crop as the source. Head stays in frame. FORBIDDEN zoom-in, bust close-up.',
           'Local edit: ONLY the masked white body. Melt ALL clothes off this same woman.',
-          'Keep the unmasked face pixels exact — same glasses, same hair, same age, same expression.',
-          'Same room, same camera crop. FORBIDDEN new face, wavy salon hair, bathroom tiles, catalog model, smile-only.',
-          'Bare breasts with nipples. Bare adult vulva: soft labia, natural cleft — not a hairless Barbie mound, not a single crease.',
-          'Mons: neat Korean-30s dark-brown CURLY patch, slightly fuller than 20s, visible separate coils — not a thin center line, not shaved-blank, not an ink triangle.',
+          'Keep the unmasked face pixels exact — same jaw, same age, same expression. Do not add glasses. Do not invent a new face.',
+          'Same room, same camera crop. FORBIDDEN new face, glasses that were not on the face, wavy salon hair, bathroom tiles, catalog model, smile-only.',
+          'Bare breasts with plain nipples. Smooth skin on the breasts, under the nipples, the belly, and the navel.',
+          'FORBIDDEN moles, dark dots, speckles, or any hair on the breasts, belly, or around the navel. FORBIDDEN happy trail. The belly stays completely bare.',
           'Photorealistic.',
         ].join(' ')
       : [
+          'CAMERA: exact same crop as the source. Head stays in frame. FORBIDDEN zoom-in, bust close-up.',
           'Local edit: ONLY change the masked white body area.',
           'FULL NUDE: remove ALL clothes from torso AND hips — blouse, bra, robe, sweater, pants, skirt, panties, thong, briefs.',
           'Bare adult breasts with visible nipples AND bare crotch — no underwear fabric left on.',
-          'Bare adult vulva: soft labia, natural cleft. FAILED hairless Barbie mound, single crease.',
-          'Mons: neat Korean-30s dark-brown CURLY patch, slightly fuller than 20s, visible coils. FAILED thin center line, shaved blank, ink triangle.',
+          'Smooth skin on the breasts, under the nipples, the belly, and the navel. FORBIDDEN moles, dark dots, speckles, or any hair on the breasts, belly, or navel. FORBIDDEN happy trail.',
           'Keep the unmasked face pixels exactly. Same woman, same glasses, same hair. Keep any other person outside the mask.',
           'FORBIDDEN new face, zoom, bathroom. Photorealistic.',
           revisionForPrompt ? `User request: ${revisionForPrompt}.` : '',
@@ -852,69 +1089,23 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       maskUrl: maskDataUrl,
       prompt: inpaintPrompt,
       negativePrompt:
-        'different face, new person, no glasses, wavy hair, salon model, bathroom tiles, clothes, robe, sweater, bra, panties, thong, briefs, underwear, bikini bottom, censored, mosaic, shaved, hairless doll, thin midline hair, landing strip, ink-blob triangle',
+        'different face, new person, no glasses, wavy hair, salon model, bathroom tiles, clothes, robe, sweater, bra, panties, thong, briefs, underwear, bikini bottom, censored, mosaic, shaved, hairless doll, thin midline hair, landing strip, ink-blob triangle, dots under breasts, speckles on belly, moles under nipples, stippled abdomen, hair above navel, happy trail, pubic hair on stomach',
       strength: 0.88,
     })
     return { nextUrl, inpaintPrompt }
   }
 
-  const inpaintSize = () => ({
-    width: size === 'portrait' || size === 'story' ? 768 : 1024,
-    height: size === 'story' ? 1344 : size === 'portrait' ? 1024 : 768,
-  })
-
-  /** 전신 탈의 직후 치골만 — '작은 단정 패치'가 가운데 선·잉크 삼각으로 남는 실측. */
-  const finishPubicHair = async (
-    srcUrl: string,
-    span?: boolean | { rightHalfOnly?: boolean; xStartRatio?: number; xEndRatio?: number },
-  ) => {
-    const extra = span === true ? { rightHalfOnly: true } : span || {}
-    const pubicPrompt = [
-      buildRealisticPubicHairRefinePrompt(
-        'neat Korean-30s curly mons, slightly fuller than 20s, visible coils, not a thin line, not a triangle',
-      ),
-      'Paint a real adult vulva now: soft outer labia, a natural vertical cleft, modest inner-labia hint.',
-      'Paint a dark-brown CURLY mons patch with separate coils. FAILED hairless Barbie mound, single pencil crease, smooth blank crotch.',
-    ].join(' ')
-    const { imageUrl: finished } = await refineFalInpaint({
-      falKey: env.FAL_KEY as string,
-      imageUrl: srcUrl,
-      maskUrl: buildPubicRegionMaskDataUrl({
-        ...inpaintSize(),
-        ...extra,
-        yStartRatio: 0.58,
-        yEndRatio: 0.9,
-      }),
-      prompt: pubicPrompt,
-      negativePrompt:
-        'thin midline hair, landing strip, ink-blob triangle, shaved, hairless doll, barbie mound, single crease, jet black ink blob, male happy trail, panties, clothes, different face, grainy stubble',
-      strength: 0.82,
-    })
-    return finished
-  }
-
-  // 커플 텍스트 경로는 사각형 마스크로 얼굴을 망친다. 옷 칸 마스크(region)만 허용.
-  if (coupleShot && mode === 'text') {
-    return jsonResponse(
-      {
-        ok: false,
-        error: 'refine_failed',
-        message: '커플은 여자 옷 칸을 연 뒤에만 녹입니다. 원본은 그대로 둡니다.',
-        attempts,
-      },
-      400,
-    )
-  }
+  // 8월 27일에는 커플 글 수정도 여기서 이어졌다. 거절하지 않는다.
 
   // 자유 스튜디오: 전신 img2img가 얼굴을 화보 모델로 갈아엎는다. 얼굴은 마스크로 잠그고 목 아래만 녹인다.
   if (autoUndressInpaint && env.FAL_KEY?.trim()) {
     try {
       const { nextUrl, inpaintPrompt } = await runFacePreserveUndress()
-      let imageUrlOut = nextUrl
+      let imageUrlOut = await polishSkinDots(nextUrl)
       let pubicFinished = false
-      if (!wantsExplicitPubicShave(revision)) {
+      if (!wantsExplicitPubicShave(revision) && (faceKeepRatio || 0) < 0.45) {
         try {
-          imageUrlOut = await finishPubicHair(nextUrl)
+          imageUrlOut = await finishPubicHair(imageUrlOut)
           pubicFinished = true
         } catch (error) {
           attempts.push({
@@ -1260,10 +1451,12 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
         guidanceScale: usePrecisionForRun ? 8 : undefined,
         disableSafetyChecker: true,
       })
+      const polished =
+        nudeBecomesHit || fullNudeOutcome ? await polishSkinDots(nextUrl) : nextUrl
       return jsonResponse(
         {
           ok: true,
-          imageUrl: nextUrl,
+          imageUrl: polished,
           prompt: nudePrompt,
           mode,
           genMode,

@@ -324,5 +324,37 @@ console.log('CAST lock — 미검증 mw 금지, 여여 금지')
   console.log(`${bad.length ? 'FAIL' : 'ok  '} cast/verified-mw${bad.length ? '  missing=' + bad.join(',') : ''}`)
 }
 
+{
+  const { readFileSync } = await import('node:fs')
+  const html = readFileSync(path.join(ROOT, 'public/index.html'), 'utf8')
+  const app = readFileSync(path.join(ROOT, 'public/app.js'), 'utf8')
+  const ids = [
+    'free-photo',
+    'free-text',
+    'free-run',
+    'free-revise',
+    'free-project',
+    'free-size',
+    'free-move-text',
+    'free-move-sec',
+    'free-move-text2',
+    'free-move-project',
+    'free-move-run',
+    'free-continue-run',
+  ]
+  const missing = ids.filter((id) => !html.includes(`id="${id}"`))
+  const checks = [
+    ['nav', /data-desk-view="shorts-make"/.test(html) && html.includes('쇼츠 만들기')],
+    ['host', /function syncFreeStudioHost/.test(app) && /function getDeskView/.test(app)],
+    ['ids', missing.length === 0],
+    ['lengths', /value="10"/.test(html) && /value="24"/.test(html) && /value="30"/.test(html)],
+    ['routes', /\/api\/free-refine/.test(readFileSync(path.join(ROOT, 'public/free-studio.js'), 'utf8'))],
+  ]
+  const bad = checks.filter(([, ok]) => !ok).map(([k]) => k)
+  if (missing.length) bad.push(...missing.map((id) => `id-${id}`))
+  if (bad.length) failed += 1
+  console.log(`${bad.length ? 'FAIL' : 'ok  '} admin/shorts-make${bad.length ? '  missing=' + bad.join(',') : ''}`)
+}
+
 console.log(failed ? `\n${failed} wire(s) broken` : '\nall wires connected')
 process.exit(failed ? 1 : 0)

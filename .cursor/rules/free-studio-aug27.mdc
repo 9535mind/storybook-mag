@@ -30,3 +30,5 @@ Desk 는 불안해도 방향이 유의미하니 **그대로 둔다**. 둘을 섞
 - 검사·게이트를 자유 스튜디오에 넣기 — 여기는 거부 없이 나오는 칸이다
 
 회귀: `node scripts/aug27-free-wire-check.mjs`, `node scripts/free-studio-smoke.mjs`
+
+2026-10-18 쇼츠 나오는 길(중간 장 없이, 요구 등분, 최초 얼굴, 잇기, 한 장면)은 `free-shorts-20261018.mdc`.

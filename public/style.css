@@ -377,6 +377,36 @@ body {
 }
 
 /* 자유 스튜디오 */
+#free-subtabs[hidden],
+#free-make-pane[hidden],
+#free-continue-pane[hidden],
+#free-continue-need[hidden],
+#free-continue-ready[hidden],
+#free-continue-preview[hidden],
+#free-result-wrap[hidden],
+#free-move-wrap[hidden],
+#free-video-wrap[hidden],
+#free-move-dual[hidden],
+.free-make-only[hidden] {
+  display: none !important;
+}
+
+.free-steps {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0 10px;
+}
+
+.free-steps button {
+  flex: 1;
+}
+
+.free-cast-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 .free-photo-wrap {
   display: flex;
   align-items: flex-start;
@@ -2651,6 +2681,14 @@ body {
 #desk-still-packs.is-off .adult-desk__kicker,
 #desk-video-packs.is-off .adult-desk__kicker {
   opacity: 0.4;
+}
+
+#free-area.is-admin-shorts {
+  margin: 0 16px 20px;
+}
+
+#free-area.is-admin-shorts .essay-panel {
+  border-color: rgba(232, 180, 255, 0.28);
 }
 
 .desk-advanced {

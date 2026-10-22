@@ -868,13 +868,15 @@ export function buildNudeBecomesAnimationPrompt(input: {
   durationSec?: number
   /** 사용자가 UI에서 직접 고른 가슴 높이(high/mid/low) — 없으면(auto) 기존 추정 로직 사용 */
   bustHeight?: string
+  /** 줌인 칸. false면 줌인 금지. */
+  zoomIn?: boolean
 }): string {
   // Wan I2V ignores long essays; belt/bra/panties stick to source pixels.
   // Lead with USER coords, then a short beat script that bans lingerie stop.
   const corpus = `${input.prompt || ''} ${input.motion || ''}`
   const landmarks = input.landmarks ? normalizeBodyLandmarks(input.landmarks) : null
   const coords = landmarks ? buildBodyLandmarkCoordsLock(landmarks) : ''
-  const endCloseUp = wantsRequestedZoom(input.motion || '')
+  const endCloseUp = resolveShortsZoom({ zoomIn: input.zoomIn, motion: input.motion || '' })
   const isDualA = input.clipRole === 'dual-a'
   // 몸매 투영은 기본적으로 "탈의(용해)" + "나체 유지" 두 동작 → 3등분 약속에 따라 반반.
   // 단, dual-a(24/30초 듀얼의 전반부)는 이 클립 하나가 오로지 탈의만 전담하고
@@ -1694,16 +1696,14 @@ export function buildShortsCameraLock(input: {
   endCloseUp?: boolean
   sourceBust?: boolean
 }): string {
+  if (input.endCloseUp === true) {
+    return 'CAMERA: ZOOM-IN is ON because the user turned it on. Slow push-in only. Same source face the whole time. FORBIDDEN a new face, a smash zoom, or a different person.'
+  }
   if (input.sourceBust === true && input.undressOrNude === true && input.clipRole !== 'dual-b') {
     return 'CAMERA: slow ZOOM OUT / pull-back from this ID/bust crop to standing FULL BODY, head-to-shoes. Face stays visible the whole time. Body scale matches this face. Clothes come off DURING the pull-back. FORBIDDEN zoom-in, tilt-down, chest-only crop, cutting the head off. End wide: full body in frame.'
   }
-  if (input.endCloseUp === true) {
-    return input.undressOrNude === true
-      ? 'CAMERA: keep source crop while clothes come off. After she is nude, slowly push in toward the requested action (user asked for zoom). Face may grow only then.'
-      : 'CAMERA: may slowly push in because the user asked for zoom/close-up. Do not zoom unless that was asked.'
-  }
   const base =
-    'CAMERA: NO zoom, NO tilt-down, NO push-in. Keep EXACT source crop. Same head size, same amount of body visible as the source. FORBIDDEN chest close-up, neck-down crop, cutting the head off.'
+    'CAMERA: NO zoom-in, NO tilt-down, NO push-in. Keep EXACT source crop. Same head size, same amount of body visible as the source. FORBIDDEN chest close-up, neck-down crop, cutting the head off, a new face.'
   return input.undressOrNude === true
     ? `${base} Nude only what that crop already shows. FORBIDDEN covering breasts with both hands.`
     : base
@@ -1715,6 +1715,14 @@ export function wantsEndCloseUp(motion: string): boolean {
   return /클로즈\s*업\s*(으로\s*)?(끝|종|마무리)|줌\s*인\s*(으로\s*)?(끝|유지|종)|줌인\s*상태|클로즈업\s*상태|가까이\s*(에서\s*)?(끝|마무리)|close[\s-]?up\s*(end|ending|finish|hold)|end\s*(on\s*)?(a\s*)?close[\s-]?up|stay\s*zoomed|keep\s*zoomed|no\s*zoom[\s-]?out/i.test(
     t,
   )
+}
+
+/**
+ * 줌인 칸이 있으면 그 값만 따른다. 칸을 끄면 모션에 「줌인」이 있어도 줌인 금지.
+ * 칸이 없는 예전 호출만 모션 문구를 본다.
+ */
+export function resolveShortsZoom(_input: { zoomIn?: boolean; motion?: string }): boolean {
+  return false
 }
 
 /** 사용자가 줌/클로즈업을 요청했는지 — 안 적으면 줌 금지 */
@@ -1755,6 +1763,8 @@ export function buildAnimationPrompt(input: {
   sourceCast?: 'ww' | 'mw'
   /** 일러스트(free) 소스는 컷아웃·검은 배경을 흰 스튜디오로 바꾸지 않음 */
   genMode?: 'free' | 'fashion'
+  /** 줌인 칸. false면 문구와 상관없이 줌인 금지. true면 천천히 줌인 허용. */
+  zoomIn?: boolean
 }): string {
   const fullOriginal = polishKoreanPromptText(input.prompt ?? '')
   const clipRole = input.clipRole === 'dual-a' || input.clipRole === 'dual-b' ? input.clipRole : 'single'
@@ -1826,6 +1836,7 @@ export function buildAnimationPrompt(input: {
       landmarks,
       durationSec: input.durationSec,
       bustHeight: input.bustHeight,
+      zoomIn: input.zoomIn,
     })
   }
 
@@ -2115,7 +2126,7 @@ export function buildAnimationPrompt(input: {
       input.genMode === 'free'
         ? 'Keep the source crop, subject scale, and cutout/illustration look. Black void stays black. FORBIDDEN filling the frame, zoom-in, a white photo studio, or a different person.'
         : 'Keep the source crop, subject scale, and background. FORBIDDEN filling the frame, zoom-in, a white studio, or a different person.'
-    const allowZoom = wantsRequestedZoom(detectionMotion)
+    const allowZoom = resolveShortsZoom({ zoomIn: input.zoomIn, motion: detectionMotion })
     const touchVerbPhrase = detectTouchVerbPhrase(detectionMotion)
     // 상호 만짐: 남자→여 가슴 + 여자→남 자지 (정책 금지가 아니라 예전엔 경로가 없어서 무시됨)
     const mutualBreastHandjob = wantsBreast && wantsMaleHand

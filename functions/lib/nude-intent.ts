@@ -432,7 +432,7 @@ export function ensureNudeHoldMotionPhrase(
   const pantyBan =
     '브라·팬티·바지·반바지·청바지·핫팬츠·레깅스·치마·치마바지·끈팬티 한 픽셀도 남기지 말 것 — 끝까지 완전 나체. 팬티 대신 뿌연 블러·안개·김·모자이크·피부색 얼룩 장애물도 금지 — 크롯치는 선명히 보이고 음모는 치골에만 정돈된 한국 30대(20대보다 조금 더 있음)'
   const fogBanEn =
-    'FORBIDDEN foggy blur / milky haze / steam cloud / cloudy smudge over crotch (fake panty substitute). Uncensored sharp crotch with a neat Korean-30s pubic patch on the mons (slightly fuller than 20s, still tidy) — not a tall wide triangle, not a shaved blank doll crotch, not fog.'
+    'FORBIDDEN foggy blur / milky haze / steam cloud / cloudy smudge over crotch (fake panty substitute). Uncensored sharp crotch with a neat Korean-30s pubic patch on the mons only — not a tall column of hair up the belly to the underbust or breasts, not a shaved blank doll crotch, not fog.'
 
   // 모션이 나체/탈의를 요구하면(유지-only가 아니면) 소스 마커와 무관하게 전환
   if (motionForcesBecomeNude(t)) {

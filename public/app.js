@@ -65,6 +65,11 @@ function isAdminUser() {
   return isAdminUserEmail(getStoredUserEmail())
 }
 
+/** 줌인 기능은 삭제됨. 쇼츠는 항상 원본 구도. */
+function shortsZoomOn() {
+  return false
+}
+
 function getGenMode() {
   // 일반 유저: 자유만. 관리자: 선택한 모드(자유 / 화보)
   if (!isAdminUser()) return 'free'
@@ -112,7 +117,7 @@ function syncAppAreaUi() {
   if (essayArea) essayArea.hidden = area !== 'essay'
   if (taleArea) taleArea.hidden = area !== 'tale'
   if (observeArea) observeArea.hidden = area !== 'observe'
-  if (freeArea) freeArea.hidden = area !== 'free'
+  syncFreeStudioHost()
   // 「내 갤러리」(자유)와 「관리자 전용 갤러리」(화보)는 서로 섞이지 않게 탭별로 완전히 분리해서 보여준다.
   if (freeGallerySection) freeGallerySection.hidden = area !== 'studio'
   syncAdminWorkspaceUi()
@@ -317,12 +322,12 @@ function syncDualFrameUi(totalSec) {
       : '예: 옷벗김 후 자신의 가슴을 주무른다'
   }
   if (dualFrameHint) {
-    dualFrameHint.textContent = `${totalSec}초: 전반→후반 이어붙임. 첫 얼굴은 신분증으로 남기고, 끝 장에 얼굴이 보이면 다시 맞춥니다. 줌인은 모션에 「줌인」을 적을 때만.`
+    dualFrameHint.textContent = `${totalSec}초: 전반→후반 이어붙임. 첫 얼굴은 신분증으로 남기고, 끝 장에 얼굴이 보이면 다시 맞춥니다. 화면은 원본 구도 그대로입니다.`
   }
   if (videoDurationHint) {
     videoDurationHint.innerHTML = dual
       ? `<strong>${totalSec}초</strong>는 두 프레임 연속 생성입니다. 전반·후반 모션을 적고 아래 버튼으로 만드세요.`
-      : '10~18초: 한 프레임. 줌인은 모션에 「줌인」을 적을 때만. 탈의+키스는 <strong>24초</strong>가 더 잘 됩니다.'
+      : '10~18초: 한 프레임. 화면은 원본 구도 그대로입니다. 탈의+키스는 <strong>24초</strong>가 더 잘 됩니다.'
   }
   if (animateButton) {
     animateButton.textContent = dual
@@ -4357,6 +4362,7 @@ async function requestAnimate(options = {}) {
         sourceCast,
         sourceBust: sourceBust || undefined,
         genMode: getGenMode(),
+        zoomIn: shortsZoomOn(),
       }),
     })
     const rawText = await response.text()
@@ -6928,6 +6934,37 @@ function getAdminPanel() {
   return saved === 'faceswap' || saved === 'edit' ? saved : 'fashion'
 }
 
+function getDeskView() {
+  const saved = localStorage.getItem('storymag-desk-view')
+  if (saved === 'keep' || saved === 'shorts-make') return saved
+  return 'make'
+}
+
+function setDeskView(view) {
+  const next = view === 'keep' || view === 'shorts-make' ? view : 'make'
+  localStorage.setItem('storymag-desk-view', next)
+  syncAdminWorkspaceUi()
+}
+
+function syncFreeStudioHost() {
+  const area = getAppArea()
+  const onAdminShorts = area === 'admin' && getDeskView() === 'shorts-make'
+  const onFreeTab = area === 'free'
+  const freeArea = document.getElementById('free-area')
+  if (freeArea) {
+    freeArea.hidden = !(onFreeTab || onAdminShorts)
+    freeArea.classList.toggle('is-admin-shorts', onAdminShorts)
+  }
+  const title = document.querySelector('#free-area .essay-panel__title')
+  if (title) title.textContent = onAdminShorts ? '쇼츠 만들기' : '자유 스튜디오'
+  const lead = document.getElementById('free-area-lead')
+  if (lead) {
+    lead.innerHTML = onAdminShorts
+      ? '중간 장 없이 사진 올리고 움직이기. 8월 26일 길입니다.'
+      : '중간 장 없이 사진 올리고 움직이기. 8월 26일 길입니다.'
+  }
+}
+
 function setAdminPanel(panel) {
   if (panel === 'gallery') {
     localStorage.setItem(WORKSHOP_STAGE_KEY, 'keep')
@@ -6962,13 +6999,14 @@ function syncAdminWorkspaceUi() {
     document.getElementById('workshop-go-shorts'),
     document.getElementById('workshop-go-shorts-accepted'),
   ]
-  const deskView = localStorage.getItem('storymag-desk-view') === 'keep' ? 'keep' : 'make'
+  const deskView = getDeskView()
   const deskAdvanced = document.body.classList.contains('desk-advanced-on')
 
   if (chrome) chrome.hidden = true
   if (adultDesk) adultDesk.hidden = !isAdminArea
   if (deskMake) deskMake.hidden = !(isAdminArea && deskView === 'make')
   if (deskKeep) deskKeep.hidden = !(isAdminArea && deskView === 'keep')
+  syncFreeStudioHost()
   if (subnav) subnav.hidden = !(isAdminArea && deskAdvanced)
   if (typeof placeAdultDeskNodes === 'function') placeAdultDeskNodes()
 
@@ -7001,7 +7039,7 @@ function syncAdminWorkspaceUi() {
   })
 
   if (resultSection) {
-    if (isAdminArea && deskView === 'keep') {
+    if (isAdminArea && (deskView === 'keep' || deskView === 'shorts-make')) {
       resultSection.hidden = true
     } else if (isAdminArea) {
       resultSection.hidden = !currentResult?.imageUrl
@@ -7014,7 +7052,9 @@ function syncAdminWorkspaceUi() {
   if (shortsEmpty) shortsEmpty.hidden = true
 
   if (animatePanel) {
-    if (isAdminArea) {
+    if (isAdminArea && deskView === 'shorts-make') {
+      animatePanel.hidden = true
+    } else if (isAdminArea) {
       animatePanel.hidden = !currentResult?.videoUrl
     } else if (currentResult?.imageUrl) {
       animatePanel.hidden = false
@@ -7535,6 +7575,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     const hit = faceBoxMemoGet(key)
     if (hit) return hit
     try {
+      if (window.__deskFaceBoxOff) throw new Error('face_box_off')
       const small = await compressToJpegDataUrl(imageDataUrl, 1024, 0.82)
       const response = await fetch('/api/face-box', {
         method: 'POST',
@@ -7542,6 +7583,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         body: JSON.stringify({ imageDataUrl: small }),
       })
       const data = await response.json().catch(() => ({}))
+      if (data?.error === 'anthropic_not_configured') window.__deskFaceBoxOff = true
       if (data?.ok && data.face && typeof data.face.w === 'number') {
         logFs('face_box_ok', { kind, x: data.face.x, y: data.face.y, w: data.face.w, h: data.face.h })
         return faceBoxMemoSet(key, clampNormFace(data.face, kind))
@@ -11040,7 +11082,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
     }
     const local = await estimateFaceBoxFromImage(imageDataUrl)
     if (local && (localOnly || want === 1)) return faceBoxMemoSet(key, [local])
-    if (localOnly) {
+    if (localOnly || window.__deskFaceBoxOff) {
+      if (local) return faceBoxMemoSet(key, [local])
       if (!guessIfMissing) return faceBoxMemoSet(key, [])
       return faceBoxMemoSet(
         key,
@@ -11055,6 +11098,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         body: JSON.stringify({ imageDataUrl: small, multi: true }),
       })
       const data = await response.json().catch(() => ({}))
+      if (data?.error === 'anthropic_not_configured') window.__deskFaceBoxOff = true
       const list = Array.isArray(data?.faces) ? data.faces : data?.face ? [data.face] : []
       const minW = want >= 2 ? 0.018 : 0.03
       const boxes = list.filter((f) => f && typeof f.w === 'number' && f.w >= minW)
@@ -13173,20 +13217,41 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
 
   // 배경이 복잡하거나 화소가 작아 장면 이어 그리기가 안 되는 여자 사진: 서서 전신을 만든 뒤, 원본 사진의 얼굴 부분(이마~턱)만
   // 타원으로 오려 크기를 맞춰 얹는다. 얼굴 화소는 원본, 머리카락·목·몸은 생성 그림. boxes = { src, dst } 는 시험용(정규화 얼굴 상자).
+  /** 이어 그리기가 찾아 둔 원본 사진 위치에, 그 사진의 얼굴을 결과 좌표로 옮긴다. */
+  async function faceBoxOnContinued(sourceUrl, restoreLog) {
+    const rect = restoreLog && restoreLog.rect
+    if (!rect || !(rect.rw > 0) || !(rect.rh > 0) || !(rect.w > 8) || !(rect.h > 8)) return null
+    const src = await detectFaceBox(sourceUrl, 'id')
+    if (!src || !(src.w > 0.05) || !(src.h > 0.05)) return null
+    const dst = {
+      x: (rect.x + src.x * rect.w) / rect.rw,
+      y: (rect.y + src.y * rect.h) / rect.rh,
+      w: (src.w * rect.w) / rect.rw,
+      h: (src.h * rect.h) / rect.rh,
+    }
+    if (!(dst.w > 0.02) || !(dst.h > 0.02) || dst.w > 0.7 || dst.h > 0.65) return null
+    if (dst.x < -0.02 || dst.y < -0.02 || dst.x + dst.w > 1.05 || dst.y + dst.h > 1.05) return null
+    return { src, dst }
+  }
+
   async function pasteFaceCutoutOnStanding(standingUrl, sourceUrl, boxes) {
     const log = { engine: 'facecut' }
     try {
       const [dstImg, srcImg] = await Promise.all([loadHtmlImage(standingUrl), loadHtmlImage(sourceUrl)])
+      const explicit = Boolean(boxes?.src && boxes?.dst)
       const sbn = boxes?.src || (await detectFaceBox(sourceUrl, 'id'))
       let dbn = boxes?.dst || (await detectFaceBox(standingUrl, 'target'))
       const r3 = (v) => (v ? { x: Number(v.x.toFixed(3)), y: Number(v.y.toFixed(3)), w: Number(v.w.toFixed(3)), h: Number(v.h.toFixed(3)) } : null)
       log.srcBox = r3(sbn)
       log.dstBox = r3(dbn)
-      // 서서 전신의 얼굴은 폭이 작다(0.25 이하). 크게 나오면 상자를 잘못 잡은 것이니 피부색 탐지로 다시 잡는다
-      if (dbn && (dbn.w > 0.25 || dbn.h > 0.22)) {
-        const est = await estimateFaceBoxFromImage(standingUrl, { centerOnly: true, scanTop: 0.3 })
+      // 서서 전신의 얼굴은 폭이 작다(0.25 이하). 크게 나오면 상자를 잘못 잡은 것이니 피부색 탐지로 다시 잡는다.
+      // 이어 그리기가 맞춰 둔 위치(src·dst를 같이 넘긴 경우)는 그 상자를 그대로 쓴다.
+      const maxW = Number(boxes?.maxW) > 0 ? Number(boxes.maxW) : 0.25
+      const maxH = Number(boxes?.maxH) > 0 ? Number(boxes.maxH) : 0.22
+      if (!explicit && dbn && (dbn.w > maxW || dbn.h > maxH)) {
+        const est = await estimateFaceBoxFromImage(standingUrl, { centerOnly: true, scanTop: 0.45 })
         log.dstEst = r3(est)
-        dbn = est && est.w <= 0.25 && est.h <= 0.22 ? est : null
+        dbn = est && est.w <= maxW && est.h <= maxH ? est : null
       }
       if (!sbn || !dbn || !(sbn.w > 0.05) || !(dbn.w > 0.02)) {
         log.skip = dbn ? 'no_face_box' : 'dst_face_big'
@@ -13801,7 +13866,7 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
           if (!rr.url) {
             tryLog.reason = 'restore_miss'
             if (tryLog.paint0 >= 4 && (!cutCand || tryLog.paint0 > cutCand.paint0)) {
-              cutCand = { display: alt.display, paint0: tryLog.paint0, prepared, url: tryLog.url }
+              cutCand = { display: alt.display, paint0: tryLog.paint0, prepared, url: tryLog.url, restore: rr.log }
             }
             continue
           }
@@ -13857,11 +13922,16 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         timingDone()
         return { display: bigHeadCand.display, remoteUrl: bigHeadCand.url, gender, isolated: false, continued: true }
       }
-      if (cutCand && window.__deskWomanContinueFallback !== true && window.__deskWomanFaceCut === true) {
-        // 모델이 몸은 그렸지만 얼굴을 새로 그린 결과: 그 전신에 원본 사진의 얼굴(이마~턱)만 오려 얹는다 (새로 생성하지 않음)
+      if (cutCand && window.__deskWomanContinueFallback !== true && window.__deskWomanFaceCut !== false) {
+        // 모델이 몸은 그렸지만 원본 사진 위치를 못 찾은 결과: 그 그림에 원본 얼굴만 오려 얹는다. 새 얼굴은 만들지 않는다.
         try {
-          setStatus(`${index}/${total} 그려진 전신에 원본 얼굴을 얹는 중…`, false)
-          const fc = await pasteFaceCutoutOnStanding(cutCand.display, source)
+          setStatus(`${index}/${total} 그려진 몸에 원본 얼굴을 얹는 중…`, false)
+          const placed = await faceBoxOnContinued(source, cutCand.restore)
+          const fc = await pasteFaceCutoutOnStanding(
+            cutCand.display,
+            source,
+            placed || { maxW: 0.55, maxH: 0.5 },
+          )
           contLog.faceCut = fc.log
           if (fc.url) {
             let out = fc.url
@@ -13885,7 +13955,8 @@ document.querySelectorAll('[data-admin-panel]').forEach((btn) => {
         contLog.fellBack = true
         console.warn('장면 이어 그리기를 쓰지 못해 서서 전신 방식으로 넘어갑니다:', JSON.stringify(contLog))
       } else {
-        const stop = `원본 사진의 장면을 살려 이어 그리지 못했습니다 (${contLog.reason}). 가짜 얼굴로 대신하지 않습니다. 이 사진은 얼굴이 크게 찍힌 가슴 위 사진이라 전신 이어 그리기가 어렵습니다. 얼굴 아래 몸이 조금 더 나온 사진을 써 보세요.`
+        const faceWhy = contLog.faceCut?.skip ? ` 원본 얼굴 붙이기: ${contLog.faceCut.skip}.` : ''
+        const stop = `원본 사진의 장면을 살려 이어 그리지 못했습니다 (${contLog.reason}).${faceWhy} 가짜 얼굴로 대신하지 않습니다. 같은 사진으로 한 번 더 시도해 보세요.`
         if (typeof setFormStatus === 'function') setFormStatus(stop, true)
         else setStatus(stop, true)
         console.warn(stop, JSON.stringify(contLog))
@@ -15280,6 +15351,18 @@ function loadDeskImage(src) {
   })
 }
 
+async function deskStableImageUrl(url) {
+  if (!url || String(url).startsWith('data:')) return url
+  if (typeof globalThis.ensureStableDataUrl === 'function') {
+    try {
+      return await globalThis.ensureStableDataUrl(url)
+    } catch (_) {
+      return url
+    }
+  }
+  return url
+}
+
 function deskComposeKind() {
   const size = currentResult?.size || document.getElementById('size')?.value || 'story'
   if (size === 'landscape') return 'landscape'
@@ -16023,7 +16106,7 @@ function deskFacePixelBox(face, kind) {
   const woman = kind === 'woman'
   const padX = face.w * (woman ? 0.22 : 0.28)
   const padTop = face.h * (woman ? 0.42 : 0.35)
-  const padBot = face.h * (woman ? 0.1 : 0.18)
+  const padBot = face.h * (woman ? 0.36 : 0.18)
   const x = Math.max(0, face.x - padX)
   const y = Math.max(0, face.y - padTop)
   return {
@@ -16083,8 +16166,8 @@ async function deskStampFacesFromSource(srcUrl, outUrl, faces) {
   const list = (faces || []).filter((f) => f && f.w > 0 && f.h > 0)
   if (!srcUrl || !outUrl || !list.length) return outUrl
   try {
-    const srcImg = await loadDeskImage(srcUrl)
-    const outImg = await loadDeskImage(outUrl)
+    const srcImg = await loadDeskImage(await deskStableImageUrl(srcUrl))
+    const outImg = await loadDeskImage(await deskStableImageUrl(outUrl))
     const w = srcImg.naturalWidth || 1
     const h = srcImg.naturalHeight || 1
     const canvas = document.createElement('canvas')
@@ -16113,10 +16196,29 @@ async function deskStampFacesRelocated(srcUrl, outUrl, srcBoxes, outBoxes) {
   const byX = (a, b) => a.x + a.w / 2 - (b.x + b.w / 2)
   const src = (srcBoxes || []).slice().sort(byX)
   const out = (outBoxes || []).slice().sort(byX)
-  if (!srcUrl || !outUrl || !src.length || src.length !== out.length) return outUrl
+  if (!srcUrl || !outUrl || !src.length || !out.length) return outUrl
+  const pairs =
+    src.length === out.length
+      ? src.map((box, i) => ({ srcBox: box, outBox: out[i], kind: src.length > 1 && i === src.length - 1 ? 'man' : 'woman' }))
+      : src.length === 1
+        ? [
+            {
+              srcBox: src[0],
+              outBox: out
+                .slice()
+                .sort(
+                  (a, b) =>
+                    Math.abs(a.x + a.w / 2 - (src[0].x + src[0].w / 2)) -
+                    Math.abs(b.x + b.w / 2 - (src[0].x + src[0].w / 2)),
+                )[0],
+              kind: 'woman',
+            },
+          ]
+        : null
+  if (!pairs) return outUrl
   try {
-    const srcImg = await loadDeskImage(srcUrl)
-    const outImg = await loadDeskImage(outUrl)
+    const srcImg = await loadDeskImage(await deskStableImageUrl(srcUrl))
+    const outImg = await loadDeskImage(await deskStableImageUrl(outUrl))
     const W = outImg.naturalWidth || 1
     const H = outImg.naturalHeight || 1
     const sw0 = srcImg.naturalWidth || 1
@@ -16126,15 +16228,19 @@ async function deskStampFacesRelocated(srcUrl, outUrl, srcBoxes, outBoxes) {
     canvas.height = H
     const ctx = canvas.getContext('2d')
     ctx.drawImage(outImg, 0, 0, W, H)
-    for (let i = 0; i < src.length; i += 1) {
-      const kind = src.length > 1 && i === src.length - 1 ? 'man' : src.length > 1 ? 'woman' : 'woman'
-      const sb = deskFacePixelBox(src[i], kind)
-      const ob = deskFacePixelBox(out[i], kind)
+    for (const pair of pairs) {
+      const kind = pair.kind
+      const sb = deskFacePixelBox(pair.srcBox, kind)
+      const ob = deskFacePixelBox(pair.outBox, kind)
       if (!sb || !ob) continue
-      const dw = Math.max(8, Math.round(ob.w * W))
-      const dh = Math.max(8, Math.round(ob.h * H))
-      const dx = Math.round(ob.x * W)
-      const dy = Math.round(ob.y * H)
+      const srcAspect = Math.max(0.55, Math.min(1.15, (sb.w * sw0) / Math.max(1, sb.h * sh0)))
+      let dw = Math.max(8, Math.round(ob.w * W))
+      let dh = Math.max(8, Math.round(ob.h * H))
+      const destAspect = dw / Math.max(1, dh)
+      if (destAspect > srcAspect * 1.04) dw = Math.max(8, Math.round(dh * srcAspect))
+      else if (destAspect < srcAspect / 1.04) dh = Math.max(8, Math.round(dw / srcAspect))
+      const dx = Math.round(ob.x * W + (ob.w * W) / 2 - dw / 2)
+      const dy = Math.round(ob.y * H + (ob.h * H) / 2 - dh / 2)
       const patch = document.createElement('canvas')
       patch.width = dw
       patch.height = dh
@@ -16147,7 +16253,7 @@ async function deskStampFacesRelocated(srcUrl, outUrl, srcBoxes, outBoxes) {
       pctx.scale(dw / 2, dh / 2)
       const grad = pctx.createRadialGradient(0, 0, 0, 0, 0, 1)
       grad.addColorStop(0, 'rgba(0,0,0,1)')
-      grad.addColorStop(0.72, 'rgba(0,0,0,1)')
+      grad.addColorStop(0.97, 'rgba(0,0,0,1)')
       grad.addColorStop(1, 'rgba(0,0,0,0)')
       pctx.fillStyle = grad
       pctx.fillRect(-1, -1, 2, 2)
@@ -16596,7 +16702,8 @@ async function deskStillFaceBoxes(imageUrl, opts) {
       typeof globalThis.ensureStableDataUrl === 'function'
         ? await globalThis.ensureStableDataUrl(imageUrl)
         : imageUrl
-    const boxes = await globalThis.detectSceneFaceBoxes(stable, 2, {
+    const want = Math.max(1, Math.min(8, opts?.max || 2))
+    const boxes = await globalThis.detectSceneFaceBoxes(stable, want, {
       guessIfMissing: false,
       mergeIou: opts?.couple ? 0.32 : 0.55,
     })
@@ -17578,8 +17685,7 @@ function initAdultDesk() {
   document.getElementById('adult-desk')?.addEventListener('click', (event) => {
     const viewBtn = event.target.closest('[data-desk-view]')
     if (viewBtn) {
-      localStorage.setItem('storymag-desk-view', viewBtn.getAttribute('data-desk-view') === 'keep' ? 'keep' : 'make')
-      syncAdminWorkspaceUi()
+      setDeskView(viewBtn.getAttribute('data-desk-view') || 'make')
       return
     }
     const jobBtn = event.target.closest('[data-desk-job]')
@@ -19210,8 +19316,18 @@ function initAdultDesk() {
         const faceBoxes = [coupleLayout.woman, coupleLayout.man].filter(Boolean)
         if (faceBoxes.length) shown = await deskStampFacesFromSource(images[0], shown, faceBoxes)
       } else if (typeof deskStampFacesFromSource === 'function') {
-        const srcFaces = await deskStillFaceBoxes(images[0], { couple: false })
-        if (srcFaces?.length) shown = await deskStampFacesFromSource(images[0], shown, srcFaces)
+        const srcFaces = await deskStillFaceBoxes(images[0], { couple: expectPeople >= 2 })
+        const outFaces = await deskStillFaceBoxes(shown, { couple: expectPeople >= 2 })
+        if (
+          srcFaces?.length &&
+          outFaces?.length &&
+          typeof deskStampFacesRelocated === 'function' &&
+          (srcFaces.length === outFaces.length || srcFaces.length === 1)
+        ) {
+          shown = await deskStampFacesRelocated(images[0], shown, srcFaces, outFaces)
+        } else if (srcFaces?.length) {
+          shown = await deskStampFacesFromSource(images[0], shown, srcFaces)
+        }
       }
     }
     if (deskStep === 'place' && typeof deskStampFacesRelocated === 'function') {

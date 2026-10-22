@@ -12,6 +12,9 @@ import {
   stripNudeBecomesPhrase,
   wantsNudeOrUndress,
   wantsUndressAction,
+  buildShortActionScript,
+  buildShortCoupleActionScript,
+  buildShortPlainNudeScript,
 } from '../lib/aug27/content-policy'
 import { mediaUrlError } from '../lib/media-url'
 import { enforceRateLimit, rateLimitIdentity } from '../lib/rate-limit'
@@ -23,8 +26,7 @@ import {
 } from '../lib/replicate-client'
 import {
   buildFreeCoupleVideoPrompt,
-  FREE_BREAST_KISS_CAM,
-  isFreeBreastKissMotion,
+  buildFreeGroupVideoPrompt,
   isFreeCoupleIntimateMotion,
 } from '../lib/free-couple-lock'
 import { applyFreeSelfBreastLock } from '../lib/free-self-breast'
@@ -109,6 +111,8 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     sourcePeople?: number
     /** 시작 프레임이 이미 나체 정지화인가. 다시 벗기면 스톡 몸으로 바뀐다. */
     sourceNude?: boolean
+    /** 줌인 칸. 끄면 줌인 금지. */
+    zoomIn?: boolean
   }
   try {
     body = await request.json()
@@ -145,16 +149,26 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
   }
 
   const userMotion = motion
+  const namedPeople = (() => {
+    const digit = userMotion.match(/([3-8])\s*명/)
+    if (digit) return Number(digit[1])
+    if (/세\s*(?:명|사람|여자)|여자\s*(?:셋|세\s*명)|3인|three women|3 women/i.test(userMotion)) return 3
+    if (/네\s*(?:명|사람)|4인|four women/i.test(userMotion)) return 4
+    if (/다섯\s*(?:명|사람)|5인|five women/i.test(userMotion)) return 5
+    return 0
+  })()
+  const sourcePeople = Math.max(0, Math.round(Number(body.sourcePeople) || 0), namedPeople)
+  const groupHint = sourcePeople >= 3
   const coupleHint = body.sourcePeople === 2
   // 커플 키스에 몸매 투영 I2V 를 켜면 솔로 탈의 비트가 키스를 먹고 스톡 서양 커플이 나온다.
   // 키스 말만으로 커플 프롬프트를 켜면 사진에 없는 사람을 만든다.
   const bodyProjectFlag =
-    body.bodyProject === true && !coupleHint && !isFreeCoupleIntimateMotion(userMotion)
+    body.bodyProject === true && !coupleHint && !groupHint && !isFreeCoupleIntimateMotion(userMotion)
   if (bodyProjectFlag) {
     if (!isBodyProjectRequest(motion)) {
       motion = motion
         ? `몸매 투영. ${motion}`
-        : '몸매 투영: 얼굴·체형 그대로. 어깨·팔뚝·팔꿈치로 유두 높이를 읽고, 가슴은 옷에 볼륨이 있으면 C컵 반~D컵·처진 실루엣 가능. 배꼽·치부 기점 고정 후 상의·바지·벨트·팬티 전부 녹여 완전 나체. 가슴 아래 벨트/띠 잔상·바지/팬티 잔존·빈유 과소평가 실패'
+        : '몸매 투영: 얼굴·체형 그대로. 어깨·팔뚝·팔꿈치로 유두 높이를 읽고, 가슴은 옷에 보이는 크기. 옷에 커 보이면 크게. 한 컵 더하지 말 것. 배꼽·치부 기점 고정 후 상의·바지·벨트·팬티 전부 녹여 완전 나체. 가슴 아래 벨트/띠 잔상·바지/팬티 잔존·빈유 과소평가 실패'
     }
   }
   // NOTE: refine 마커만으로 motion='몸매 투영'을 주입하지 않음.
@@ -207,13 +221,36 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
     clipRoleRaw === 'dual-a' || clipRoleRaw === 'dual-b' ? clipRoleRaw : ('single' as const)
   const landmarks = bodyProjectFlag ? normalizeBodyLandmarks(body.landmarks) : null
 
+  const zoomOn = false
+  // 줌 칸이 꺼지면 맨 첫 문장. 커플 경로는 이 문장이 얼굴·가슴 설명 뒤에 가서 화면이 가슴으로 들어갔다.
+  const CAM_LOCK = zoomOn
+    ? ''
+    : 'NO CLOSE-UP. Face stays fully in frame. Never a chest-only shot. Camera frozen on the source crop. Nipples pale pink-brown, never jet-black. Skin between the breasts is clean — no blotch, no mole. Belly bare. '
+  const askedNude =
+    body.bodyProject === true || wantsUndressAction(userMotion) || wantsNudeOrUndress(userMotion)
   let prompt: string
   let motionForVideo = ''
-  if (coupleHint) {
-    // 장문 키스 프롬프트는 사진을 버리고 스톡 서양 커플을 그린다. 짧은 원본-얼굴 잠금만 보낸다.
-    prompt = buildFreeCoupleVideoPrompt(userMotion, {
-      alreadyNude: body.sourceNude === true,
+  const motionHayAll = `${rawMotion} ${motion} ${userMotion}`
+  const coupleScript = coupleHint && !groupHint ? buildShortCoupleActionScript(motionHayAll, approxDurationSec) : ''
+  const actionScript = !coupleHint && !groupHint ? buildShortActionScript(motionHayAll, approxDurationSec) : ''
+  // 나체 혼자: 번역·CAM 장문을 버림. 어제 증명사진·8월 26일은 짧은 글에서만 됐다.
+  if (!groupHint && !coupleHint && askedNude && !bodyProjectFlag) {
+    prompt = actionScript
+      ? `FACE: exact source face. ${actionScript}`
+      : buildShortPlainNudeScript(approxDurationSec)
+  } else if (groupHint) {
+    prompt = buildFreeGroupVideoPrompt(userMotion, {
+      zoomIn: zoomOn,
+      people: sourcePeople,
+      becomeNude: askedNude,
     })
+  } else if (coupleHint) {
+    // 장문 키스 프롬프트는 사진을 버리고 스톡 서양 커플을 그린다. 짧은 원본-얼굴 잠금만 보낸다.
+    prompt = `FACE: exact source faces every frame. FORBIDDEN a new model. ${buildFreeCoupleVideoPrompt(userMotion, {
+      alreadyNude: body.sourceNude === true,
+      zoomIn: false,
+      becomeNude: askedNude,
+    })}`
   } else {
     const [{ text: promptForVideo }, { text: motionTx }] = await Promise.all([
       translateDescriptionForImagePrompt(originalPrompt, env),
@@ -238,6 +275,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           landmarks,
           bodyProject: true,
           durationSec: approxDurationSec,
+          zoomIn: false,
         })
       : buildAnimationPrompt({
           prompt: [originalPrompt, promptForVideo].filter(Boolean).join('\n'),
@@ -246,23 +284,54 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
           clipRole,
           landmarks,
           durationSec: approxDurationSec,
+          zoomIn: false,
         })
     const motionHay = [rawMotion, motion, motionForVideo].filter(Boolean).join('\n')
     const promptLocked = applyFreeSelfBreastLock(promptRaw, motionHay)
     const CAST_FACE =
-      'CAST LOCK: I2V of THIS photo only. Same person from the input, same face, same hair, same age, same clothes, same place. FORBIDDEN a new face, fashion model, Caucasian, a different person. '
-    const FREE_CAM = isFreeBreastKissMotion(userMotion)
-      ? FREE_BREAST_KISS_CAM
-      : 'WIDE SHOT LOCK: exact source framing every frame. Head and shoulders stay visible. Never zoom. Never a waist-down only crop. Never a chest-only crop. '
-    const HEAD = bodyProjectFlag ? FREE_CAM : `${CAST_FACE}${FREE_CAM}`
+      'FACE: exact source face every frame. FORBIDDEN a new face, a new model, a different person. NIPPLES: pale pink-brown, never black. Sternum between the breasts is clean. Belly smooth. Hips and crotch are bare skin. Mons hair visible. No fabric. '
+    const FREE_CAM = zoomOn
+      ? 'ZOOM-IN is ON because the user turned it on. Slow push-in only. Same source face. '
+      : 'LOCKED CAMERA: exact source crop and distance on every frame. If the head starts in frame it stays in frame. FORBIDDEN zoom-in, dolly-in, push-in, chest close-up, bust crop, cutting off the head. Hands may move. The camera does not. '
+    const HEAD = `${CAST_FACE}${FREE_CAM}`
+    const promptForHead = zoomOn
+      ? promptLocked
+          .replace(/NO zoom-in[^.\n]*/gi, 'Slow zoom-in is allowed')
+          .replace(/FORBIDDEN zoom-in[^.\n]*/gi, 'Slow zoom-in is allowed')
+          .replace(/Never zoom[^.\n]*/gi, 'Slow zoom-in is allowed')
+      : promptLocked.replace(/intimate chest two-shot/gi, 'same source crop, no zoom')
     prompt = (() => {
-      const next = `${HEAD}${promptLocked}`
+      const next = `${HEAD}${promptForHead}`
       if (next.length <= 1500) return next
       const budget = 1500 - HEAD.length
-      const bodyPrompt = promptLocked.slice(0, Math.max(0, budget))
+      const bodyPrompt = promptForHead.slice(0, Math.max(0, budget))
       const cut = bodyPrompt.lastIndexOf('.')
       return `${HEAD}${(cut > 400 ? bodyPrompt.slice(0, cut + 1) : bodyPrompt).trim()}`
     })()
+  }
+  const usedShortNude = !groupHint && !coupleHint && askedNude && !bodyProjectFlag
+  const groupCam =
+    groupHint && !zoomOn
+      ? `ALL ${Math.min(sourcePeople, 8)} WOMEN stay full length, same size, same places. FORBIDDEN a close-up of one woman, orbiting one face, cropping the others out. `
+      : ''
+  if (!zoomOn && !usedShortNude) {
+    prompt = prompt
+      .replace(/\b(extreme\s+)?close-?ups?\b/gi, 'wide framing')
+      .replace(/\b(push|dolly|zoom)-?ins?\b/gi, 'locked camera')
+      .replace(/\b(spirals?|swirls?|pinwheels?)\b/gi, '')
+      .replace(/\s{2,}/g, ' ')
+    prompt = `${CAM_LOCK}${groupCam}${prompt}`
+  }
+  if (prompt.length > 1500) {
+    const cut = prompt.lastIndexOf('.', 1500)
+    prompt = prompt.slice(0, cut > 240 ? cut + 1 : 1500).trim()
+  }
+  if (coupleScript) {
+    prompt = `FACE: exact source faces. Bare hips, bare crotch, skin only. ${coupleScript}`
+  }
+  if (askedNude && prompt.length > 1500) {
+    const cut = prompt.lastIndexOf('.', 1500)
+    prompt = prompt.slice(0, cut > 240 ? cut + 1 : 1500).trim()
   }
   const modelOwner = env.REPLICATE_VIDEO_MODEL_OWNER?.trim() || 'wan-video'
   const modelName = env.REPLICATE_VIDEO_MODEL_NAME?.trim() || 'wan-2.2-i2v-fast'
@@ -299,7 +368,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
       // 일반 모션/나체 쇼츠는 낮은 sample_shift(원본에 더 붙임)를 시도했다가 오히려
       // 바지가 안 벗겨지는 회귀(탈의= 큰 변형인데 원본에 더 붙이니 변형이 덜 일어남)가
       // 실측돼 되돌림 — 모델 기본값(12)에 맡긴다.
-      sampleShift: bodyProjectFlag ? 18 : undefined,
+      // 줌 칸이 꺼지면 원본 화소에 붙여 카메라가 가슴으로 들어가지 않게 한다.
+      // 몸매 투영만 옷을 녹일 여유가 필요해서 조금 더 준다.
+      // 이 엔진의 sample_shift 기본값은 12. 1~3으로 내리면 피부 결이 갈라진 선으로 무너진다.
+      sampleShift: zoomOn && bodyProjectFlag ? 18 : undefined,
     })
 
     if (started.status === 'succeeded' && started.videoUrl) {
