@@ -43,9 +43,11 @@
   const VOICE_LABELS = { me: '나', him: '남친' }
   const VOICE_DB = 'storymag-voices'
   const VOICE_STORE = 'slots'
-  /** 10월 18일 확정-2번. 나는 이 파일만 쓴다. */
-  const ME_VOICE_URL = '/voices/me-ref.m4a'
-  const ME_VOICE_NAME = '확정-2번'
+  /** 통화 1번에서 피치로 가른 당신 말만. 남친 구간은 him-only. */
+  const ME_VOICE_URL = '/voices/me-only.m4a'
+  const ME_VOICE_NAME = '내 목소리'
+  const HIM_VOICE_URL = '/voices/him-only.m4a'
+  const HIM_VOICE_NAME = '남친 목소리'
 
   const openVoiceDb = () =>
     new Promise((resolve, reject) => {
@@ -84,12 +86,18 @@
     applyVoiceSlot(state.voiceWho)
   }
 
-  const lockMeVoice = async () => {
-    const res = await fetch(ME_VOICE_URL, { cache: 'force-cache' })
-    if (!res.ok) throw new Error('me_voice_missing')
+  const lockVoiceFromUrl = async (id, url, name) => {
+    const res = await fetch(url, { cache: 'force-cache' })
+    if (!res.ok) throw new Error(`${id}_voice_missing`)
     const blob = await res.blob()
-    if (!blob || blob.size < 1000) throw new Error('me_voice_empty')
-    await saveVoiceSlot('me', blob, ME_VOICE_NAME, { voiceId: '' })
+    if (!blob || blob.size < 1000) throw new Error(`${id}_voice_empty`)
+    await saveVoiceSlot(id, blob, name, { voiceId: '' })
+  }
+
+  const lockMeVoice = async () => {
+    await lockVoiceFromUrl('me', ME_VOICE_URL, ME_VOICE_NAME)
+    await lockVoiceFromUrl('him', HIM_VOICE_URL, HIM_VOICE_NAME).catch(() => {})
+    applyVoiceSlot('me')
   }
 
   const saveVoiceSlot = async (id, blob, name, extra = {}) => {
@@ -125,11 +133,11 @@
     const him = $('free-voice-who-him')
     if (me) {
       me.className = state.voiceWho === 'me' ? 'form__submit' : 'review-panel__secondary'
-      me.textContent = state.voices.me?.blob ? '나 · 2번' : '나'
+      me.textContent = state.voices.me?.blob ? '나 · 내목소리' : '나'
     }
     if (him) {
       him.className = state.voiceWho === 'him' ? 'form__submit' : 'review-panel__secondary'
-      him.textContent = state.voices.him?.blob ? '남친 · 저장됨' : '남친'
+      him.textContent = state.voices.him?.blob ? '남친 · 통화' : '남친'
     }
     paintVoiceName()
   }
@@ -1376,8 +1384,12 @@
     return bytes
   }
 
-  /** 통화 원본 전체가 아니라 내 말 16초만 잘라 기준으로 쓴다. */
-  const sliceVoiceRef = async (blob) => {
+  /**
+   * 통화 1번은 나와 남친이 섞여 있다.
+   * 앞 안내를 건너뛰고 당신 말이 있는 16초를 기준으로 보낸다.
+   */
+  const sliceVoiceRef = async (blob, opts = {}) => {
+    if (opts.whole) return blobToDataUrl(blob)
     const Ctx = window.AudioContext || window.webkitAudioContext
     if (!Ctx) return blobToDataUrl(blob)
     const ctx = new Ctx()
@@ -1472,10 +1484,13 @@
     try {
       let audioBlob = null
       if (state.voiceBlob && text) {
-        setVoiceStatus('올린 녹취의 내 목소리로 대사를 만드는 중…', false)
+        setVoiceStatus(
+          state.voiceWho === 'me' ? '내 목소리만으로 대사를 읽는 중…' : '남친 목소리로 대사를 읽는 중…',
+          false,
+        )
         const out = await callJson('/api/free-voice', {
           text,
-          voiceDataUrl: await sliceVoiceRef(state.voiceBlob),
+          voiceDataUrl: await sliceVoiceRef(state.voiceBlob, { whole: true }),
         })
         if (out.auth) {
           setVoiceStatus('다시 로그인해 주세요.', true)
@@ -1739,7 +1754,7 @@
     $('free-voice-run')?.addEventListener('click', runVoice)
     $('free-voice-record')?.addEventListener('click', () => {
       if (state.voiceWho === 'me') {
-        setVoiceStatus('나는 확정-2번으로 고정입니다. 남친 칸만 녹음하세요.', true)
+        setVoiceStatus('나와 남친은 통화에서 가른 목소리로 고정입니다.', true)
         return
       }
       toggleVoiceRecord().catch(() => {})
@@ -1751,7 +1766,7 @@
       event.target.value = ''
       if (!file) return
       if (state.voiceWho === 'me') {
-        setVoiceStatus('나는 확정-2번으로 고정입니다. 남친 칸에 올리세요.', true)
+        setVoiceStatus('나와 남친은 통화에서 가른 목소리로 고정입니다.', true)
         return
       }
       saveVoiceSlot(state.voiceWho, file, file.name, { voiceId: '' })
